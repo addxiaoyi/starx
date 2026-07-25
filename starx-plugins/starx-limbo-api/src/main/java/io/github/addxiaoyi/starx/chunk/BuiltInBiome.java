@@ -1,0 +1,17 @@
+/*
+ * Copyright (C) 2021 - 2025 Elytrium
+ *
+ * The LimboAPI (excluding the LimboAPI plugin) is licensed under the terms of the MIT License. For more details,
+ * reference the LICENSE file in the api top-level directory.
+ */
+
+package io.github.addxiaoyi.starx.chunk;
+
+public enum BuiltInBiome {
+
+  PLAINS,
+  SWAMP,
+  SWAMP_HILLS,
+  NETHER_WASTES,
+  THE_END
+}

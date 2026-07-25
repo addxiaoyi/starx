@@ -1,0 +1,67 @@
+/*
+ * Copyright (C) 2021 - 2025 Elytrium
+ *
+ * The LimboAPI (excluding the LimboAPI plugin) is licensed under the terms of the MIT License. For more details,
+ * reference the LICENSE file in the api top-level directory.
+ */
+
+package io.github.addxiaoyi.starx.protocol.packets;
+
+import com.velocitypowered.api.network.ProtocolVersion;
+import java.util.List;
+import java.util.Map;
+import io.github.addxiaoyi.starx.chunk.Dimension;
+import io.github.addxiaoyi.starx.chunk.data.ChunkSnapshot;
+import io.github.addxiaoyi.starx.material.VirtualItem;
+import io.github.addxiaoyi.starx.material.WorldVersion;
+import io.github.addxiaoyi.starx.protocol.item.ItemComponentMap;
+import io.github.addxiaoyi.starx.protocol.packets.data.AbilityFlags;
+import io.github.addxiaoyi.starx.protocol.packets.data.MapData;
+import net.kyori.adventure.nbt.CompoundBinaryTag;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public interface PacketFactory {
+
+  Object createChangeGameStatePacket(int reason, float value);
+
+  Object createChunkDataPacket(ChunkSnapshot chunkSnapshot, boolean legacySkyLight, int maxSections);
+
+  Object createChunkDataPacket(ChunkSnapshot chunkSnapshot, Dimension dimension);
+
+  Object createChunkUnloadPacket(int posX, int posZ);
+
+  Object createDefaultSpawnPositionPacket(int posX, int posY, int posZ, float angle);
+
+  Object createDefaultSpawnPositionPacket(String dimension, int posX, int posY, int posZ, float yaw, float pitch);
+
+  Object createMapDataPacket(int mapID, byte scale, MapData mapData);
+
+  /**
+   * @param flags See {@link AbilityFlags}. (e.g. {@code AbilityFlags.ALLOW_FLYING | AbilityFlags.CREATIVE_MODE})
+   */
+  Object createPlayerAbilitiesPacket(int flags, float flySpeed, float walkSpeed);
+
+  /**
+   * @param flags See {@link AbilityFlags}. (e.g. {@code AbilityFlags.ALLOW_FLYING | AbilityFlags.CREATIVE_MODE})
+   */
+  Object createPlayerAbilitiesPacket(byte flags, float flySpeed, float walkSpeed);
+
+  Object createPositionRotationPacket(double posX, double posY, double posZ, float yaw, float pitch,
+      boolean onGround, int teleportID, boolean dismountVehicle);
+
+  Object createSetExperiencePacket(float expBar, int level, int totalExp);
+
+  Object createSetSlotPacket(int windowID, int slot, VirtualItem item, int count, int data, @Nullable CompoundBinaryTag nbt);
+
+  Object createSetSlotPacket(int windowID, int slot, VirtualItem item, int count, int data, @Nullable ItemComponentMap map);
+
+  Object createTimeUpdatePacket(long worldAge, long timeOfDay);
+
+  Object createUpdateViewPositionPacket(int posX, int posZ);
+
+  Object createUpdateTagsPacket(WorldVersion version);
+
+  Object createUpdateTagsPacket(ProtocolVersion version);
+
+  Object createUpdateTagsPacket(Map<String, Map<String, List<Integer>>> tags);
+}

@@ -1,0 +1,22 @@
+name: StarXServer
+version: '${version}'
+main: io.github.addxiaoyi.starx.server.StarxServerPlugin
+api-version: '1.21'
+folia-supported: true
+authors: [addxiaoyi]
+description: StarX backend bridge for Paper and Folia
+softdepend: [PlaceholderAPI, SkinsRestorer]
+commands:
+  starxserver:
+    description: Shows StarX backend bridge status
+    usage: /starxserver <status|capabilities|skin <uuid> <name>>
+    aliases: [starxbackend]
+    permission: starx.command.server
+  sx:
+    description: Opens StarX account security settings
+    usage: /sx [邮箱|验证|关闭|重置]
+    aliases: [starxaccount, account]
+permissions:
+  starx.command.server:
+    description: Allows inspection of the StarX backend bridge
+    default: op

@@ -1,0 +1,74 @@
+StarX
+Copyright (C) 2025 StarX Team
+
+This distribution includes StarX-owned code and embedded third-party code.
+Source-file headers remain authoritative for the license of each file.
+
+StarX Uworld and other StarX-owned additions
+------------------------------------------------------------
+StarX-owned files carrying the StarX Team copyright header are distributed
+under the GNU Affero General Public License, version 3 or, where the source
+header says so, any later version. The license text is provided in:
+
+  LICENSES/AGPL-3.0.txt
+
+Embedded Elytrium LimboAPI implementation
+------------------------------------------------------------
+Implementation sources are derived from Elytrium LimboAPI:
+
+  https://github.com/Elytrium/LimboAPI.git
+  commit 839773cfd406458cf247fbfd64ed492926f921b7
+  upstream version line 1.1.27-SNAPSHOT
+
+The upstream implementation is distributed under the GNU Affero General
+Public License, version 3. Upstream copyright and license headers are retained.
+The AGPL-3.0 text was extracted from LICENSE at the fixed commit and is stored
+in LICENSES/AGPL-3.0.txt.
+
+Embedded Elytrium LimboAPI API
+------------------------------------------------------------
+API sources derived from the upstream api/ tree are distributed under the MIT
+License. The upstream notice begins "Copyright 2021 Elytrium" and is retained
+in LICENSES/MIT.txt, extracted from api/LICENSE at the fixed commit.
+
+Vendored fastutil compile baseline
+------------------------------------------------------------
+This repository distributes fastutil 8.5.18 by Sebastiano Vigna from:
+
+  https://github.com/vigna/fastutil
+
+fastutil is distributed under the Apache License, Version 2.0. The license
+text is provided in LICENSES/Apache-2.0.txt. The vendored JAR is a pinned
+compile and test input only; it is not embedded in the StarX runtime JAR.
+
+StarX embedded changes
+------------------------------------------------------------
+The embedded copy relocates upstream packages into the StarX namespace and
+contains StarX-owned lifecycle and Velocity compatibility changes. The sync
+process preserves these reviewed overrides:
+
+  io/github/addxiaoyi/starx/limbo/LimboAPI.java
+  io/github/addxiaoyi/starx/limbo/server/LimboImpl.java
+  io/github/addxiaoyi/starx/limbo/server/LimboPlayerImpl.java
+  io/github/addxiaoyi/starx/limbo/server/CachedPackets.java
+  io/github/addxiaoyi/starx/limbo/injection/packet/UpsertPlayerInfoHook.java
+
+The embedded runtime intentionally omits the upstream login-stage event hook;
+StarX enters managed Uworld flows after Velocity login completes.
+
+Generated mapping resources are imported from the matching LimboAPI dev-build
+artifact vendored as limboapi-1.1.27-SNAPSHOT.jar. The pinned artifact SHA-256
+is:
+
+  18AC6287D413234C4FC317267A6D5DBF978ADAE8BF3F098A1248966BF2C32CE9
+
+Operational boundary
+------------------------------------------------------------
+The only deployable StarX Velocity artifact is starx-velocity.jar. Uworld and
+the embedded Limbo runtime are not separate plugins. Installing an external
+LimboAPI plugin alongside StarX is unsupported.
+
+Detailed provenance, synchronization instructions, and the upgrade checklist
+are in starx-plugins/starx-standalone-limbo/UPSTREAM.md.
+
+This notice does not replace or modify any license text or source-file header.

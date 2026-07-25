@@ -1,0 +1,20 @@
+# 建议与 Velocity velocity.toml 的 [servers] 键保持一致，便于识别子服。
+node-id: backend
+# 同一玩法的分片应使用相同类型，例如 survival-1 / survival-2 均填写 survival。
+server-type: backend
+
+network:
+  # 由 Velocity 同步；仅作为最后已知状态持久化，不应手工修改。
+  maintenance: false
+
+bridge:
+  # 通过 starx:bridge 向 Velocity 上报 Paper/Folia 平台、能力和状态。
+  enabled: true
+  heartbeat:
+    # 空服时改用 StarX 自有 HTTP 心跳，不依赖在线玩家承载插件消息。
+    enabled: false
+    velocity-url: "http://127.0.0.1:8788"
+    # 与 Velocity plugins/starx/config.yml 的 api-key 保持一致。
+    api-key: ""
+    interval-seconds: 15
+    timeout-ms: 4000

@@ -1,0 +1,222 @@
+# StarX Velocity 默认配置
+# 只需先修改 uworld.auth.target-server；其余项目都有可直接运行的安全默认值。
+# 修改后必须完整重启 Velocity，不支持热重载。
+
+# HTTP 管理接口密钥。生产环境必须设置高强度随机值。
+api-key: ""
+
+# 默认只监听本机，避免管理接口直接暴露到公网。
+http:
+  bind: "127.0.0.1"
+  port: 8788
+  # 本机没有可直连公网地址时，填写管理员配置的 FRP HTTP(S) 入口。
+  frp-public-url: ""
+
+webhook:
+  url: ""
+  secret: ""
+
+database:
+  # 推荐使用内置 SQLite；无需额外数据库插件。
+  type: "sqlite"
+  host: ""
+  port: 3306
+  database: "plugins/starx/data.db"
+  username: "starx"
+  password: ""
+  url: ""
+  pool-max-size: 2
+  connection-timeout-ms: 30000
+
+uniauth:
+  # 可选外部账号服务；关闭时不会发起任何 UniAuth 请求。
+  enabled: false
+  api-url: "https://api.example.com/uniauth/"
+  api-key: ""
+  timeout-ms: 5000
+  bridge-mode: false
+
+# 离线模式玩家默认必须在 Uworld 完成登录或注册。
+auth:
+  binding-website-url: https://star-web.top
+  # 同一账号、同一 IP 最近成功输入密码后的免密时长；设为 0 关闭。
+  password-bypass-minutes: 30
+  allow-offline-default: false
+  # 仅用于识别带前缀的离线用户名，不会绕过密码登录。
+  offline-identity:
+    prefix: "."
+    display-name: "前缀离线账号"
+  ux:
+    titles-enabled: true
+    action-bar-enabled: true
+    sounds-enabled: true
+    prompt-sound: "minecraft:block.note_block.chime"
+    success-sound: "minecraft:entity.player.levelup"
+    error-sound: "minecraft:block.note_block.bass"
+    messages:
+      login-title: "欢迎回来"
+      login-subtitle: "请在聊天栏输入密码登录"
+      register-title: "欢迎来到 StarMC"
+      register-subtitle: "在聊天栏输入密码即可注册"
+      totp-title: "二步验证"
+      totp-subtitle: "请输入 6 位验证码"
+      success-title: "认证成功"
+      success-subtitle: "正在进入服务器"
+
+# 插件内置玩家列表，无需安装 TAB 或 PlaceholderAPI。
+# 文本使用 MiniMessage；可使用下方示例中的 StarX 变量。
+player-list:
+  refresh-seconds: 5
+  header: |-
+      <gradient:#38bdf8:#a855f7><bold>StarMC NETWORK</bold></gradient>
+      <gray>欢迎，<white>{starx_player}</white> <dark_gray>|</dark_gray> <aqua>{starx_login_source}</aqua></gray>
+  footer: |-
+      <gray>当前子服 <white>{starx_server}</white> <dark_gray>|</dark_gray> <green>{starx_server_online}</green> 人</gray>
+      <gray>全网在线 <aqua>{starx_network_online}</aqua><dark_gray>/</dark_gray><white>{starx_network_max}</white></gray>
+
+modules:
+  # 核心认证与 Uworld
+  starx.auth:
+    enabled: true
+  starx.auth.yggdrasil:
+    enabled: true
+  starx.auth.uniauth:
+    enabled: false
+  starx.player-list:
+    enabled: true
+  starx.player-sessions:
+    enabled: true
+  starx.auth.migration:
+    enabled: false
+  starx.auth.migration.commands:
+    enabled: false
+  # 玩家体验与代理工具
+  starx.skin-bridge:
+    enabled: true
+  starx.chat:
+    enabled: true
+  starx.maintenance:
+    enabled: true
+  starx.motd:
+    enabled: true
+  starx.redirect:
+    enabled: true
+  starx.queue:
+    enabled: true
+  starx.tutorial:
+    enabled: true
+  starx.hub:
+    enabled: true
+  starx.uworld:
+    enabled: true
+  starx.reconnect:
+    enabled: true
+  starx.info:
+    enabled: true
+  starx.forge:
+    enabled: true
+    debug: false
+    # 代理无法远程关闭客户端模组；开启后只在指定纯净服进行允许、告警或拒绝。
+    guard-enabled: false
+    unknown-action: "WARN"
+    vanilla-servers: []
+    allowed-client-only-mods: []
+    denied-mods: []
+  starx.proxytools.raknet:
+    enabled: true
+    port: 19132
+    debug: false
+    # true 时未安装 Geyser/Raknetify 会阻止模块启用；默认仅告警。
+    require-provider: false
+  starx.online:
+    enabled: true
+  starx.backend-bridge:
+    enabled: true
+  starx.messaging:
+    enabled: true
+  starx.welcome:
+    enabled: true
+  starx.admin:
+    enabled: true
+  starx.enhanced:
+    enabled: true
+  starx.proxytools.filecleaner:
+    enabled: false
+  starx.security.bot:
+    enabled: true
+  starx.security.crash:
+    enabled: true
+  starx.security.risk:
+    enabled: true
+  starx.security.anticheat:
+    enabled: true
+  starx.security.blossom:
+    enabled: false
+  starx.security.smart-rate:
+    enabled: false
+  starx.security.smart-alert:
+    enabled: false
+  starx.proxytools.smart-queue:
+    enabled: false
+  # 可选业务连接：只有主动配置并启用后才访问外部服务。
+  starx.integrations.qq:
+    enabled: false
+  starx.integrations.plan:
+    enabled: false
+  starx.integrations.mapmod:
+    enabled: true
+    debug: false
+    notify-player: false
+  starx.integrations.napcat:
+    enabled: false
+  # 下列增强仅在对应插件已安装时自动激活；未安装不会影响启动。
+  starx.integrations.luckperms:
+    enabled: true
+  starx.integrations.floodgate:
+    enabled: true
+  starx.integrations.tab:
+    enabled: true
+  starx.vote:
+    enabled: true
+
+napcat:
+  # 可选 QQ/NapCat 连接；默认关闭。
+  enabled: false
+  ws-url: "ws://127.0.0.1:6700"
+  http-url: "http://127.0.0.1:3000"
+  qq-group-id: 0
+  forward-format: "[MC] {player}: {message}"
+
+totp:
+  # 仅开放内置 TOTP 功能入口，不会替玩家自动开启。
+  # 每个玩家默认关闭，只有本人完成二维码和 6 位验证码确认后才启用。
+  enabled: true
+
+uworld:
+  # Velocity 内置虚拟世界，不需要外置 LimboAPI。
+  enabled: true
+  transfer-timeout-seconds: 30
+  auth:
+    timeout-seconds: 300
+    target-server: "lobby"
+    world:
+      # VOID 会自动生成 11x11 平台；SCHEMATIC/STRUCTURE 使用 file-name。
+      dimension: "OVERWORLD"
+      spawn-x: 0.5
+      spawn-y: 100.0
+      spawn-z: 0.5
+      spawn-yaw: 0.0
+      spawn-pitch: 0.0
+      game-mode: "SURVIVAL"
+      loader-type: "AUTO"
+      file-name: "auth_world.schem"
+      offset-x: 0
+      offset-y: 0
+      offset-z: 0
+      view-distance: 4
+      simulation-distance: 4
+      platform-radius: 5
+  diagnostics:
+    enabled: false
+    timeout-seconds: 120
+    platform-radius: 5
