@@ -60,6 +60,11 @@ desktop.ini
 **/backups/
 **/data/backups/
 **/runtime/
+# Keep the extension runtime implementation package in Git; the rule above is for generated runtime data.
+!starx-plugins/starx-extension-runtime/src/main/java/io/github/addxiaoyi/starx/runtime/
+!starx-plugins/starx-extension-runtime/src/main/java/io/github/addxiaoyi/starx/runtime/**
+!starx-plugins/starx-extension-runtime/src/test/java/io/github/addxiaoyi/starx/runtime/
+!starx-plugins/starx-extension-runtime/src/test/java/io/github/addxiaoyi/starx/runtime/**
 **/.paper-runtime/
 
 # Secrets and machine-specific configuration
