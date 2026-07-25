@@ -19,7 +19,9 @@ final class AuthRegistrationPromptContractTest {
     int bindingCode = prompt.indexOf("this.bindingVerification.generateCode");
     int loginReturn = prompt.indexOf("return;", bindingCode);
     int registrationPrompt = prompt.indexOf(
-        "this.authUx.messages().registerTitle()", loginReturn);
+        "messages.registerTitle()", loginReturn);
+    int registrationCard = prompt.indexOf(
+        "AuthLoginCard.renderRegistration", loginReturn);
 
     assertTrue(registeredBranch >= 0);
     assertTrue(bindingCode > registeredBranch,
@@ -27,6 +29,8 @@ final class AuthRegistrationPromptContractTest {
     assertTrue(loginReturn > bindingCode);
     assertTrue(registrationPrompt > loginReturn,
         "The registration prompt must remain outside the registered-login branch");
+    assertTrue(registrationCard > loginReturn,
+        "First-time registration must render the full authentication card");
     assertEquals(1,
         prompt.split("this\\.bindingVerification\\.generateCode", -1).length - 1);
   }

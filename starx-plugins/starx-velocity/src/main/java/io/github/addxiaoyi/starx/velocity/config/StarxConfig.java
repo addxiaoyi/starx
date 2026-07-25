@@ -432,13 +432,34 @@ public final class StarxConfig {
             String promptSound,
             String successSound,
             String errorSound,
-            AuthUxMessages messages) {
+            AuthUxMessages messages,
+            AuthCardMessages card) {
+
+        public AuthUxConfig(
+                boolean titlesEnabled,
+                boolean actionBarEnabled,
+                boolean soundsEnabled,
+                String promptSound,
+                String successSound,
+                String errorSound,
+                AuthUxMessages messages) {
+            this(
+                    titlesEnabled,
+                    actionBarEnabled,
+                    soundsEnabled,
+                    promptSound,
+                    successSound,
+                    errorSound,
+                    messages,
+                    AuthCardMessages.defaults());
+        }
 
         public AuthUxConfig {
             promptSound = normalized(promptSound, "minecraft:block.note_block.chime");
             successSound = normalized(successSound, "minecraft:entity.player.levelup");
             errorSound = normalized(errorSound, "minecraft:block.note_block.bass");
             messages = messages == null ? AuthUxMessages.defaults() : messages;
+            card = card == null ? AuthCardMessages.defaults() : card;
         }
 
         public static AuthUxConfig defaults() {
@@ -449,7 +470,8 @@ public final class StarxConfig {
                     "minecraft:block.note_block.chime",
                     "minecraft:entity.player.levelup",
                     "minecraft:block.note_block.bass",
-                    AuthUxMessages.defaults());
+                    AuthUxMessages.defaults(),
+                    AuthCardMessages.defaults());
         }
 
         private static String normalized(String value, String fallback) {
@@ -465,7 +487,39 @@ public final class StarxConfig {
             String totpTitle,
             String totpSubtitle,
             String successTitle,
-            String successSubtitle) {
+            String successSubtitle,
+            String loginPrompt,
+            String loginActionBar,
+            String registerPrompt,
+            String registerActionBar,
+            String totpPrompt,
+            String totpActionBar) {
+
+        public AuthUxMessages(
+                String loginTitle,
+                String loginSubtitle,
+                String registerTitle,
+                String registerSubtitle,
+                String totpTitle,
+                String totpSubtitle,
+                String successTitle,
+                String successSubtitle) {
+            this(
+                    loginTitle,
+                    loginSubtitle,
+                    registerTitle,
+                    registerSubtitle,
+                    totpTitle,
+                    totpSubtitle,
+                    successTitle,
+                    successSubtitle,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
+        }
 
         public AuthUxMessages {
             loginTitle = normalized(loginTitle, "欢迎回来");
@@ -476,6 +530,20 @@ public final class StarxConfig {
             totpSubtitle = normalized(totpSubtitle, "请输入 6 位验证码");
             successTitle = normalized(successTitle, "认证成功");
             successSubtitle = normalized(successSubtitle, "正在进入服务器");
+            loginPrompt = normalized(loginPrompt, "请输入密码完成登录。");
+            loginActionBar = normalized(
+                    loginActionBar,
+                    "直接输入密码即可，聊天内容不会公开");
+            registerPrompt = normalized(
+                    registerPrompt,
+                    "请直接在聊天栏输入你的密码完成注册。");
+            registerActionBar = normalized(
+                    registerActionBar,
+                    "密码仅用于认证，不会显示在聊天中");
+            totpPrompt = normalized(
+                    totpPrompt,
+                    "请输入验证器的 6 位验证码，或 10 位恢复码。");
+            totpActionBar = normalized(totpActionBar, "验证码提交后将自动验证");
         }
 
         public static AuthUxMessages defaults() {
@@ -487,7 +555,124 @@ public final class StarxConfig {
                     "二步验证",
                     "请输入 6 位验证码",
                     "认证成功",
-                    "正在进入服务器");
+                    "正在进入服务器",
+                    "请输入密码完成登录。",
+                    "直接输入密码即可，聊天内容不会公开",
+                    "请直接在聊天栏输入你的密码完成注册。",
+                    "密码仅用于认证，不会显示在聊天中",
+                    "请输入验证器的 6 位验证码，或 10 位恢复码。",
+                    "验证码提交后将自动验证");
+        }
+
+        private static String normalized(String value, String fallback) {
+            return value == null || value.isBlank() ? fallback : value.trim();
+        }
+    }
+
+    public record AuthCardMessages(
+            String title,
+            String playerPrefix,
+            String uuidPrefix,
+            String accountTypePrefix,
+            String currentIpPrefix,
+            String lastIpPrefix,
+            String lastLoginPrefix,
+            String playtimePrefix,
+            String registeredAtPrefix,
+            String targetPrefix,
+            String premiumAccount,
+            String offlineAccount,
+            String firstLoginAccount,
+            String newPlayerName,
+            String noHistory,
+            String registrationPremiumAccount,
+            String registrationOfflineAccount,
+            String registrationHistory,
+            String registrationPendingTime,
+            String unknownValue,
+            String targetUnavailable,
+            String loginLinkText,
+            String loginLinkHover,
+            String registrationLinkText,
+            String registrationLinkHover,
+            String hourUnit,
+            String minuteUnit) {
+
+        public AuthCardMessages {
+            title = normalized(title, "✦ StarMC 安全登录中心 ✦");
+            playerPrefix = normalized(playerPrefix, "玩家：");
+            uuidPrefix = normalized(uuidPrefix, "玩家 UUID：");
+            accountTypePrefix = normalized(accountTypePrefix, "账号类型：");
+            currentIpPrefix = normalized(currentIpPrefix, "当前 IP：");
+            lastIpPrefix = normalized(lastIpPrefix, "上次 IP：");
+            lastLoginPrefix = normalized(lastLoginPrefix, "上次登录：");
+            playtimePrefix = normalized(playtimePrefix, "累计游玩：");
+            registeredAtPrefix = normalized(registeredAtPrefix, "注册时间：");
+            targetPrefix = normalized(targetPrefix, "认证目标：");
+            premiumAccount = normalized(premiumAccount, "正版账号");
+            offlineAccount = normalized(offlineAccount, "离线账号");
+            firstLoginAccount = normalized(firstLoginAccount, "首次登录");
+            newPlayerName = normalized(newPlayerName, "新玩家");
+            noHistory = normalized(noHistory, "无历史记录");
+            registrationPremiumAccount = normalized(
+                    registrationPremiumAccount,
+                    "正版账号（待注册）");
+            registrationOfflineAccount = normalized(
+                    registrationOfflineAccount,
+                    "离线账号（待注册）");
+            registrationHistory = normalized(
+                    registrationHistory,
+                    "首次注册，无历史记录");
+            registrationPendingTime = normalized(
+                    registrationPendingTime,
+                    "完成注册后生成");
+            unknownValue = normalized(unknownValue, "未知");
+            targetUnavailable = normalized(targetUnavailable, "暂不可用");
+            loginLinkText = normalized(
+                    loginLinkText,
+                    "[点击打开 StarX 账号绑定 · 绑定后免密登录]");
+            loginLinkHover = normalized(
+                    loginLinkHover,
+                    "打开安全绑定页面（5 分钟内有效）");
+            registrationLinkText = normalized(
+                    registrationLinkText,
+                    "[打开 StarX 账号中心 · 注册后可绑定免密登录]");
+            registrationLinkHover = normalized(
+                    registrationLinkHover,
+                    "先完成游戏内注册，再进行账号绑定");
+            hourUnit = normalized(hourUnit, "小时");
+            minuteUnit = normalized(minuteUnit, "分钟");
+        }
+
+        public static AuthCardMessages defaults() {
+            return new AuthCardMessages(
+                    "✦ StarMC 安全登录中心 ✦",
+                    "玩家：",
+                    "玩家 UUID：",
+                    "账号类型：",
+                    "当前 IP：",
+                    "上次 IP：",
+                    "上次登录：",
+                    "累计游玩：",
+                    "注册时间：",
+                    "认证目标：",
+                    "正版账号",
+                    "离线账号",
+                    "首次登录",
+                    "新玩家",
+                    "无历史记录",
+                    "正版账号（待注册）",
+                    "离线账号（待注册）",
+                    "首次注册，无历史记录",
+                    "完成注册后生成",
+                    "未知",
+                    "暂不可用",
+                    "[点击打开 StarX 账号绑定 · 绑定后免密登录]",
+                    "打开安全绑定页面（5 分钟内有效）",
+                    "[打开 StarX 账号中心 · 注册后可绑定免密登录]",
+                    "先完成游戏内注册，再进行账号绑定",
+                    "小时",
+                    "分钟");
         }
 
         private static String normalized(String value, String fallback) {

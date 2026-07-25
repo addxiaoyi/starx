@@ -439,6 +439,7 @@ public final class ConfigLoader {
   private static StarxConfig.AuthConfig parseAuthConfig(Map<String, Object> node) {
     Map<String, Object> uxNode = child(node, "ux");
     Map<String, Object> messagesNode = child(uxNode, "messages");
+    Map<String, Object> cardNode = child(uxNode, "card");
     Map<String, Object> offlineIdentityNode = child(node, "offline-identity");
     StarxConfig.AuthUxMessages messages = new StarxConfig.AuthUxMessages(
         stringValue(messagesNode, "login-title", null),
@@ -448,7 +449,41 @@ public final class ConfigLoader {
         stringValue(messagesNode, "totp-title", null),
         stringValue(messagesNode, "totp-subtitle", null),
         stringValue(messagesNode, "success-title", null),
-        stringValue(messagesNode, "success-subtitle", null));
+        stringValue(messagesNode, "success-subtitle", null),
+        stringValue(messagesNode, "login-prompt", null),
+        stringValue(messagesNode, "login-action-bar", null),
+        stringValue(messagesNode, "register-prompt", null),
+        stringValue(messagesNode, "register-action-bar", null),
+        stringValue(messagesNode, "totp-prompt", null),
+        stringValue(messagesNode, "totp-action-bar", null));
+    StarxConfig.AuthCardMessages card = new StarxConfig.AuthCardMessages(
+        stringValue(cardNode, "title", null),
+        stringValue(cardNode, "player-prefix", null),
+        stringValue(cardNode, "uuid-prefix", null),
+        stringValue(cardNode, "account-type-prefix", null),
+        stringValue(cardNode, "current-ip-prefix", null),
+        stringValue(cardNode, "last-ip-prefix", null),
+        stringValue(cardNode, "last-login-prefix", null),
+        stringValue(cardNode, "playtime-prefix", null),
+        stringValue(cardNode, "registered-at-prefix", null),
+        stringValue(cardNode, "target-prefix", null),
+        stringValue(cardNode, "premium-account", null),
+        stringValue(cardNode, "offline-account", null),
+        stringValue(cardNode, "first-login-account", null),
+        stringValue(cardNode, "new-player-name", null),
+        stringValue(cardNode, "no-history", null),
+        stringValue(cardNode, "registration-premium-account", null),
+        stringValue(cardNode, "registration-offline-account", null),
+        stringValue(cardNode, "registration-history", null),
+        stringValue(cardNode, "registration-pending-time", null),
+        stringValue(cardNode, "unknown-value", null),
+        stringValue(cardNode, "target-unavailable", null),
+        stringValue(cardNode, "login-link-text", null),
+        stringValue(cardNode, "login-link-hover", null),
+        stringValue(cardNode, "registration-link-text", null),
+        stringValue(cardNode, "registration-link-hover", null),
+        stringValue(cardNode, "hour-unit", null),
+        stringValue(cardNode, "minute-unit", null));
     StarxConfig.AuthUxConfig ux = new StarxConfig.AuthUxConfig(
         configBoolean(uxNode, "titles-enabled", true, "auth.ux.titles-enabled"),
         configBoolean(uxNode, "action-bar-enabled", true, "auth.ux.action-bar-enabled"),
@@ -456,7 +491,8 @@ public final class ConfigLoader {
         stringValue(uxNode, "prompt-sound", null),
         stringValue(uxNode, "success-sound", null),
         stringValue(uxNode, "error-sound", null),
-        messages);
+        messages,
+        card);
     return new StarxConfig.AuthConfig(
         configBoolean(
             node,

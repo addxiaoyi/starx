@@ -707,61 +707,70 @@ public final class AuthModule implements VelocityModule {
     if (!this.flows.requiresInput(player)) {
       return;
     }
+    StarxConfig.AuthUxMessages messages = this.authUx.messages();
+    StarxConfig.AuthCardMessages card = this.authUx.card();
+    InetAddress address = this.playerAddress(player);
+    String currentIp = address == null ? card.unknownValue() : address.getHostAddress();
+    RegisteredServer target = this.targetServer;
+    String targetName = target == null
+        ? card.targetUnavailable()
+        : target.getServerInfo().getName();
+    String accountCenterUrl = this.plugin.config().auth().bindingWebsiteUrl()
+        + "/profile?tab=minecraft&username="
+        + java.net.URLEncoder.encode(
+            player.getUsername(), java.nio.charset.StandardCharsets.UTF_8)
+        + "&uuid=" + player.getUniqueId();
     if (registered) {
       String code = this.bindingVerification.generateCode(player.getUniqueId());
-      String bindingUrl = this.plugin.config().auth().bindingWebsiteUrl()
-          + "/profile?tab=minecraft&username="
-          + java.net.URLEncoder.encode(
-              player.getUsername(), java.nio.charset.StandardCharsets.UTF_8)
-          + "&uuid=" + player.getUniqueId()
-          + "&code=" + code;
-      InetAddress address = this.playerAddress(player);
-      String currentIp = address == null ? "未知" : address.getHostAddress();
-      RegisteredServer target = this.targetServer;
+      String bindingUrl = accountCenterUrl + "&code=" + code;
       player.sendMessage(AuthLoginCard.render(
           user,
           currentIp,
-          target == null ? "暂不可用" : target.getServerInfo().getName(),
-          bindingUrl));
-      player.sendMessage(Component.text("请输入密码完成登录。", NamedTextColor.YELLOW));
+          targetName,
+          bindingUrl,
+          card));
+      player.sendMessage(Component.text(messages.loginPrompt(), NamedTextColor.YELLOW));
       if (this.authUx.actionBarEnabled()) {
-        player.sendActionBar(Component.text(
-            "直接输入密码即可，聊天内容不会公开", NamedTextColor.GRAY));
+        player.sendActionBar(Component.text(messages.loginActionBar(), NamedTextColor.GRAY));
       }
       if (this.authUx.titlesEnabled()) {
         player.showTitle(Title.title(
-            Component.text(this.authUx.messages().loginTitle(), NamedTextColor.GOLD),
-            Component.text(this.authUx.messages().loginSubtitle(), NamedTextColor.GRAY)));
+            Component.text(messages.loginTitle(), NamedTextColor.GOLD),
+            Component.text(messages.loginSubtitle(), NamedTextColor.GRAY)));
       }
       this.playFeedback(player, this.authUx.promptSound(), 0.55f, 1.15f);
       return;
     }
     if (this.authUx.titlesEnabled()) {
       player.showTitle(Title.title(
-          Component.text(this.authUx.messages().registerTitle(), NamedTextColor.AQUA),
-          Component.text(this.authUx.messages().registerSubtitle(), NamedTextColor.GRAY)));
+          Component.text(messages.registerTitle(), NamedTextColor.AQUA),
+          Component.text(messages.registerSubtitle(), NamedTextColor.GRAY)));
     }
-    player.sendMessage(((TextComponent) Component.text("欢迎来到 StarMC 认证世界", NamedTextColor.AQUA)
-        .append(Component.newline()))
-        .append(Component.text("请直接在聊天栏输入你的密码完成注册", NamedTextColor.WHITE)));
+    player.sendMessage(AuthLoginCard.renderRegistration(
+        player.getUsername(),
+        player.getUniqueId(),
+        player.isOnlineMode(),
+        currentIp,
+        targetName,
+        accountCenterUrl,
+        card));
+    player.sendMessage(Component.text(messages.registerPrompt(), NamedTextColor.YELLOW));
     if (this.authUx.actionBarEnabled()) {
-      player.sendActionBar(Component.text(
-          "密码仅用于认证，不会显示在聊天中", NamedTextColor.GRAY));
+      player.sendActionBar(Component.text(messages.registerActionBar(), NamedTextColor.GRAY));
     }
     this.playFeedback(player, this.authUx.promptSound(), 0.55f, 1.15f);
   }
 
   private void showTotpPrompt(Player player) {
+    StarxConfig.AuthUxMessages messages = this.authUx.messages();
     if (this.authUx.titlesEnabled()) {
       player.showTitle(Title.title(
-          Component.text(this.authUx.messages().totpTitle(), NamedTextColor.GOLD),
-          Component.text(this.authUx.messages().totpSubtitle(), NamedTextColor.WHITE)));
+          Component.text(messages.totpTitle(), NamedTextColor.GOLD),
+          Component.text(messages.totpSubtitle(), NamedTextColor.WHITE)));
     }
-    player.sendMessage(Component.text(
-        "请输入验证器的 6 位验证码，或 10 位恢复码。",
-        NamedTextColor.YELLOW));
+    player.sendMessage(Component.text(messages.totpPrompt(), NamedTextColor.YELLOW));
     if (this.authUx.actionBarEnabled()) {
-      player.sendActionBar(Component.text("验证码提交后将自动验证", NamedTextColor.GRAY));
+      player.sendActionBar(Component.text(messages.totpActionBar(), NamedTextColor.GRAY));
     }
     this.playFeedback(player, this.authUx.promptSound(), 0.55f, 1.15f);
   }
