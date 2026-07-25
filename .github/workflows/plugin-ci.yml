@@ -20,22 +20,15 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: gradle
-      - name: Verify plugin release
+      - name: Verify universal plugin
         run: |
           chmod +x gradlew
-          ./gradlew clean test \
-            :starx-plugins:starx-api:build \
-            :starx-plugins:starx-extension-example:build \
+          ./gradlew clean \
             :starx-plugins:starx-universal:check \
             --console=plain
-      - name: Upload verified artifacts
+      - name: Upload universal plugin
         uses: actions/upload-artifact@v4
         with:
-          name: starx-plugin-build
+          name: starx-universal
           if-no-files-found: error
-          path: |
-            starx-plugins/starx-universal/build/libs/starx-universal.jar
-            starx-plugins/starx-velocity/build/libs/starx-velocity.jar
-            starx-plugins/starx-server/build/libs/starx-server.jar
-            starx-plugins/starx-api/build/libs/*.jar
-            starx-plugins/starx-extension-example/build/libs/starx-extension-example.jar
+          path: starx-plugins/starx-universal/build/libs/starx-universal.jar

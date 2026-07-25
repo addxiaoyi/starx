@@ -4,19 +4,12 @@ StarX is a Java 21 Minecraft network plugin for Velocity, Paper, and Folia. Vers
 
 ## Downloads
 
-Use `starx-universal-0.2.0.jar` for normal deployments. Copy the same file into each independent Velocity, Paper, or Folia instance's `plugins/` directory. Do not install the universal JAR together with a split platform JAR in the same instance.
-
-Split artifacts are retained for platform-specific diagnostics:
-
-- `starx-velocity-0.2.0.jar`
-- `starx-server-0.2.0.jar`
+The GitHub Release publishes exactly one deployable file: `starx-universal-0.2.0.jar`. Copy the same file into each independent Velocity, Paper, or Folia instance's `plugins/` directory.
 
 ## Build
 
 ```bash
-./gradlew clean test \
-  :starx-plugins:starx-api:build \
-  :starx-plugins:starx-extension-example:build \
+./gradlew clean \
   :starx-plugins:starx-universal:check \
   --console=plain
 ```

@@ -14,12 +14,7 @@ StarX 0.2.0 是首个正式提供三端通用插件与第三方扩展 Service AP
 
 ## 推荐安装
 
-将 `starx-universal-0.2.0.jar` 分别放入 Velocity、Paper 和 Folia 实例的 `plugins/` 目录。不要在同一实例同时安装通用版和对应分端版。
-
-## 分端构建
-
-- `starx-velocity-0.2.0.jar`：Velocity 分端调试或独立部署。
-- `starx-server-0.2.0.jar`：Paper/Folia 分端调试或独立部署。
+GitHub Release 只提供 `starx-universal-0.2.0.jar`。将同一个文件分别放入 Velocity、Paper 和 Folia 实例的 `plugins/` 目录。
 
 ## 扩展开发
 
