@@ -13,62 +13,169 @@ permissions:
 
 jobs:
   trivy:
-    name: Filesystem security
+    name: Artifact and source security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Generate Trivy report
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Build universal artifact for dependency scanning
+        run: |
+          chmod +x gradlew
+          ./gradlew :starx-plugins:starx-universal:universalJar --warning-mode all --no-daemon --console=plain --non-interactive
+
+      - name: Scan packaged dependencies
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: starx-plugins/starx-universal/build/libs/starx-universal.jar
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: trivy-vulnerability-report.json
+          exit-code: "0"
+          hide-progress: "true"
+          list-all-pkgs: "true"
+          timeout: 10m
+
+      - name: Scan repository source
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret,misconfig
-          ignore-unfixed: "true"
+          scanners: secret,misconfig
           severity: HIGH,CRITICAL
-          format: table
-          output: trivy-report.txt
+          format: json
+          output: trivy-source-report.json
           exit-code: "0"
           hide-progress: "true"
+          skip-dirs: .git,.gradle,**/build,vendor,starx-plugins/starx-standalone-limbo/vendor
           timeout: 10m
+          skip-setup-trivy: "true"
 
-      - name: Publish Trivy summary
-        if: always()
+      - name: Validate Trivy coverage and enforce critical findings
         shell: bash
         run: |
-          echo "### Trivy filesystem security report" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ -s trivy-report.txt ]; then
-            echo "```" >> "$GITHUB_STEP_SUMMARY"
-            sed -n '1,400p' trivy-report.txt >> "$GITHUB_STEP_SUMMARY"
-            echo "```" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "No HIGH or CRITICAL findings were reported." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
 
-      - name: Upload Trivy report
+          def load_report(path: str) -> dict:
+              report_path = Path(path)
+              if not report_path.is_file():
+                  raise SystemExit(f"Missing Trivy report: {path}")
+              data = json.loads(report_path.read_text(encoding="utf-8"))
+              if int(data.get("SchemaVersion", 0)) < 2:
+                  raise SystemExit(f"Unsupported Trivy report schema in {path}")
+              return data
+
+          vulnerability_report = load_report("trivy-vulnerability-report.json")
+          source_report = load_report("trivy-source-report.json")
+          vulnerability_results = vulnerability_report.get("Results") or []
+          source_results = source_report.get("Results") or []
+
+          packages = [
+              package
+              for result in vulnerability_results
+              for package in (result.get("Packages") or [])
+          ]
+          package_names = {
+              str(package.get("Name", "")).strip().lower()
+              for package in packages
+              if package.get("Name")
+          }
+          expected_components = ("gson", "hikaricp", "sqlite-jdbc")
+          missing_components = [
+              component
+              for component in expected_components
+              if not any(component in name for name in package_names)
+          ]
+          if not packages or missing_components:
+              raise SystemExit(
+                  "Trivy did not identify the expected packaged dependencies; "
+                  f"packages={len(packages)} missing={missing_components}"
+              )
+
+          finding_groups = (
+              ("Vulnerability", "Vulnerabilities", vulnerability_results),
+              ("Secret", "Secrets", source_results),
+              ("Misconfiguration", "Misconfigurations", source_results),
+          )
+          findings = []
+          for label, key, results in finding_groups:
+              for result in results:
+                  target = str(result.get("Target", ""))
+                  for finding in result.get(key) or []:
+                      severity = str(finding.get("Severity", "UNKNOWN")).upper()
+                      identifier = str(
+                          finding.get("VulnerabilityID")
+                          or finding.get("ID")
+                          or finding.get("RuleID")
+                          or "unknown"
+                      )
+                      title = str(
+                          finding.get("Title")
+                          or finding.get("Message")
+                          or finding.get("Description")
+                          or ""
+                      ).replace("\n", " ").strip()
+                      findings.append((severity, label, identifier, target, title))
+
+          high = [finding for finding in findings if finding[0] == "HIGH"]
+          critical = [finding for finding in findings if finding[0] == "CRITICAL"]
+          summary_lines = [
+              "### Trivy artifact and source security",
+              "",
+              f"- Packaged dependencies identified: **{len(packages)}**",
+              f"- Vulnerability result targets: **{len(vulnerability_results)}**",
+              f"- Source security result targets: **{len(source_results)}**",
+              f"- HIGH findings: **{len(high)}**",
+              f"- CRITICAL findings: **{len(critical)}**",
+              "- Coverage check: **gson, HikariCP, and sqlite-jdbc identified in the final Universal JAR**",
+          ]
+          if findings:
+              summary_lines.extend(["", "| Severity | Type | ID | Target | Title |", "|---|---|---|---|---|"])
+              for severity, label, identifier, target, title in findings[:100]:
+                  safe_target = target.replace("|", "\\|")
+                  safe_title = title.replace("|", "\\|")[:240]
+                  summary_lines.append(
+                      f"| {severity} | {label} | {identifier} | {safe_target} | {safe_title} |"
+                  )
+          else:
+              summary_lines.extend(["", "No HIGH or CRITICAL findings were reported."])
+
+          summary = "\n".join(summary_lines) + "\n"
+          Path("trivy-summary.md").write_text(summary, encoding="utf-8")
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if step_summary:
+              with Path(step_summary).open("a", encoding="utf-8") as output:
+                  output.write(summary)
+          print(summary)
+
+          if critical:
+              print("Critical Trivy findings block the security gate.", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+      - name: Upload Trivy reports
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: trivy-security-report
           if-no-files-found: error
-          path: trivy-report.txt
-
-      - name: Enforce critical Trivy findings
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,secret,misconfig
-          ignore-unfixed: "true"
-          severity: CRITICAL
-          format: table
-          exit-code: "1"
-          hide-progress: "true"
-          timeout: 10m
-          skip-setup-trivy: "true"
+          path: |
+            trivy-vulnerability-report.json
+            trivy-source-report.json
+            trivy-summary.md
 
   codeql:
     name: Analyze Java

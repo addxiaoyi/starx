@@ -21,7 +21,7 @@ The build verifies pinned Velocity compile inputs, public API boundaries, extens
 
 ## Security automation
 
-The `Security Analysis` workflow runs Trivy filesystem scanning for vulnerabilities, secrets, and misconfiguration on every repository visibility level. CodeQL runs automatically when the repository is public or GitHub Code Security is enabled; GitHub does not provide CodeQL uploads for an ineligible private personal repository. Trivy reports remain available as workflow artifacts.
+The `Security Analysis` workflow builds the final Universal JAR, verifies that Trivy identifies the packaged Gson, HikariCP, and SQLite JDBC components, scans packaged dependencies for HIGH/CRITICAL vulnerabilities, and scans repository source for HIGH/CRITICAL secrets and misconfiguration. Missing artifact coverage or any CRITICAL finding fails the gate; JSON reports and a Markdown summary are retained as workflow artifacts. CodeQL runs automatically when the repository is public or GitHub Code Security is enabled; GitHub does not provide CodeQL uploads for an ineligible private personal repository.
 
 ## Extension API
 
