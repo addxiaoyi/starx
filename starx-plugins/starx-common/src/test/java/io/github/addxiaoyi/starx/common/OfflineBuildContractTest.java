@@ -108,7 +108,8 @@ final class OfflineBuildContractTest {
     String notice = Files.readString(root.resolve("NOTICE"));
 
     assertTrue(Files.isRegularFile(license), "缺少 fastutil 的 Apache-2.0 许可证文本");
-    assertTrue(Files.readString(license).contains("Apache License\nVersion 2.0, January 2004"),
+    String licenseText = Files.readString(license).replace("\r\n", "\n");
+    assertTrue(licenseText.contains("Apache License\nVersion 2.0, January 2004"),
         "Apache-2.0 许可证文本不完整");
     assertTrue(notice.contains("fastutil 8.5.18"),
         "NOTICE 必须标明 vendored fastutil 的名称和版本");
