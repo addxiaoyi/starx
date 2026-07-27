@@ -19,6 +19,10 @@ The GitHub Release publishes exactly one deployable file: `starx-universal-0.3.0
 
 The build verifies pinned Velocity compile inputs, public API boundaries, extension lifecycle behavior, both platform descriptors, Folia support, duplicate ZIP entries, nested JAR leakage, and platform API leakage.
 
+## Security automation
+
+The `Security Analysis` workflow runs Trivy filesystem scanning for vulnerabilities, secrets, and misconfiguration on every repository visibility level. CodeQL runs automatically when the repository is public or GitHub Code Security is enabled; GitHub does not provide CodeQL uploads for an ineligible private personal repository. Trivy reports remain available as workflow artifacts.
+
 ## Extension API
 
 Maven coordinates:

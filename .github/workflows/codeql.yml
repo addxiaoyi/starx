@@ -1,4 +1,4 @@
-name: CodeQL
+name: Security Analysis
 
 on:
   push:
@@ -9,16 +9,77 @@ on:
     - cron: "23 3 * * 1"
 
 permissions:
-  actions: read
   contents: read
-  security-events: write
-  packages: read
 
 jobs:
-  analyze:
+  trivy:
+    name: Filesystem security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Generate Trivy report
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          ignore-unfixed: "true"
+          severity: HIDH,CRITICAL
+          format: table
+          output: trivy-report.txt
+          exit-code: "0"
+          hide-progress: "true"
+          timeout: 10m
+
+      - name: Publish Trivy summary
+        if: always()
+        shell: bash
+        run: |
+          echo "### Trivy filesystem security report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s trivy-report.txt ]; then
+            echo "```" >> "$GITHUB_STEP_SUMMARY"
+            sed -n '1,400p' trivy-report.txt >> "$GITHUB_STEP_SUMMARY"
+            echo "```" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No HIGH or CRITICAL findings were reported." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: trivy-security-report
+          if-no-files-found: error
+          path: trivy-report.txt
+
+      - name: Enforce critical Trivy findings
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          ignore-unfixed: "true"
+          severity: CRITICAL
+          format: table
+          exit-code: "1"
+          hide-progress: "true"
+          timeout: 10m
+          skip-setup-trivy: "true"
+
+  codeql:
     name: Analyze Java
+    if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
 
     steps:
       - uses: actions/checkout@v6
