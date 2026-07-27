@@ -21,6 +21,7 @@ import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.api.event.StarxEvent;
+import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
 import io.github.addxiaoyi.starx.api.extension.StarxCapabilities;
 import io.github.addxiaoyi.starx.api.extension.StarxService;
 import io.github.addxiaoyi.starx.api.extension.StarxServiceProvider;
@@ -143,6 +144,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
     private UworldRuntime uworld;
     private DefaultStarxService extensionService;
     private Consumer<StarxEvent> extensionEventForwarder;
+    private CompatibilityReport compatibilityReport;
 
     @Inject
     public StarxVelocityPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -165,6 +167,14 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
 
     public StarxConfig config() {
         return this.config;
+    }
+
+    public CompatibilityReport compatibilityReport() {
+        CompatibilityReport report = this.compatibilityReport;
+        if (report == null) {
+            throw new IllegalStateException("Compatibility report is not initialized");
+        }
+        return report;
     }
 
     public EventBus eventBus() {
@@ -215,6 +225,9 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         if (autoConfig.changed()) {
             this.config = ConfigLoader.load(configFile, this.logger::warning);
         }
+        this.compatibilityReport = VelocityCompatibility.evaluate(
+            this.proxy, configFile, this.dataDirectory, this.logger::info, this.logger::warning);
+        this.lifecycle.own("compatibility report", () -> this.compatibilityReport = null);
         this.eventBus = new VelocityEventBus();
         this.lifecycle.own("event bus", this.eventBus::close);
         this.extensionService = new DefaultStarxService(

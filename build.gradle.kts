@@ -3,7 +3,7 @@ import java.util.jar.JarFile
 
 plugins {
     `java-library`
-    id("com.gradleup.shadow") version "8.3.5" apply false
+    id("com.gradleup.shadow") version "9.6.1" apply false
 }
 
 allprojects {
@@ -48,7 +48,7 @@ val velocityBuild606CompileNamespaces = listOf(
     "org/yaml/snakeyaml"
 )
 
-val verifyVelocityBuild606 by tasks.registering {
+val verifyVelocityBuild606 = tasks.register("verifyVelocityBuild606") {
     group = "verification"
     description = "Verifies the exact Velocity build 606 compile input"
     inputs.file(velocityBuild606Artifact)
@@ -91,7 +91,7 @@ val verifyVelocityBuild606 by tasks.registering {
     }
 }
 
-val verifyVelocityFastutil by tasks.registering {
+val verifyVelocityFastutil = tasks.register("verifyVelocityFastutil") {
     group = "verification"
     description = "Verifies the full fastutil compile baseline used with Velocity build 606"
     inputs.file(velocityFastutilArtifact)
@@ -124,8 +124,8 @@ val verifyVelocityFastutil by tasks.registering {
     }
 }
 
-val prepareVelocityBuild606Compile by tasks.registering(
-    org.gradle.api.tasks.bundling.Zip::class
+val prepareVelocityBuild606Compile = tasks.register<org.gradle.api.tasks.bundling.Zip>(
+    "prepareVelocityBuild606Compile"
 ) {
     group = "build setup"
     description = "Extracts the exact Velocity namespaces used for compilation"

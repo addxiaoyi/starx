@@ -17,6 +17,7 @@ val velocityBuild606Compile = files(
 val velocityBuild606Runtime = files(
     rootProject.layout.projectDirectory.file("vendor/velocity/velocity-3.5.0-SNAPSHOT-606.jar")
 )
+val velocityPluginVersion = project.version.toString()
 
 dependencies {
     // starx-common 必须 shadow 到 jar 中，否则运行时找不到类
@@ -41,14 +42,14 @@ tasks.withType<JavaCompile> {
 
 tasks.test {
     useJUnitPlatform()
-    systemProperty("starx.project.version", project.version.toString())
+    systemProperty("starx.project.version", velocityPluginVersion)
 }
 
 tasks.processResources {
     filteringCharset = "UTF-8"
-    inputs.property("version", project.version)
+    inputs.property("version", velocityPluginVersion)
     filesMatching("velocity-plugin.json") {
-        expand("version" to project.version)
+        expand("version" to velocityPluginVersion)
     }
 }
 
@@ -64,7 +65,7 @@ tasks.shadowJar {
     relocate("net.elytrium.commons", "io.github.addxiaoyi.starx.limbo.thirdparty.commons")
 }
 
-val verifyVelocityRuntimeJar by tasks.registering {
+val verifyVelocityRuntimeJar = tasks.register("verifyVelocityRuntimeJar") {
     group = "verification"
     description = "Verifies the self-contained Velocity JAR package boundary"
     dependsOn(tasks.shadowJar)

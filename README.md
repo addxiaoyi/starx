@@ -9,9 +9,12 @@ The GitHub Release publishes exactly one deployable file: `starx-universal-0.3.0
 ## Build
 
 ```bash
-./gradlew clean \
+./gradlew clean check \
   :starx-plugins:starx-universal:check \
-  --console=plain
+  --warning-mode all \
+  --no-daemon \
+  --console=plain \
+  --non-interactive
 ```
 
 The build verifies pinned Velocity compile inputs, public API boundaries, extension lifecycle behavior, both platform descriptors, Folia support, duplicate ZIP entries, nested JAR leakage, and platform API leakage.
@@ -33,6 +36,7 @@ Third-party plugins must use the API as `compileOnly` and must not shade or relo
 ## Documentation
 
 - `docs/STARX_PLATFORMS.md`
+- `docs/COMPATIBILITY.md`
 - `starx-plugins/starx-universal/README.md`
 - `NOTICE`
 

@@ -35,7 +35,7 @@ val limboVendorNamespaces = listOf(
     "net/elytrium/commons/utils/reflection"
 )
 
-val verifyLimboVendor by tasks.registering {
+val verifyLimboVendor = tasks.register("verifyLimboVendor") {
     group = "verification"
     description = "Verifies the pinned LimboAPI vendor artifact"
     inputs.file(limboVendorArtifact)
@@ -68,8 +68,8 @@ val verifyLimboVendor by tasks.registering {
     }
 }
 
-val prepareLimboVendorRuntime by tasks.registering(
-    org.gradle.api.tasks.bundling.Zip::class
+val prepareLimboVendorRuntime = tasks.register<org.gradle.api.tasks.bundling.Zip>(
+    "prepareLimboVendorRuntime"
 ) {
     group = "build setup"
     description = "Extracts the pinned Elytrium libraries used by embedded Uworld"
@@ -96,6 +96,7 @@ dependencies {
     testCompileOnly(velocityBuild606Compile)
     testRuntimeOnly(velocityBuild606Runtime)
     testRuntimeOnly(velocityFastutilRuntime)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.withType<JavaCompile> {

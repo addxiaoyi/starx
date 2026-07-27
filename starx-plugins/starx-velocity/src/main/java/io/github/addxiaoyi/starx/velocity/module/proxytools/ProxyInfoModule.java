@@ -14,6 +14,9 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.proxytools;
 
+import io.github.addxiaoyi.starx.api.compat.CompatibilityCheck;
+import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
+import io.github.addxiaoyi.starx.api.compat.CompatibilityStatus;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.SimpleCommand;
@@ -115,6 +118,10 @@ implements VelocityModule {
                     this.sendServers(invocation);
                     break;
                 }
+                case "doctor": {
+                    this.sendDoctor(invocation);
+                    break;
+                }
                 default: {
                     this.sendHelp(invocation);
                 }
@@ -126,6 +133,7 @@ implements VelocityModule {
             invocation.source().sendMessage((Component)Component.text((String)"  /starx info    - Proxy status info", (TextColor)NamedTextColor.YELLOW));
             invocation.source().sendMessage((Component)Component.text((String)"  /starx uptime  - Proxy uptime", (TextColor)NamedTextColor.YELLOW));
             invocation.source().sendMessage((Component)Component.text((String)"  /starx servers - Server list", (TextColor)NamedTextColor.YELLOW));
+            invocation.source().sendMessage((Component)Component.text((String)"  /starx doctor  - Compatibility diagnostics", (TextColor)NamedTextColor.YELLOW));
         }
 
         private void sendInfo(SimpleCommand.Invocation invocation) {
@@ -139,6 +147,28 @@ implements VelocityModule {
 
         private void sendUptime(SimpleCommand.Invocation invocation) {
             invocation.source().sendMessage(Component.text((String)"代理端运行时长：", (TextColor)NamedTextColor.GOLD).append((Component)Component.text((String)ProxyInfoModule.this.formatUptime(), (TextColor)NamedTextColor.GREEN)));
+        }
+
+        private void sendDoctor(SimpleCommand.Invocation invocation) {
+            CompatibilityReport report = ProxyInfoModule.this.plugin.compatibilityReport();
+            invocation.source().sendMessage(Component.text(
+                "StarX compatibility: " + report.overallStatus(), color(report.overallStatus())));
+            for (CompatibilityCheck check : report.checks()) {
+                invocation.source().sendMessage(Component.text(
+                    "  " + check.component() + ": " + check.status()
+                        + " detected=" + check.detectedVersion()
+                        + " supported=" + check.supportedRange(),
+                    color(check.status())));
+            }
+        }
+
+        private NamedTextColor color(CompatibilityStatus status) {
+            return switch (status) {
+                case SUPPORTED -> NamedTextColor.GREEN;
+                case UNKNOWN -> NamedTextColor.YELLOW;
+                case DEGRADED -> NamedTextColor.GOLD;
+                case UNSUPPORTED -> NamedTextColor.RED;
+            };
         }
 
         private void sendServers(SimpleCommand.Invocation invocation) {

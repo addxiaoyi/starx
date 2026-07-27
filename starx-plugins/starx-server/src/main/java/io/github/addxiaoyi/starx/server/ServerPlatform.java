@@ -7,6 +7,7 @@ public enum ServerPlatform {
   FOLIA(PlatformKind.FOLIA, "regionized");
 
   static final String FOLIA_SERVER_CLASS = "io.papermc.paper.threadedregions.RegionizedServer";
+  static final String PAPER_SERVER_CLASS = "io.papermc.paper.configuration.GlobalConfiguration";
 
   private final PlatformKind bridgeKind;
   private final String executionModel;
@@ -36,7 +37,13 @@ public enum ServerPlatform {
   }
 
   static ServerPlatform detect(ClassProbe probe) {
-    return probe.isPresent(FOLIA_SERVER_CLASS) ? FOLIA : PAPER;
+    if (probe.isPresent(FOLIA_SERVER_CLASS)) {
+      return FOLIA;
+    }
+    if (probe.isPresent(PAPER_SERVER_CLASS)) {
+      return PAPER;
+    }
+    throw new IllegalStateException("StarXServer requires Paper or Folia");
   }
 
   @FunctionalInterface

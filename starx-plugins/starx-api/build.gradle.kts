@@ -50,7 +50,7 @@ publishing {
     }
 }
 
-val verifyPublicApiJar by tasks.registering {
+val verifyPublicApiJar = tasks.register("verifyPublicApiJar") {
     group = "verification"
     description = "Verifies that the published StarX API JAR contains contracts only"
     dependsOn(tasks.jar)

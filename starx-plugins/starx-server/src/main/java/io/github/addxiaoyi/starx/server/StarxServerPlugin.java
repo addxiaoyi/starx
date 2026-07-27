@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.server;
 
 import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
+import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
 import io.github.addxiaoyi.starx.api.extension.StarxCapabilities;
 import io.github.addxiaoyi.starx.api.extension.StarxService;
 import io.github.addxiaoyi.starx.api.extension.StarxServiceEventTypes;
@@ -45,6 +46,7 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
   private BackendMaintenanceState maintenance;
   private String serverType;
   private DefaultStarxService extensionService;
+  private CompatibilityReport compatibilityReport;
 
   @Override
   public void onEnable() {
@@ -52,9 +54,10 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
     boolean firstBoot = !configFile.isFile();
     this.saveDefaultConfig();
     try {
+      BackendConfigSchemaUpgrader.upgrade(this, firstBoot);
       BackendAutoConfigurator.apply(this, firstBoot);
     } catch (java.io.IOException error) {
-      throw new IllegalStateException("StarX backend auto-configuration failed", error);
+      throw new IllegalStateException("StarX backend configuration initialization failed", error);
     }
     String nodeId = Objects.requireNonNullElse(
         this.getConfig().getString("node-id"), "backend").trim();
@@ -70,6 +73,11 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
     }
 
     ServerPlatform platform = ServerPlatform.detect();
+    try {
+      this.compatibilityReport = ServerCompatibility.evaluate(this, platform);
+    } catch (java.io.IOException error) {
+      throw new IllegalStateException("StarX compatibility report failed", error);
+    }
     this.maintenance = new BackendMaintenanceState(
         this.getConfig().getBoolean("network.maintenance", false),
         this::persistMaintenance);
@@ -90,7 +98,7 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
     PluginCommand command = Objects.requireNonNull(
         this.getCommand("starxserver"),
         "starxserver command is missing from plugin.yml");
-    command.setExecutor(new StarxServerCommand(this.session));
+    command.setExecutor(new StarxServerCommand(this.session, this.compatibilityReport));
     String accountApiKey = this.getConfig().getString("bridge.heartbeat.api-key", "");
     StarxAccountClient accountClient = accountApiKey == null || accountApiKey.isBlank()
         ? null
@@ -154,6 +162,7 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
     this.session = null;
     this.maintenance = null;
     this.serverType = null;
+    this.compatibilityReport = null;
     this.skinResolver = null;
     this.skinResolvers.clear();
     StarxPlaceholderExpansion currentPlaceholders = this.placeholders;

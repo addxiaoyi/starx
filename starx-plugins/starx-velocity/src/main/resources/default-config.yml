@@ -18,6 +18,12 @@ auto-config:
 # HTTP management key. A 384-bit random value is generated when blank.
 api-key: ""
 
+# Runtime and integration compatibility gate. UNKNOWN/DEGRADED continue with warnings;
+# UNSUPPORTED stops startup when strict-platform is true.
+compatibility:
+  strict-platform: true
+  report-file: "compatibility-report.json"
+
 # 默认只监听本机，避免管理接口直接暴露到公网。
 http:
   bind: "127.0.0.1"

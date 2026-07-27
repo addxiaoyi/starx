@@ -9,6 +9,8 @@ java {
     targetCompatibility = JavaVersion.VERSION_21
 }
 
+val serverPluginVersion = project.version.toString()
+
 dependencies {
     implementation(project(":starx-plugins:starx-api"))
     implementation(project(":starx-plugins:starx-website-sync"))
@@ -35,9 +37,9 @@ tasks.test {
 
 tasks.processResources {
     filteringCharset = "UTF-8"
-    inputs.property("version", project.version)
+    inputs.property("version", serverPluginVersion)
     filesMatching("plugin.yml") {
-        expand("version" to project.version)
+        expand("version" to serverPluginVersion)
     }
 }
 

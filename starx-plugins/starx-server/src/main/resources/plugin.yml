@@ -9,7 +9,7 @@ softdepend: [PlaceholderAPI, SkinsRestorer]
 commands:
   starxserver:
     description: Shows StarX backend bridge status
-    usage: /starxserver <status|capabilities|skin <uuid> <name>>
+    usage: /starxserver <status|doctor|capabilities|skin <uuid> <name>>
     aliases: [starxbackend]
     permission: starx.command.server
   sx:

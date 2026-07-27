@@ -11,20 +11,22 @@ val velocityJar = project(":starx-plugins:starx-velocity")
     .layout.buildDirectory.file("libs/starx-velocity.jar")
 val serverJar = project(":starx-plugins:starx-server")
     .layout.buildDirectory.file("libs/starx-server.jar")
+val universalVersion = project.version.toString()
 
-val universalAssemblySchema = 4
+val universalAssemblySchema = 5
 val canonicalServerApiEntries = listOf(
     "io/github/addxiaoyi/starx/api/bridge/BridgeMessage.class",
     "io/github/addxiaoyi/starx/api/bridge/BridgeProtocol.class",
     "io/github/addxiaoyi/starx/api/bridge/PlatformKind.class"
 )
 val canonicalServerApiPrefixes = listOf(
+    "io/github/addxiaoyi/starx/api/compat/",
     "io/github/addxiaoyi/starx/api/extension/",
     "io/github/addxiaoyi/starx/runtime/extension/",
     "io/github/addxiaoyi/starx/website/"
 )
 
-val universalJar by tasks.registering(Jar::class) {
+val universalJar = tasks.register<Jar>("universalJar") {
     group = "build"
     description = "Builds one plugin JAR accepted by Velocity, Paper, and Folia"
     dependsOn(
@@ -61,6 +63,7 @@ val universalJar by tasks.registering(Jar::class) {
             "META-INF/*.SF",
             "META-INF/versions/**/module-info.class",
             *canonicalServerApiEntries.toTypedArray(),
+            "io/github/addxiaoyi/starx/api/compat/**",
             "io/github/addxiaoyi/starx/api/extension/**",
             "io/github/addxiaoyi/starx/runtime/extension/**",
             "io/github/addxiaoyi/starx/website/**"
@@ -70,7 +73,7 @@ val universalJar by tasks.registering(Jar::class) {
     manifest {
         attributes(
             "Implementation-Title" to "StarX Universal Plugin",
-            "Implementation-Version" to project.version,
+            "Implementation-Version" to universalVersion,
             "StarX-Platforms" to "Velocity,Paper,Folia"
         )
     }
@@ -80,7 +83,7 @@ fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
     .digest(bytes)
     .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-val verifyUniversalJar by tasks.registering {
+val verifyUniversalJar = tasks.register("verifyUniversalJar") {
     group = "verification"
     description = "Verifies the universal plugin package and cross-platform class boundary"
     dependsOn(universalJar)
@@ -118,6 +121,7 @@ val verifyUniversalJar by tasks.registering {
             "io/github/addxiaoyi/starx/velocity/StarxVelocityPlugin.class",
             "io/github/addxiaoyi/starx/server/StarxServerPlugin.class",
             "io/github/addxiaoyi/starx/api/bridge/BridgeProtocol.class",
+            "io/github/addxiaoyi/starx/api/compat/CompatibilityReport.class",
             "io/github/addxiaoyi/starx/api/extension/StarxService.class",
             "io/github/addxiaoyi/starx/api/extension/StarxServiceProvider.class",
             "io/github/addxiaoyi/starx/runtime/extension/DefaultStarxService.class",
@@ -161,7 +165,7 @@ val verifyUniversalJar by tasks.registering {
         if (!serverDescriptor.contains("folia-supported: true")) {
             throw GradleException("Universal backend descriptor does not advertise Folia support")
         }
-        val expectedVersion = project.version.toString()
+        val expectedVersion = universalVersion
         if (!velocityDescriptor.contains("\"version\": \"$expectedVersion\"")) {
             throw GradleException("Velocity descriptor version does not match $expectedVersion")
         }
@@ -174,6 +178,7 @@ val verifyUniversalJar by tasks.registering {
 
         val canonicalChecks = listOf(
             "io/github/addxiaoyi/starx/api/bridge/BridgeProtocol.class",
+            "io/github/addxiaoyi/starx/api/compat/CompatibilityReport.class",
             "io/github/addxiaoyi/starx/api/extension/StarxService.class",
             "io/github/addxiaoyi/starx/runtime/extension/DefaultStarxService.class"
         )

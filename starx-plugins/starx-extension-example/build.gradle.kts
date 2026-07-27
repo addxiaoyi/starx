@@ -17,6 +17,7 @@ val velocityBuild606Compile = files(
 val velocityBuild606Runtime = files(
     rootProject.layout.projectDirectory.file("vendor/velocity/velocity-3.5.0-SNAPSHOT-606.jar")
 )
+val extensionVersion = project.version.toString()
 
 dependencies {
     compileOnly(project(":starx-plugins:starx-api"))
@@ -41,9 +42,9 @@ tasks.test {
 }
 
 tasks.processResources {
-    inputs.property("version", project.version)
+    inputs.property("version", extensionVersion)
     filesMatching(listOf("velocity-plugin.json", "plugin.yml")) {
-        expand("version" to project.version)
+        expand("version" to extensionVersion)
     }
 }
 
@@ -53,7 +54,7 @@ tasks.jar {
     isReproducibleFileOrder = true
 }
 
-val verifyExampleJar by tasks.registering {
+val verifyExampleJar = tasks.register("verifyExampleJar") {
     group = "verification"
     description = "Verifies the public-API-only three-platform example extension JAR"
     dependsOn(tasks.jar)

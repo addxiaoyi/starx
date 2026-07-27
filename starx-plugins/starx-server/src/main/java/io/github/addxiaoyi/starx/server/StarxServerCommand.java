@@ -1,5 +1,8 @@
 package io.github.addxiaoyi.starx.server;
 
+import io.github.addxiaoyi.starx.api.compat.CompatibilityCheck;
+import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
+import io.github.addxiaoyi.starx.api.compat.CompatibilityStatus;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -14,9 +17,11 @@ import org.bukkit.command.CommandSender;
 
 final class StarxServerCommand implements CommandExecutor {
   private final BackendBridgeSession session;
+  private final CompatibilityReport compatibility;
 
-  StarxServerCommand(BackendBridgeSession session) {
+  StarxServerCommand(BackendBridgeSession session, CompatibilityReport compatibility) {
     this.session = Objects.requireNonNull(session, "session");
+    this.compatibility = Objects.requireNonNull(compatibility, "compatibility");
   }
 
   @Override
@@ -37,12 +42,15 @@ final class StarxServerCommand implements CommandExecutor {
       }
       return true;
     }
+    if ("doctor".equals(action)) {
+      return this.sendDoctor(sender);
+    }
     if ("skin".equals(action)) {
       return this.sendSkinProbe(sender, label, args);
     }
     if (!"status".equals(action)) {
       sender.sendMessage(Component.text(
-          "用法：/" + label + " <status|capabilities|skin <uuid> <name>>",
+          "用法：/" + label + " <status|doctor|capabilities|skin <uuid> <name>>",
           NamedTextColor.RED));
       return true;
     }
@@ -64,6 +72,29 @@ final class StarxServerCommand implements CommandExecutor {
     sender.sendMessage(Component.text(
         "Last proxy contact: " + lastContact, NamedTextColor.GRAY));
     return true;
+  }
+
+  private boolean sendDoctor(CommandSender sender) {
+    sender.sendMessage(Component.text(
+        "StarX compatibility: " + this.compatibility.overallStatus(),
+        color(this.compatibility.overallStatus())));
+    for (CompatibilityCheck check : this.compatibility.checks()) {
+      sender.sendMessage(Component.text(
+          " - " + check.component() + ": " + check.status()
+              + " detected=" + check.detectedVersion()
+              + " supported=" + check.supportedRange(),
+          color(check.status())));
+    }
+    return true;
+  }
+
+  private static NamedTextColor color(CompatibilityStatus status) {
+    return switch (status) {
+      case SUPPORTED -> NamedTextColor.GREEN;
+      case UNKNOWN -> NamedTextColor.YELLOW;
+      case DEGRADED -> NamedTextColor.GOLD;
+      case UNSUPPORTED -> NamedTextColor.RED;
+    };
   }
 
   private boolean sendSkinProbe(CommandSender sender, String label, String[] args) {

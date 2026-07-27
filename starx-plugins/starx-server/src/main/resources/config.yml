@@ -1,3 +1,10 @@
+schema-version: 1
+
+# Runtime and third-party plugin compatibility reporting.
+compatibility:
+  strict-platform: true
+  report-file: "compatibility-report.json"
+
 # Safe first-boot and startup environment detection.
 # Disable a management switch when that section is maintained manually.
 auto-config:

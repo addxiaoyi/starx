@@ -1,9 +1,11 @@
 package io.github.addxiaoyi.starx.server;
 
+import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Proxy;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +34,9 @@ final class StarxServerCommandTest {
     List<String> messages = new ArrayList<>();
     CommandSender sender = sender(messages);
 
-    new StarxServerCommand(session).onCommand(
+    CompatibilityReport compatibility = new CompatibilityReport(
+        "test", "", System.getProperty("java.version", ""), Instant.EPOCH, List.of());
+    new StarxServerCommand(session, compatibility).onCommand(
         sender,
         null,
         "starxserver",
