@@ -51,15 +51,18 @@ final class WebsiteSkinProfile {
     }
   }
 
-  GameProfile.Property textureProperty(UUID uuid, String playerName) {
+  String textureValue(UUID uuid, String playerName) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("timestamp", System.currentTimeMillis());
     payload.put("profileId", profileId(uuid));
     payload.put("profileName", profileName(playerName));
     payload.put("textures", textures);
     String json = gson.toJson(payload);
-    String value = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
-    return new GameProfile.Property("textures", value, "");
+    return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+  }
+
+  GameProfile.Property textureProperty(UUID uuid, String playerName) {
+    return new GameProfile.Property("textures", textureValue(uuid, playerName), "");
   }
 
   List<GameProfile.Property> merge(

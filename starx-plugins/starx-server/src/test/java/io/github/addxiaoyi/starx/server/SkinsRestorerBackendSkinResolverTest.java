@@ -27,6 +27,20 @@ final class SkinsRestorerBackendSkinResolverTest {
   }
 
   @Test
+  void storesWebsiteTextureAndAssignsItToThePlayer() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    WritableApi api = new WritableApi();
+    SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(api);
+
+    assertTrue(resolver.store(uuid, "Alex", "website-value", "website-signature"));
+    BackendSkinProfile stored = resolver.find(uuid, "Alex").orElseThrow();
+
+    assertEquals("website-value", stored.value());
+    assertEquals("website-signature", stored.signature());
+    assertEquals("starx-4f06bce032d74d4dbb179f7e92ae8701", api.players.skinId);
+  }
+
+  @Test
   void logsReflectedApiFailureOnceWithoutBreakingBridge() {
     Logger logger = Logger.getLogger("skin-resolver-test-" + UUID.randomUUID());
     CapturingHandler logs = new CapturingHandler();
@@ -72,6 +86,54 @@ final class SkinsRestorerBackendSkinResolverTest {
     public String getSignature() {
       return "texture-signature";
     }
+  }
+
+  private static final class WritableApi {
+    private final WritablePlayerStorage players = new WritablePlayerStorage();
+    private final WritableSkinStorage skins = new WritableSkinStorage();
+
+    public WritablePlayerStorage getPlayerStorage() {
+      return this.players;
+    }
+
+    public WritableSkinStorage getSkinStorage() {
+      return this.skins;
+    }
+  }
+
+  private static final class WritablePlayerStorage {
+    private String skinId;
+
+    public Optional<String> getSkinIdOfPlayer(UUID uuid) {
+      return Optional.ofNullable(this.skinId);
+    }
+
+    public void setSkinIdOfPlayer(UUID uuid, String skinId) {
+      this.skinId = skinId;
+    }
+  }
+
+  private static final class WritableSkinStorage {
+    private String skinId;
+    private String value;
+    private String signature;
+
+    public void setSkinData(String skinId, String value, String signature) {
+      this.skinId = skinId;
+      this.value = value;
+      this.signature = signature;
+    }
+
+    public Optional<WritableSkinData> getSkinDataByIdentifier(String skinId) {
+      return this.skinId != null && this.skinId.equals(skinId)
+          ? Optional.of(new WritableSkinData(this.value, this.signature))
+          : Optional.empty();
+    }
+  }
+
+  private record WritableSkinData(String value, String signature) {
+    public String getValue() { return this.value; }
+    public String getSignature() { return this.signature; }
   }
 
   private record BrokenApi() {

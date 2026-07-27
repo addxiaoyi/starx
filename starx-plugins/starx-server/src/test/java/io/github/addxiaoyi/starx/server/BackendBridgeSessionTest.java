@@ -89,6 +89,42 @@ final class BackendBridgeSessionTest {
   }
 
   @Test
+  void persistsWebsiteSkinUpdateWithoutAnOnlinePlayer() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    AtomicReference<String> stored = new AtomicReference<>();
+    BackendSkinResolver resolver = new BackendSkinResolver() {
+      @Override
+      public Optional<BackendSkinProfile> find(UUID requestedUuid, String name) {
+        return Optional.empty();
+      }
+
+      @Override
+      public boolean store(
+          UUID requestedUuid,
+          String name,
+          String value,
+          String signature
+      ) {
+        stored.set(requestedUuid + ":" + name + ":" + value + ":" + signature);
+        return true;
+      }
+    };
+    BackendBridgeSession session = new BackendBridgeSession(
+        "lobby",
+        ServerPlatform.PAPER,
+        () -> Map.of("online", "0", "max", "100"),
+        resolver,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+
+    Optional<BridgeMessage> response = session.receive(BridgeMessage.skinUpdate(
+        "proxy", "skin-update-7", uuid.toString(), "Alex", "texture-value", ""));
+
+    assertTrue(response.isEmpty());
+    assertEquals(uuid + ":Alex:texture-value:", stored.get());
+    assertEquals(NOW, session.lastProxyContact().orElseThrow());
+  }
+
+  @Test
   void appliesMaintenanceConfigWithoutRequiringAPlayerCarrier() {
     AtomicReference<Boolean> maintenance = new AtomicReference<>();
     BackendBridgeSession session = new BackendBridgeSession(

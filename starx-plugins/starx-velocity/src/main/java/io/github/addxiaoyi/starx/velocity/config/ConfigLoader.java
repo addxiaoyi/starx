@@ -19,6 +19,7 @@ package io.github.addxiaoyi.starx.velocity.config;
 
 import io.github.addxiaoyi.starx.common.auth.uniauth.UniAuthConfig;
 import io.github.addxiaoyi.starx.common.config.DatabaseConfig;
+import io.github.addxiaoyi.starx.website.WebsiteSyncConfig;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -52,25 +53,26 @@ public final class ConfigLoader {
     Objects.requireNonNull(warningSink, "warningSink");
     ensureConfigExists(path);
 
-    Map<String, Object> root = readRoot(path);
+    Map<String, Object> currentRoot = readRoot(path);
+    Map<String, Object> sourceModules = child(currentRoot, "modules");
+    boolean sourceHasUworldRoot = currentRoot.containsKey("uworld");
+    boolean sourceHasLegacyRoot = currentRoot.containsKey("limbo");
+    boolean sourceHasLegacyModule = sourceModules.containsKey("starx.limbo");
+
+    Map<String, Object> defaultRoot = readDefaultRoot();
+    Map<String, Object> root = ConfigSchemaUpgrader.upgrade(
+        path, currentRoot, defaultRoot, warningSink).root();
     Map<String, Object> modulesNode = child(root, "modules");
     Map<String, StarxConfig.ModuleConfig> modules = parseModules(modulesNode);
     validateExclusiveModules(modules);
-    boolean hasUworldRoot = root.containsKey("uworld");
-    boolean hasLegacyRoot = root.containsKey("limbo");
-    boolean hasLegacyModule = modulesNode.containsKey("starx.limbo");
 
     warnForMigration(
-        hasUworldRoot,
-        hasLegacyRoot,
-        hasLegacyModule,
+        sourceHasUworldRoot,
+        sourceHasLegacyRoot,
+        sourceHasLegacyModule,
         warningSink);
 
-    UworldConfig uworld = hasUworldRoot
-        ? parseUworldConfig(child(root, "uworld"))
-        : hasLegacyRoot
-            ? parseLegacyUworldConfig(child(root, "limbo"))
-            : UworldConfig.defaults();
+    UworldConfig uworld = parseUworldConfig(child(root, "uworld"));
 
     String apiKey = stringValue(root, "api-key", "");
     Map<String, Object> httpNode = child(root, "http");
@@ -88,6 +90,8 @@ public final class ConfigLoader {
     StarxConfig.TotpConfig totp = parseTotpConfig(child(root, "totp"));
     StarxConfig.AuthConfig auth = parseAuthConfig(child(root, "auth"));
     StarxConfig.PlayerListConfig playerList = parsePlayerListConfig(child(root, "player-list"));
+    WebsiteSyncConfig websiteSync = VelocityWebsiteSyncConfigParser.parse(
+        child(root, "website-sync"));
 
     return new StarxConfig(
         apiKey,
@@ -100,6 +104,7 @@ public final class ConfigLoader {
         uworld,
         auth,
         playerList,
+        websiteSync,
         modules);
   }
 
@@ -123,15 +128,27 @@ public final class ConfigLoader {
   }
 
   private static Map<String, Object> readRoot(Path path) throws IOException {
-    Object loaded;
     try (InputStream input = Files.newInputStream(path)) {
-      loaded = new Yaml().load(input);
+      return readRoot(input, path.toString());
     }
+  }
+
+  private static Map<String, Object> readDefaultRoot() throws IOException {
+    try (InputStream input = ConfigLoader.class.getResourceAsStream(DEFAULT_CONFIG_RESOURCE)) {
+      if (input == null) {
+        throw new IOException("Missing classpath resource " + DEFAULT_CONFIG_RESOURCE);
+      }
+      return readRoot(input, DEFAULT_CONFIG_RESOURCE);
+    }
+  }
+
+  private static Map<String, Object> readRoot(InputStream input, String label) {
+    Object loaded = new Yaml().load(input);
     if (loaded == null) {
       return Map.of();
     }
     if (!(loaded instanceof Map<?, ?> map)) {
-      throw new IllegalArgumentException("Configuration root must be a mapping: " + path);
+      throw new IllegalArgumentException("Configuration root must be a mapping: " + label);
     }
     return stringKeyMap(map, "configuration root");
   }
@@ -237,34 +254,6 @@ public final class ConfigLoader {
             "uworld.transfer-timeout-seconds"),
         auth,
         diagnostics);
-  }
-
-  private static UworldConfig parseLegacyUworldConfig(Map<String, Object> node) {
-    UworldConfig.World world = new UworldConfig.World(
-        stringValue(node, "dimension", "OVERWORLD"),
-        decimal(node, "spawn-x", 0.5),
-        decimal(node, "spawn-y", 100.0),
-        decimal(node, "spawn-z", 0.5),
-        (float) decimal(node, "spawn-yaw", 0.0),
-        (float) decimal(node, "spawn-pitch", 0.0),
-        stringValue(node, "game-mode", "SURVIVAL"),
-        stringValue(node, "world-loader-type", "AUTO"),
-        stringValue(node, "world-file-name", "auth_world.schem"),
-        configInteger(node, "world-offset-x", 0, "limbo.world-offset-x"),
-        configInteger(node, "world-offset-y", 0, "limbo.world-offset-y"),
-        configInteger(node, "world-offset-z", 0, "limbo.world-offset-z"),
-        configInteger(node, "view-distance", 4, "limbo.view-distance"),
-        configInteger(node, "simulation-distance", 4, "limbo.simulation-distance"),
-        aliasInteger(node, "platform-radius", "platform-size", 5, "limbo"));
-    UworldConfig.Auth auth = new UworldConfig.Auth(
-        configInteger(node, "auth-timeout-seconds", 300, "limbo.auth-timeout-seconds"),
-        stringValue(node, "hub-server", "lobby"),
-        world);
-    return new UworldConfig(
-        configBoolean(node, "enabled", true, "limbo.enabled"),
-        15,
-        auth,
-        UworldConfig.Diagnostics.defaults());
   }
 
   private static void warnForMigration(

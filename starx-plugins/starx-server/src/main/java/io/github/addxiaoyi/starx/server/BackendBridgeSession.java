@@ -78,6 +78,7 @@ public final class BackendBridgeSession {
     if (!BridgeProtocol.PROXY_HELLO.equals(message.type())
         && !BridgeProtocol.STATUS_REQUEST.equals(message.type())
         && !BridgeProtocol.SKIN_REQUEST.equals(message.type())
+        && !BridgeProtocol.SKIN_UPDATE.equals(message.type())
         && !BridgeProtocol.CONFIG_SYNC.equals(message.type())) {
       return Optional.empty();
     }
@@ -88,6 +89,10 @@ public final class BackendBridgeSession {
     }
     if (BridgeProtocol.SKIN_REQUEST.equals(message.type())) {
       return Optional.of(this.skinResponse(message));
+    }
+    if (BridgeProtocol.SKIN_UPDATE.equals(message.type())) {
+      this.applySkinUpdate(message);
+      return Optional.empty();
     }
     if (BridgeProtocol.CONFIG_SYNC.equals(message.type())) {
       this.maintenanceConsumer.accept(parseMaintenance(message));
@@ -113,6 +118,22 @@ public final class BackendBridgeSession {
       throw new IllegalArgumentException("Config sync maintenance must be true or false");
     }
     return Boolean.parseBoolean(value);
+  }
+
+  private void applySkinUpdate(BridgeMessage message) {
+    UUID uuid;
+    try {
+      uuid = UUID.fromString(message.attributes().getOrDefault("uuid", ""));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("Skin update contains an invalid UUID", error);
+    }
+    String name = message.attributes().getOrDefault("name", "").trim();
+    String value = message.attributes().getOrDefault("value", "").trim();
+    String signature = message.attributes().getOrDefault("signature", "");
+    if (name.isEmpty() || value.isEmpty()) {
+      throw new IllegalArgumentException("Skin update name and value must not be blank");
+    }
+    this.skinResolver.store(uuid, name, value, signature);
   }
 
   private BridgeMessage skinResponse(BridgeMessage request) {

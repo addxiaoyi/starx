@@ -84,6 +84,10 @@ final class ConfigLoaderUworldTest {
   private static final String BOTH_CONFIG = NEW_CONFIG + "\n" + LEGACY_ROOT;
   private static final String BOTH_ROOTS_WARNING =
       "Both uworld and legacy limbo configuration are present; uworld takes precedence";
+  private static final String LEGACY_WARNING =
+      "Legacy limbo configuration is deprecated; migrate to uworld";
+  private static final String SCHEMA_WARNING_PREFIX =
+      "StarX configuration upgraded from schema ";
 
   @TempDir
   Path tempDir;
@@ -131,7 +135,8 @@ final class ConfigLoaderUworldTest {
         () -> assertEquals(121, uworld.diagnostics().timeoutSeconds()),
         () -> assertEquals(8, uworld.diagnostics().platformRadius()),
         () -> assertTrue(config.isModuleEnabled("starx.uworld")),
-        () -> assertTrue(warnings.isEmpty()));
+        () -> assertEquals(1, warnings.size()),
+        () -> assertTrue(warnings.getFirst().startsWith(SCHEMA_WARNING_PREFIX)));
   }
 
   @Test
@@ -166,7 +171,51 @@ final class ConfigLoaderUworldTest {
         () -> assertEquals(120, uworld.diagnostics().timeoutSeconds()),
         () -> assertEquals(5, uworld.diagnostics().platformRadius()),
         () -> assertTrue(config.isModuleEnabled("starx.uworld")),
-        () -> assertEquals(1, warnings.size()));
+        () -> assertEquals(2, warnings.size()),
+        () -> assertTrue(warnings.getFirst().startsWith(SCHEMA_WARNING_PREFIX)),
+        () -> assertEquals(LEGACY_WARNING, warnings.get(1)));
+  }
+
+  @Test
+  void legacyRootMigrationPersistsAcrossReloads() throws Exception {
+    Path file = this.tempDir.resolve("legacy-persisted.yml");
+    Files.writeString(file, LEGACY_CONFIG, StandardCharsets.UTF_8);
+
+    List<String> firstWarnings = new ArrayList<>();
+    StarxConfig first = ConfigLoader.load(file, firstWarnings::add);
+    Map<String, Object> migratedRoot =
+        mapping(new Yaml().load(Files.readString(file, StandardCharsets.UTF_8)));
+    Map<String, Object> migratedModules = mapping(migratedRoot.get("modules"));
+
+    assertAll(
+        () -> assertEquals("legacy-hub", first.uworld().auth().targetServer()),
+        () -> assertFalse(migratedRoot.containsKey("limbo")),
+        () -> assertTrue(migratedRoot.containsKey("uworld")),
+        () -> assertFalse(migratedModules.containsKey("starx.limbo")),
+        () -> assertTrue(migratedModules.containsKey("starx.uworld")));
+
+    List<String> secondWarnings = new ArrayList<>();
+    StarxConfig second = ConfigLoader.load(file, secondWarnings::add);
+
+    assertAll(
+        () -> assertEquals("legacy-hub", second.uworld().auth().targetServer()),
+        () -> assertTrue(second.isModuleEnabled("starx.uworld")),
+        () -> assertTrue(secondWarnings.isEmpty()));
+  }
+
+  @Test
+  void disabledLegacyModuleRemainsDisabledAfterMigrationAndReload() throws Exception {
+    String yaml = LEGACY_CONFIG.replace(
+        "starx.limbo:\n    enabled: true",
+        "starx.limbo:\n    enabled: false");
+    Path file = this.tempDir.resolve("legacy-disabled.yml");
+    Files.writeString(file, yaml, StandardCharsets.UTF_8);
+
+    StarxConfig first = ConfigLoader.load(file);
+    StarxConfig second = ConfigLoader.load(file);
+
+    assertFalse(first.isModuleEnabled("starx.uworld"));
+    assertFalse(second.isModuleEnabled("starx.uworld"));
   }
 
   @Test
@@ -176,7 +225,9 @@ final class ConfigLoaderUworldTest {
     StarxConfig config = load(BOTH_CONFIG, warnings);
 
     assertEquals("new-hub", config.uworld().auth().targetServer());
-    assertEquals(List.of(BOTH_ROOTS_WARNING), warnings);
+    assertEquals(2, warnings.size());
+    assertTrue(warnings.getFirst().startsWith(SCHEMA_WARNING_PREFIX));
+    assertEquals(BOTH_ROOTS_WARNING, warnings.get(1));
   }
 
   @Test
@@ -258,6 +309,8 @@ final class ConfigLoaderUworldTest {
   void hubDoesNotFallBackToLegacyLimboModule() throws Exception {
     String yaml = """
         modules:
+          starx.hub:
+            enabled: false
           starx.limbo:
             enabled: true
         """;
@@ -296,8 +349,8 @@ final class ConfigLoaderUworldTest {
         () -> assertEquals(5, defaults.diagnostics().platformRadius()),
         () -> assertEquals(
             Set.of(
-                "api-key", "http", "webhook", "database", "uniauth", "auth",
-                "player-list", "modules", "napcat", "totp", "uworld"),
+                "schema-version", "auto-config", "api-key", "http", "webhook", "website-sync", "database",
+                "uniauth", "auth", "player-list", "modules", "napcat", "totp", "uworld"),
             root.keySet()),
         () -> assertEquals(
             Set.of(

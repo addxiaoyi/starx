@@ -20,7 +20,8 @@ val canonicalServerApiEntries = listOf(
 )
 val canonicalServerApiPrefixes = listOf(
     "io/github/addxiaoyi/starx/api/extension/",
-    "io/github/addxiaoyi/starx/runtime/extension/"
+    "io/github/addxiaoyi/starx/runtime/extension/",
+    "io/github/addxiaoyi/starx/website/"
 )
 
 val universalJar by tasks.registering(Jar::class) {
@@ -61,7 +62,8 @@ val universalJar by tasks.registering(Jar::class) {
             "META-INF/versions/**/module-info.class",
             *canonicalServerApiEntries.toTypedArray(),
             "io/github/addxiaoyi/starx/api/extension/**",
-            "io/github/addxiaoyi/starx/runtime/extension/**"
+            "io/github/addxiaoyi/starx/runtime/extension/**",
+            "io/github/addxiaoyi/starx/website/**"
         )
     }
 
@@ -118,7 +120,8 @@ val verifyUniversalJar by tasks.registering {
             "io/github/addxiaoyi/starx/api/bridge/BridgeProtocol.class",
             "io/github/addxiaoyi/starx/api/extension/StarxService.class",
             "io/github/addxiaoyi/starx/api/extension/StarxServiceProvider.class",
-            "io/github/addxiaoyi/starx/runtime/extension/DefaultStarxService.class"
+            "io/github/addxiaoyi/starx/runtime/extension/DefaultStarxService.class",
+            "io/github/addxiaoyi/starx/website/WebsiteSyncRuntime.class"
         )
         val missing = required.filterNot(universalEntries::containsKey)
         if (missing.isNotEmpty()) {

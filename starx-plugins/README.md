@@ -1,6 +1,6 @@
 # StarX 多平台插件
 
-`starx-plugins` 产出两个部署物：代理使用 `starx-velocity.jar`，Paper/Folia 子服共同使用 `starx-server.jar`。两端通过 `starx:bridge` 协作；Uworld 仍只属于 Velocity JAR，不是第二个插件，也不部署到子服。
+`starx-plugins` 的唯一生产部署物是 `starx-universal.jar`。同一个文件分别放入 Velocity、Paper 或 Folia 的 `plugins/` 目录：Velocity 根据 `velocity-plugin.json` 启动代理模式，Paper/Folia 根据 `plugin.yml` 启动后端模式。两端通过 `starx:bridge` 协作；Uworld 只会在 Velocity 入口中初始化。
 
 完整职责、安装顺序、命令和功能矩阵见[多平台部署文档](../docs/STARX_PLATFORMS.md)。
 
@@ -16,7 +16,7 @@ Uworld 不是第二个插件，不依赖外置 LimboAPI，不支持热重载，�
 
 支持边界如下：
 
-- 唯一部署物为 `starx-velocity.jar`。
+- 唯一生产部署物为 `starx-universal.jar`；每个独立 JVM 各放置一份相同文件。
 - Uworld core 和同步的底层 Limbo 实现都内嵌在该 JAR 中。
 - 不安装外置 LimboAPI，不部署 `starx-limbo-api` 或 `starx-standalone-limbo` JAR。
 - 不支持插件热重载，升级和回滚都必须完整重启 Velocity。
@@ -51,8 +51,9 @@ Uworld 不是第二个插件，不依赖外置 LimboAPI，不支持热重载，�
 | `starx-limbo-api` | Uworld 公共契约和同步的底层协议 API | 否，内嵌 |
 | `starx-standalone-limbo` | 内置 Uworld factory 与底层实现 | 否，内嵌 |
 | `starx-api` | 共享 API 与 `starx:bridge` v1 二进制协议 | 否，分别内嵌 |
-| `starx-velocity` | Velocity 插件、Uworld 生命周期和网络编排所有者 | 是，生成 `starx-velocity.jar` |
-| `starx-server` | Paper/Folia 子服能力与状态适配器 | 是，生成 `starx-server.jar` |
+| `starx-velocity` | Velocity 入口、Uworld 生命周期和网络编排所有者 | 否，生成内部组装输入 `starx-velocity.jar` |
+| `starx-server` | Paper/Folia 后端入口、能力与状态适配器 | 否，生成内部组装输入 `starx-server.jar` |
+| `starx-universal` | 合并两个平台入口、双描述符和共享实现 | 是，生成唯一部署物 `starx-universal.jar` |
 
 ## 支持基线
 

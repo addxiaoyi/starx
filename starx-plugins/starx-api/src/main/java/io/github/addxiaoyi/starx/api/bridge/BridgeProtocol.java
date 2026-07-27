@@ -30,6 +30,8 @@ public final class BridgeProtocol {
   public static final String SKIN_REQUEST = "proxy.skin.request";
   /** Backend-to-proxy skin response type. */
   public static final String SKIN_RESPONSE = "backend.skin.response";
+  /** Proxy-to-backend persistent skin update type. */
+  public static final String SKIN_UPDATE = "proxy.skin.update";
   /** Proxy-to-backend configuration synchronization type. */
   public static final String CONFIG_SYNC = "proxy.config.sync";
   /** Current wire protocol version. */

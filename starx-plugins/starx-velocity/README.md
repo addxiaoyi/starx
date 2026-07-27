@@ -1,6 +1,6 @@
 # StarX Velocity
 
-StarX 的 Velocity 发行物是单个 `starx-velocity.jar`。Uworld 是该插件内置的受管虚拟世界运行时，当前用于 Auth 与 Diagnostics；Queue、Maintenance 和 Tutorial 已作为独立的内置代理模块接入，不依赖 Uworld，也不需要其他插件。它不是第二个 Velocity 插件，也不需要额外安装 LimboAPI。Paper/Folia 子服使用独立的 `starx-server.jar` 与代理互通，不能把后端 JAR 放进 Velocity。各消费者的权威状态见[插件产品边界](../README.md)。
+`starx-velocity` 是通用 StarX 插件的 Velocity 内部入口模块，不再作为生产发行物单独部署。生产环境把 `starx-universal.jar` 放入 Velocity；Velocity 插件加载器读取其中的 `velocity-plugin.json` 并只启动 `StarxVelocityPlugin`。Uworld、Auth、Queue、Maintenance 和 Tutorial 仅在该代理入口中初始化。各消费者的权威状态见[插件产品边界](../README.md)。
 
 ## 运行要求
 
@@ -13,7 +13,20 @@ StarX 的 Velocity 发行物是单个 `starx-velocity.jar`。Uworld 是该插件
 
 不要把外置 LimboAPI JAR 放进 `plugins/`。内置 Uworld 与外置 LimboAPI 同时加载会争用进程级协议和事件状态，属于不支持的部署方式。
 
-每个 Paper/Folia 子服安装 `starx-server.jar` 后，Velocity 默认启用 `starx.backend-bridge`。使用 `/starxbackend status [server]` 或 `/starxnodes` 查看节点报告；启用认证 heartbeat 后，状态与皮肤控制指令可在无玩家时经每服独立 HTTP mailbox 交换。`UNSEEN` 只表示尚无新鲜 bridge/heartbeat 报告，不能单独判定子服离线。完整职责和子服安装见[多平台部署文档](../../docs/STARX_PLATFORMS.md)。
+## 自动探测与配置生成
+
+默认启用 `auto-config`。Velocity 每次完整启动会读取已注册子服和已加载插件，并在受管字段中自动：
+
+- 为空的根级 `api-key` 生成 384 位随机值；
+- 按实际安装状态启用或关闭 LuckPerms、Floodgate、TAB、Plan 与 RakNet/Geyser 适配；
+- 仅在检测到 SkinsRestorer 时启用网站纹理采集；
+- 首次启动时从 `lobby`、`hub`、`main`、`survival` 或其他已注册子服中选择认证目标；
+- 将空值或 `auto` 的网站节点 ID 解析为稳定代理节点名；
+- 写出不含任何密钥的 `plugins/starx/auto-detection.json`。
+
+管理员的业务参数不会被任意猜测。把对应 `generate-*`、`manage-*` 或 `select-*` 开关设为 `false` 后，该部分完全由人工配置维护。
+
+每个 Paper/Folia 子服安装同一份 `starx-universal.jar` 后，Velocity 默认启用 `starx.backend-bridge`。使用 `/starxbackend status [server]` 或 `/starxnodes` 查看节点报告；启用认证 heartbeat 后，状态与皮肤控制指令可在无玩家时经每服独立 HTTP mailbox 交换。`UNSEEN` 只表示尚无新鲜 bridge/heartbeat 报告，不能单独判定子服离线。完整职责和子服安装见[多平台部署文档](../../docs/STARX_PLATFORMS.md)。
 
 最小 `velocity.toml` 后端配置如下：
 
@@ -34,7 +47,7 @@ lobby = "127.0.0.1:25566"
   :starx-plugins:starx-common:test `
   :starx-plugins:starx-standalone-limbo:test `
   :starx-plugins:starx-velocity:test `
-  :starx-plugins:starx-velocity:shadowJar `
+  :starx-plugins:starx-universal:check `
   --no-parallel --no-daemon --console=plain
 ```
 
@@ -46,17 +59,17 @@ Linux 或纯 ASCII 路径可以直接执行：
   :starx-plugins:starx-common:test \
   :starx-plugins:starx-standalone-limbo:test \
   :starx-plugins:starx-velocity:test \
-  :starx-plugins:starx-velocity:shadowJar \
+  :starx-plugins:starx-universal:check \
   --no-parallel --no-daemon --console=plain
 ```
 
-唯一可部署文件为：
+唯一生产部署文件为：
 
 ```text
-starx-plugins/starx-velocity/build/libs/starx-velocity.jar
+starx-plugins/starx-universal/build/libs/starx-universal.jar
 ```
 
-不要部署 `starx-standalone-limbo` 或 `starx-limbo-api` 的独立 JAR；它们是构建期模块，由 Shadow JAR 内嵌。
+`starx-velocity.jar`、`starx-server.jar`、`starx-standalone-limbo` 和 `starx-limbo-api` 都是内部构建或分端测试产物，不应单独复制到生产 `plugins/`。
 
 ## 生产部署命令
 
@@ -66,7 +79,7 @@ Windows 与 Linux 的完整部署、SQLite 一致性备份、候选/安装 SHA-2
 
 1. 停止 Velocity 进程。
 2. 将 `plugins/` 中任何外置 LimboAPI JAR 和旧的 StarX 重复 JAR 移动到时间戳备份，不要直接删除。
-3. 将 `starx-velocity.jar` 放入 `plugins/`。
+3. 将 `starx-universal.jar` 放入 Velocity 的 `plugins/`。
 4. 使用 Java 21 启动 Velocity。
 5. 检查 `plugins/starx/config.yml`。新安装会写出完整 `modules.starx.uworld` 和 `uworld` 配置。
 6. 检查 `plugins/starx/uworld/core.yml`。如果只存在旧的 `plugins/starx/limbo/core.yml`，运行时会继续读取旧路径并记录迁移警告，不会自动移动或覆盖文件。
@@ -104,7 +117,7 @@ Diagnostics 世界由 `/uworld test` 惰性创建，因此仅启动代理时不�
 
 升级前备份以下内容：
 
-- 当前 `starx-velocity.jar`。
+- 当前 `starx-universal.jar`。
 - `plugins/starx/config.yml`。
 - `plugins/starx/uworld/core.yml`；仍使用兼容路径时同时备份 `plugins/starx/limbo/core.yml`。
 - Uworld loader 引用的 `.schem`、`.schematic` 或 `.nbt` 文件。

@@ -17,6 +17,7 @@ import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -29,6 +30,7 @@ import io.github.addxiaoyi.starx.common.skin.SkinsRestorerSkinRepository;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.bridge.VelocityBackendBridge;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
+import io.github.addxiaoyi.starx.website.WebsiteSyncConfig;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -47,6 +49,7 @@ implements VelocityModule {
     private final Supplier<SkinRepository> repositoryFactory;
     private final String skinProfileBaseUrl;
     private SkinService skinService;
+    private SkinRepository writableSkinRepository;
     private WebsiteSkinRepository websiteRepository;
     private volatile boolean skinsRestorerAvailable;
     private final VelocityBackendBridge backendBridge;
@@ -73,7 +76,10 @@ implements VelocityModule {
         this.proxy = plugin.proxy();
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.backendBridge = Objects.requireNonNull(backendBridge, "backendBridge");
-        this.skinProfileBaseUrl = null;
+        WebsiteSyncConfig websiteSync = plugin.config().websiteSync();
+        this.skinProfileBaseUrl = websiteSync.enabled()
+            ? websiteSync.siteUrl().resolve("/api/public/skin-profile").toString()
+            : null;
         this.repositoryFactory = null;
         this.backendSkinCache = new BackendSkinFallbackCache(
             plugin.dataDirectory().resolve("cache").resolve("backend-skins"),
@@ -109,16 +115,21 @@ implements VelocityModule {
     @Override
     public void onEnable() {
         SkinRepository repository;
-        if (this.skinProfileBaseUrl != null && !this.skinProfileBaseUrl.isBlank()) {
-            this.websiteRepository = new WebsiteSkinRepository(this.skinProfileBaseUrl, Logger.getLogger(WebsiteSkinRepository.class.getName()));
-            repository = this.websiteRepository;
-            this.skinsRestorerAvailable = false;
-        } else if (this.repositoryFactory != null) {
+        if (this.repositoryFactory != null) {
             repository = this.repositoryFactory.get();
             this.skinsRestorerAvailable = this.proxy.getPluginManager().getPlugin("skinsrestorer").isPresent();
+        } else if (this.plugin == null && this.isWebsiteSkinAvailable()) {
+            repository = new NoopSkinRepository();
+            this.skinsRestorerAvailable = false;
         } else {
             this.skinsRestorerAvailable = this.proxy.getPluginManager().getPlugin("skinsrestorer").isPresent();
             repository = this.skinsRestorerAvailable ? new SkinsRestorerSkinRepository() : new NoopSkinRepository();
+        }
+        this.writableSkinRepository = repository;
+        if (this.isWebsiteSkinAvailable()) {
+            this.websiteRepository = new WebsiteSkinRepository(
+                this.skinProfileBaseUrl,
+                Logger.getLogger(WebsiteSkinRepository.class.getName()));
         }
         this.skinService = new SkinService(repository, this.eventBus);
         if (this.backendBridge != null) {
@@ -149,6 +160,7 @@ implements VelocityModule {
             this.backendBridge.onBackendReady((player, server) -> { });
         }
         this.skinService = null;
+        this.writableSkinRepository = null;
         this.websiteRepository = null;
         this.skinsRestorerAvailable = false;
     }
@@ -171,6 +183,9 @@ implements VelocityModule {
         if (this.skinService == null) {
             return;
         }
+        if (this.websiteRepository != null && this.applyWebsiteSkin(uuid, playerName)) {
+            return;
+        }
         Optional<Player> player = this.proxy.getPlayer(uuid);
         if (player.isPresent()) {
             this.refreshSkin(player.get(), null);
@@ -189,8 +204,8 @@ implements VelocityModule {
         if (this.skinService == null) {
             return;
         }
-        if (this.websiteRepository != null) {
-            this.applyWebsiteSkin(player);
+        if (this.websiteRepository != null
+            && this.applyWebsiteSkin(player.getUniqueId(), player.getUsername())) {
             return;
         }
         if (this.backendBridge != null
@@ -281,28 +296,56 @@ implements VelocityModule {
             LOGGER.warning("Website skin base URL is not configured, cannot refresh from website.");
             return false;
         }
-        Optional<Player> player = this.proxy.getPlayer(uuid);
-        if (this.websiteRepository == null || player.isEmpty()) {
+        if (this.websiteRepository == null) {
             return false;
         }
-        return this.applyWebsiteSkin(player.get());
+        return this.applyWebsiteSkin(uuid, playerName);
     }
 
-    private boolean applyWebsiteSkin(Player player) {
-        Optional<WebsiteSkinProfile> profile = this.websiteRepository.findProfile(player.getUsername());
+    private boolean applyWebsiteSkin(UUID uuid, String playerName) {
+        Optional<WebsiteSkinProfile> profile = this.websiteRepository.findProfile(playerName);
         if (profile.isEmpty()) {
-            LOGGER.warning("Website skin profile not found for " + player.getUsername());
+            LOGGER.fine("Website skin profile not found for " + playerName);
             return false;
         }
         WebsiteSkinProfile websiteProfile = profile.get();
+        String value = websiteProfile.textureValue(uuid, playerName);
+        boolean locallyPersisted = false;
+        SkinRepository writable = this.writableSkinRepository;
+        if (writable != null) {
+            try {
+                writable.setSkinData(uuid, value, "");
+                locallyPersisted = true;
+            } catch (RuntimeException error) {
+                LOGGER.warning("Website skin could not be persisted locally for " + playerName
+                    + ": " + error.getClass().getSimpleName());
+            }
+        }
+        int backendTargets = 0;
+        if (this.backendBridge != null) {
+            try {
+                backendTargets = this.backendBridge.broadcastSkinUpdate(
+                    uuid, playerName, value, "").size();
+            } catch (RuntimeException error) {
+                LOGGER.warning("Website skin could not be broadcast for " + playerName
+                    + ": " + error.getClass().getSimpleName());
+            }
+        }
+        Optional<Player> online = this.proxy.getPlayer(uuid);
+        if (online.isPresent()) {
+            Player player = online.get();
             player.setGameProfileProperties(websiteProfile.merge(
-                player.getUniqueId(),
-                player.getUsername(),
+                uuid,
+                playerName,
                 player.getGameProfileProperties()));
-            this.eventBus.publish("skin:updated", java.util.Map.of(
-                "uuid", player.getUniqueId().toString(), "provider", "website"));
             this.eventBus.publish("skin:applied", java.util.Map.of(
-                "uuid", player.getUniqueId().toString(), "provider", "website"));
+                "uuid", uuid.toString(), "provider", "website"));
+        }
+        this.eventBus.publish("skin:updated", java.util.Map.of(
+            "uuid", uuid.toString(),
+            "provider", "website",
+            "localPersisted", Boolean.toString(locallyPersisted),
+            "backendTargets", Integer.toString(backendTargets)));
         return true;
     }
 
@@ -322,6 +365,15 @@ implements VelocityModule {
     }
 
     private final class Listener {
+        @Subscribe
+        public void onPostLogin(PostLoginEvent event) {
+            if (SkinBridgeModule.this.websiteRepository != null) {
+                Player player = event.getPlayer();
+                SkinBridgeModule.this.applyWebsiteSkin(
+                    player.getUniqueId(), player.getUsername());
+            }
+        }
+
         @Subscribe
         public void onServerConnected(ServerConnectedEvent event) {
             if (!shouldRefreshAfterConnect(

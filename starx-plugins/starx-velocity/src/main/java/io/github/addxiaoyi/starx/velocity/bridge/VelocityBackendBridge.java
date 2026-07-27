@@ -264,6 +264,62 @@ public final class VelocityBackendBridge implements VelocityModule {
     return this.commandMailbox;
   }
 
+  public Map<String, DispatchResult> broadcastSkinUpdate(
+      UUID playerUuid,
+      String playerName,
+      String value,
+      String signature
+  ) {
+    Objects.requireNonNull(playerUuid, "playerUuid");
+    if (playerName == null || playerName.isBlank() || value == null || value.isBlank()) {
+      throw new IllegalArgumentException("Skin update name and value must not be blank");
+    }
+    Map<String, DispatchResult> results = new LinkedHashMap<>();
+    for (RegisteredServer server : this.plugin.proxy().getAllServers()) {
+      String serverName = server.getServerInfo().getName();
+      results.put(serverName, dispatchSkinUpdate(
+          server,
+          this.channel,
+          UUID.randomUUID().toString(),
+          playerUuid,
+          playerName,
+          value,
+          signature,
+          this.commandMailbox));
+    }
+    return Map.copyOf(results);
+  }
+
+  static DispatchResult dispatchSkinUpdate(
+      RegisteredServer server,
+      ChannelIdentifier channel,
+      String correlationId,
+      UUID playerUuid,
+      String playerName,
+      String value,
+      String signature,
+      BackendCommandMailbox mailbox
+  ) {
+    Objects.requireNonNull(server, "server");
+    Objects.requireNonNull(channel, "channel");
+    Objects.requireNonNull(playerUuid, "playerUuid");
+    Objects.requireNonNull(mailbox, "mailbox");
+    BridgeMessage update = BridgeMessage.skinUpdate(
+        "proxy",
+        correlationId,
+        playerUuid.toString(),
+        playerName,
+        value,
+        signature);
+    if (server.sendPluginMessage(channel, BridgeProtocol.encode(update))) {
+      return DispatchResult.SENT;
+    }
+    String serverName = server.getServerInfo().getName();
+    return mailbox.offer(serverName, update)
+        ? DispatchResult.QUEUED_HTTP
+        : DispatchResult.MAILBOX_FULL;
+  }
+
   public Map<String, DispatchResult> broadcastMaintenance(boolean enabled) {
     Map<String, DispatchResult> results = new LinkedHashMap<>();
     for (RegisteredServer server : this.plugin.proxy().getAllServers()) {

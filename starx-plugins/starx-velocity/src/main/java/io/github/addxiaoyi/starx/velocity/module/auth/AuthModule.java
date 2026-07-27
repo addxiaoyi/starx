@@ -248,33 +248,43 @@ public final class AuthModule implements VelocityModule {
     return "starx.auth";
   }
 
+  static boolean hasReadyUworld(UworldRuntime runtime) {
+    return runtime != null && runtime.isReady();
+  }
   @Override
   public void onEnable() {
     try {
       UworldRuntime runtime = this.uworld;
-      if (runtime == null || !runtime.isReady()) {
-        throw new IllegalStateException("Uworld must be ready before authentication starts");
-      }
       this.targetServer = this.plugin.proxy()
           .getServer(this.uworldConfig.auth().targetServer())
           .orElseThrow(() -> new IllegalStateException(
               "Authenticated target server is not registered: "
                   + this.uworldConfig.auth().targetServer()));
 
-      AuthUworldDefinition definition = new AuthUworldDefinition(
-          this.plugin.dataDirectory(),
-          this.uworldConfig.auth(),
-          this.logger::warning,
-          this.logger::info);
-      this.authWorld = runtime.createWorld("starx.auth", definition.spec(), definition.generator());
+      if (hasReadyUworld(runtime)) {
+        AuthUworldDefinition definition = new AuthUworldDefinition(
+            this.plugin.dataDirectory(),
+            this.uworldConfig.auth(),
+            this.logger::warning,
+            this.logger::info);
+        UworldRuntime readyRuntime = Objects.requireNonNull(runtime);
+        this.authWorld = readyRuntime.createWorld(
+            "starx.auth", definition.spec(), definition.generator());
+        this.logger.info("Authentication Uworld ready");
+      } else {
+        this.authWorld = null;
+        this.logger.warning(
+            "Authentication Uworld is unavailable; trusted identity auto-login remains enabled, "
+                + "while password authentication is unavailable");
+      }
+
       this.listener = new EventListener();
       this.plugin.proxy().getEventManager().register(this.plugin, this.listener);
       this.authCommands = new AuthCommands(this.plugin, this.authService);
       this.authCommands.onEnable();
-      this.logger.info("Authentication Uworld ready");
     } catch (RuntimeException error) {
       this.rollbackEnable(error);
-      throw new IllegalStateException("Unable to start Uworld authentication", error);
+      throw new IllegalStateException("Unable to start authentication", error);
     }
   }
 

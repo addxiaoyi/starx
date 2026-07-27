@@ -79,6 +79,30 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     }
   }
 
+  @Override
+  public boolean store(UUID uuid, String name, String value, String signature) {
+    if (!this.available() || this.skinStorage == null) {
+      return false;
+    }
+    if (uuid == null || name == null || name.isBlank() || value == null || value.isBlank()) {
+      throw new IllegalArgumentException("Skin update fields must not be blank");
+    }
+    try {
+      Optional<?> existing = invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
+      String skinId = existing.map(Object::toString)
+          .orElseGet(() -> "starx-" + uuid.toString().replace("-", ""));
+      invoke(this.skinStorage, "setSkinData", skinId, value, signature == null ? "" : signature);
+      invoke(this.playerStorage, "setSkinIdOfPlayer", uuid, skinId);
+      return true;
+    } catch (ReflectiveOperationException | ClassCastException | IllegalStateException error) {
+      if (this.failureLogged.compareAndSet(false, true)) {
+        this.logger.log(Level.WARNING,
+            "SkinsRestorer profile update failed; backend skin was not persisted", error);
+      }
+      return false;
+    }
+  }
+
   private Optional<?> tryCurrentApi(UUID uuid, String name) throws ReflectiveOperationException {
     try {
       return invokeOptional(this.playerStorage, "getSkinForPlayer", uuid, name);

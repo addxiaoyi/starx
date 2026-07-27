@@ -1,3 +1,14 @@
+# Safe first-boot and startup environment detection.
+# Disable a management switch when that section is maintained manually.
+auto-config:
+  enabled: true
+  infer-node-id: true
+  infer-server-type: true
+  discover-velocity: true
+  manage-heartbeat: true
+  # Contains platform/plugin/path metadata only; secrets are never written.
+  report-file: "auto-detection.json"
+
 # 建议与 Velocity velocity.toml 的 [servers] 键保持一致，便于识别子服。
 node-id: backend
 # 同一玩法的分片应使用相同类型，例如 survival-1 / survival-2 均填写 survival。

@@ -267,6 +267,28 @@ final class VelocityBackendBridgeContractTest {
   }
 
   @Test
+  void queuesPersistentSkinUpdateForBackendWithoutAPlayerCarrier() {
+    BackendCommandMailbox mailbox = new BackendCommandMailbox(4);
+    UUID uuid = UUID.fromString("a77946af-36d5-3cf0-beb8-5b784f8498ed");
+
+    VelocityBackendBridge.DispatchResult result = VelocityBackendBridge.dispatchSkinUpdate(
+        registeredServer(false),
+        MinecraftChannelIdentifier.from(BridgeProtocol.CHANNEL),
+        "skin-update-1",
+        uuid,
+        "SkinProbe",
+        "encoded-texture",
+        "",
+        mailbox);
+
+    assertEquals(VelocityBackendBridge.DispatchResult.QUEUED_HTTP, result);
+    BridgeMessage queued = mailbox.poll("factions").orElseThrow();
+    assertEquals(BridgeProtocol.SKIN_UPDATE, queued.type());
+    assertEquals(uuid.toString(), queued.attributes().get("uuid"));
+    assertEquals("encoded-texture", queued.attributes().get("value"));
+  }
+
+  @Test
   void queuesMaintenanceForEachBackendWithoutAPlayerCarrier() {
     BackendCommandMailbox mailbox = new BackendCommandMailbox(4);
 

@@ -21,6 +21,7 @@ val velocityBuild606Runtime = files(
 dependencies {
     // starx-common 必须 shadow 到 jar 中，否则运行时找不到类
     implementation(project(":starx-plugins:starx-common"))
+    implementation(project(":starx-plugins:starx-website-sync"))
     implementation(project(":starx-plugins:starx-extension-runtime"))
     implementation(project(":starx-plugins:starx-standalone-limbo"))
 

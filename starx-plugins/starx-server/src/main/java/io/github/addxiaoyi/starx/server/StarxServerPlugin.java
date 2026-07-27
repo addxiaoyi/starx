@@ -7,6 +7,7 @@ import io.github.addxiaoyi.starx.api.extension.StarxServiceEventTypes;
 import io.github.addxiaoyi.starx.api.extension.StarxServiceProvider;
 import io.github.addxiaoyi.starx.runtime.extension.DefaultStarxService;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.io.File;
 import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -47,7 +48,14 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
 
   @Override
   public void onEnable() {
+    File configFile = new File(this.getDataFolder(), "config.yml");
+    boolean firstBoot = !configFile.isFile();
     this.saveDefaultConfig();
+    try {
+      BackendAutoConfigurator.apply(this, firstBoot);
+    } catch (java.io.IOException error) {
+      throw new IllegalStateException("StarX backend auto-configuration failed", error);
+    }
     String nodeId = Objects.requireNonNullElse(
         this.getConfig().getString("node-id"), "backend").trim();
     if (!nodeId.matches(NODE_ID_PATTERN)) {

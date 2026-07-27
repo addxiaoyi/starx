@@ -1,10 +1,10 @@
 # StarX
 
-StarX is a Java 21 Minecraft network plugin for Velocity, Paper, and Folia. Version **0.2.0** introduces the universal three-platform JAR and the stable **StarX Extension API 1.0.0**.
+StarX is a Java 21 Minecraft network plugin for Velocity, Paper, and Folia. Version **0.3.0** introduces the universal three-platform JAR and the stable **StarX Extension API 1.0.0**.
 
 ## Downloads
 
-The GitHub Release publishes exactly one deployable file: `starx-universal-0.2.0.jar`. Copy the same file into each independent Velocity, Paper, or Folia instance's `plugins/` directory.
+The GitHub Release publishes exactly one deployable file: `starx-universal-0.3.0.jar`. Copy the same file into each independent Velocity, Paper, or Folia instance's `plugins/` directory.
 
 ## Build
 

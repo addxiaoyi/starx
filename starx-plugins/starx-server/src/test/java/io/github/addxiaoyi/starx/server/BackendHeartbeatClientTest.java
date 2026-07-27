@@ -64,4 +64,17 @@ final class BackendHeartbeatClientTest {
     assertTrue(BackendHeartbeatClient.decodeCommandResponse(200, "").isEmpty());
     assertTrue(BackendHeartbeatClient.decodeCommandResponse(204, "").isEmpty());
   }
+
+  @Test
+  void acceptsConfigurationSyncFromHeartbeatResponse() {
+    BridgeMessage command = BridgeMessage.maintenanceConfig(
+        "proxy", "config-1", true);
+
+    BridgeMessage decoded = BackendHeartbeatClient.decodeCommandResponse(
+        200, BackendHeartbeatClient.encodeBody(command)).orElseThrow();
+
+    assertEquals(BridgeProtocol.CONFIG_SYNC, decoded.type());
+    assertEquals("config-1", decoded.correlationId());
+    assertEquals("true", decoded.attributes().get("maintenance"));
+  }
 }

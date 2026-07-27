@@ -39,6 +39,21 @@ final class BridgeMessageTest {
   }
 
   @Test
+  void createsPersistentSkinUpdateWithoutRequiringASignature() {
+    BridgeMessage update = BridgeMessage.skinUpdate(
+        "proxy",
+        "skin-update-1",
+        "4f06bce0-32d7-4d4d-bb17-9f7e92ae8701",
+        "Alex",
+        "encoded-texture",
+        "");
+
+    assertEquals(BridgeProtocol.SKIN_UPDATE, update.type());
+    assertEquals("encoded-texture", update.attributes().get("value"));
+    assertEquals("", update.attributes().get("signature"));
+  }
+
+  @Test
   void acceptsChineseFieldsWithinUtf8Limits() {
     BridgeMessage message = message(
         "后端.状态",

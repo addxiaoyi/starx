@@ -42,6 +42,43 @@ final class AuthUworldAutoLoaderTest {
   }
 
   @Test
+  void autoLoaderUsesLitematicFileWhenPresent() throws Exception {
+    Files.createFile(this.dataDirectory.resolve("auth_world.litematic"));
+    UworldConfig.World defaults = UworldConfig.World.defaults();
+    UworldConfig.World world = new UworldConfig.World(
+        defaults.dimension(),
+        defaults.spawnX(),
+        defaults.spawnY(),
+        defaults.spawnZ(),
+        defaults.spawnYaw(),
+        defaults.spawnPitch(),
+        defaults.gameMode(),
+        "AUTO",
+        "auth_world.litematic",
+        defaults.offsetX(),
+        defaults.offsetY(),
+        defaults.offsetZ(),
+        defaults.viewDistance(),
+        defaults.simulationDistance(),
+        defaults.platformRadius());
+    Probe editor = new Probe();
+    List<String> info = new ArrayList<>();
+    AuthUworldDefinition definition = new AuthUworldDefinition(
+        this.dataDirectory,
+        new UworldConfig.Auth(300, "lobby", world),
+        ignored -> { },
+        info::add);
+
+    definition.generator().generate(editor);
+
+    assertEquals(List.of(BuiltInWorldFileType.LITEMATIC), editor.loads);
+    assertTrue(editor.blocks.isEmpty());
+    assertEquals(
+        List.of("Loaded Uworld authentication world from LITEMATIC: auth_world.litematic"),
+        info);
+  }
+
+  @Test
   void autoLoaderFallsBackToElevenByElevenPlatformWhenFileIsAbsent() throws Exception {
     Probe editor = new Probe();
     AuthUworldDefinition definition = new AuthUworldDefinition(

@@ -115,6 +115,37 @@ public record BridgeMessage(
   }
 
   /**
+   * Creates a persistent skin update for one backend server.
+   *
+   * @param nodeId requesting proxy node identifier
+   * @param correlationId update correlation identifier
+   * @param uuid player UUID text
+   * @param name player name
+   * @param value encoded Minecraft textures property
+   * @param signature textures property signature, possibly empty
+   * @return skin update message
+   */
+  public static BridgeMessage skinUpdate(
+      String nodeId,
+      String correlationId,
+      String uuid,
+      String name,
+      String value,
+      String signature
+  ) {
+    return new BridgeMessage(
+        BridgeProtocol.SKIN_UPDATE,
+        nodeId,
+        PlatformKind.VELOCITY,
+        correlationId,
+        Map.of(
+            "uuid", requireText(uuid, "uuid"),
+            "name", requireText(name, "name"),
+            "value", requireText(value, "value"),
+            "signature", signature == null ? "" : signature));
+  }
+
+  /**
    * Creates a signed-skin lookup response.
    *
    * @param nodeId backend node identifier

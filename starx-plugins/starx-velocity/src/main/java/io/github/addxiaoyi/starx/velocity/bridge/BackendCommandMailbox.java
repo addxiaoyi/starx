@@ -104,6 +104,7 @@ public final class BackendCommandMailbox {
     boolean supported = BridgeProtocol.PROXY_HELLO.equals(command.type())
         || BridgeProtocol.STATUS_REQUEST.equals(command.type())
         || BridgeProtocol.SKIN_REQUEST.equals(command.type())
+        || BridgeProtocol.SKIN_UPDATE.equals(command.type())
         || BridgeProtocol.CONFIG_SYNC.equals(command.type());
     if (command.platform() != PlatformKind.VELOCITY || !supported) {
       throw new IllegalArgumentException(

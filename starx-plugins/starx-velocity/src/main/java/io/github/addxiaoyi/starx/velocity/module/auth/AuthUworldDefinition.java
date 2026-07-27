@@ -123,8 +123,11 @@ final class AuthUworldDefinition {
     if (name.endsWith(".nbt")) {
       return BuiltInWorldFileType.STRUCTURE;
     }
+    if (name.endsWith(".litematic")) {
+      return BuiltInWorldFileType.LITEMATIC;
+    }
     throw new IllegalArgumentException(
-        "AUTO Uworld loader only supports .schem, .schematic, or .nbt: " + file);
+        "AUTO Uworld loader only supports .schem, .schematic, .nbt, or .litematic: " + file);
   }
 
   private static void generatePlatform(UworldWorldEditor editor, UworldConfig.World world) {

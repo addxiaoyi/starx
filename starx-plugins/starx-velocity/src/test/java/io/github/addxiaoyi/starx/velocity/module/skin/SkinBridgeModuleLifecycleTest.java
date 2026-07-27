@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -23,6 +24,17 @@ final class SkinBridgeModuleLifecycleTest {
         ServerConnectedEvent.class);
 
     assertNotNull(connected.getAnnotation(Subscribe.class));
+  }
+
+  @Test
+  void appliesWebsiteSkinDuringPostLoginBeforeBackendConnection() throws Exception {
+    Class<?> listener = Arrays.stream(SkinBridgeModule.class.getDeclaredClasses())
+        .filter(type -> type.getSimpleName().equals("Listener"))
+        .findFirst()
+        .orElseThrow();
+    Method postLogin = listener.getDeclaredMethod("onPostLogin", PostLoginEvent.class);
+
+    assertNotNull(postLogin.getAnnotation(Subscribe.class));
   }
 
   @Test

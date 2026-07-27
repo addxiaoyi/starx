@@ -1,8 +1,21 @@
+schema-version: 3
+
 # StarX Velocity 默认配置
 # 只需先修改 uworld.auth.target-server；其余项目都有可直接运行的安全默认值。
 # 修改后必须完整重启 Velocity，不支持热重载。
 
 # HTTP 管理接口密钥。生产环境必须设置高强度随机值。
+# Automatic environment detection. Disable individual manage switches for manual ownership.
+auto-config:
+  enabled: true
+  generate-api-key: true
+  manage-optional-integrations: true
+  manage-texture-source: true
+  select-auth-target: true
+  # Contains platform/plugin/server metadata only; secrets are never written.
+  report-file: "auto-detection.json"
+
+# HTTP management key. A 384-bit random value is generated when blank.
 api-key: ""
 
 # 默认只监听本机，避免管理接口直接暴露到公网。
@@ -15,6 +28,26 @@ http:
 webhook:
   url: ""
   secret: ""
+
+# 将本节点状态和纹理增量同步到 StarMC 网站。
+website-sync:
+  enabled: false
+  site-url: "https://star-web.top"
+  node-id: "proxy-1"
+  platform: "velocity"
+  # 仅首次注册填写；成功后插件会原子清空并写入 node-token。
+  bootstrap-token: ""
+  # 由插件自动管理。不会出现在日志、Placeholder 或状态命令中。
+  node-token: ""
+  heartbeat:
+    interval-seconds: 15
+    connect-timeout-ms: 3000
+    request-timeout-ms: 8000
+  textures:
+    enabled: true
+    source: "skinsrestorer"
+    manifest-interval-seconds: 300
+    batch-size: 500
 
 database:
   # 推荐使用内置 SQLite；无需额外数据库插件。

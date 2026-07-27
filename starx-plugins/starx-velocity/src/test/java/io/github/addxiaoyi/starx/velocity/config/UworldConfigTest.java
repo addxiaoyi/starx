@@ -12,7 +12,7 @@ final class UworldConfigTest {
 
   @Test
   void normalizesNamesAndAcceptsEverySupportedLoader() {
-    List<String> loaders = List.of("VOID", "SCHEMATIC", "WORLDEDIT_SCHEM", "STRUCTURE");
+    List<String> loaders = List.of("VOID", "SCHEMATIC", "WORLDEDIT_SCHEM", "STRUCTURE", "LITEMATIC");
 
     assertAll(loaders.stream().map(loader -> () -> {
       UworldConfig.World world = validWorld("  " + loader.toLowerCase() + "  ");

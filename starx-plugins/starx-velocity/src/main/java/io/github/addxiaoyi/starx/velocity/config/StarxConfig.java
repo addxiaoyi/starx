@@ -5,6 +5,8 @@ package io.github.addxiaoyi.starx.velocity.config;
 
 import io.github.addxiaoyi.starx.common.auth.uniauth.UniAuthConfig;
 import io.github.addxiaoyi.starx.common.config.DatabaseConfig;
+import io.github.addxiaoyi.starx.website.WebsitePlatform;
+import io.github.addxiaoyi.starx.website.WebsiteSyncConfig;
 import java.util.Map;
 import java.util.Objects;
 
@@ -19,6 +21,7 @@ public final class StarxConfig {
     private final UworldConfig uworld;
     private final AuthConfig auth;
     private final PlayerListConfig playerList;
+    private final WebsiteSyncConfig websiteSync;
     private final Map<String, ModuleConfig> modules;
 
     public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, Map<String, ModuleConfig> modules) {
@@ -27,6 +30,11 @@ public final class StarxConfig {
     }
 
     public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, PlayerListConfig playerList, Map<String, ModuleConfig> modules) {
+        this(apiKey, http, webhook, database, uniauth, napcat, totp, uworld, auth,
+                playerList, WebsiteSyncConfig.disabled("proxy-1", WebsitePlatform.VELOCITY), modules);
+    }
+
+    public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, PlayerListConfig playerList, WebsiteSyncConfig websiteSync, Map<String, ModuleConfig> modules) {
         this.apiKey = apiKey;
         this.http = Objects.requireNonNull(http, "http");
         this.webhook = webhook;
@@ -37,6 +45,9 @@ public final class StarxConfig {
         this.uworld = uworld == null ? UworldConfig.defaults() : uworld;
         this.auth = auth == null ? AuthConfig.defaults() : auth;
         this.playerList = playerList == null ? PlayerListConfig.defaults() : playerList;
+        this.websiteSync = websiteSync == null
+                ? WebsiteSyncConfig.disabled("proxy-1", WebsitePlatform.VELOCITY)
+                : websiteSync;
         this.modules = modules == null ? Map.of() : Map.copyOf(modules);
     }
 
@@ -78,6 +89,10 @@ public final class StarxConfig {
 
     public PlayerListConfig playerList() {
         return this.playerList;
+    }
+
+    public WebsiteSyncConfig websiteSync() {
+        return this.websiteSync;
     }
 
     public Map<String, ModuleConfig> modules() {

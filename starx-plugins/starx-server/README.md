@@ -1,12 +1,12 @@
 # StarX Server
 
-`starx-server.jar` 是 StarX 的 Paper/Folia 子服适配器。同一个 JAR 可安装在 Paper 和 Folia；它负责报告本地能力与状态，不复制 Velocity 的认证、Uworld、路由或全局队列。
+`starx-server` 是 `starx-universal.jar` 内部的 Paper/Folia 后端入口模块。Paper/Folia 加载器读取通用 JAR 中的 `plugin.yml` 并只启动 `StarxServerPlugin`；它负责报告本地能力与状态，不初始化 Velocity 的认证、Uworld、路由或全局队列。
 
 ## 要求
 
 - Java 21
 - Paper/Folia 1.21.x；编译 API 基线为 Paper 1.21.11
-- 前置 Velocity 已安装同版本 `starx-velocity.jar`
+- 前置 Velocity 已安装完全相同版本和 SHA-256 的 `starx-universal.jar`
 - Velocity modern forwarding 与子服 secret 配置正确
 
 ## 构建与安装
@@ -20,7 +20,7 @@
   --no-daemon --console=plain
 ```
 
-将 `starx-plugins/starx-server/build/libs/starx-server.jar` 放入每个 Paper/Folia 子服的 `plugins/`，完整重启后编辑：
+生产部署请先运行 `npm run plugin:universal`，再将 `starx-plugins/starx-universal/build/libs/starx-universal.jar` 放入每个 Paper/Folia 子服的 `plugins/`。本模块的 `starx-server.jar` 仅作为通用包的内部组装输入和分端测试产物。完整重启后编辑：
 
 ```yaml
 # plugins/StarXServer/config.yml
@@ -34,6 +34,19 @@ bridge:
 ```
 
 `node-id` 建议与 Velocity `[servers]` 中的键一致。允许字符为字母、数字、点、下划线和短横线，长度 1-64；无效值会让插件在启动阶段明确失败。
+
+## 自动探测与配置生成
+
+默认启用 `auto-config`。Paper/Folia 首次启动时会自动识别平台、插件目录和服务器根目录，并：
+
+- 从 `STARX_NODE_ID` 或服务器目录名生成稳定 `node-id`；
+- 由节点名推断 `server-type`；
+- 在标准同机布局的相邻 `velocity/plugins/starx/config.yml` 中发现 Velocity；
+- 读取 Velocity 的监听端口和根级 API 密钥，自动配置空服 heartbeat；
+- 找不到有效凭据时安全关闭空服 heartbeat，不影响插件消息通道；
+- 写出不包含 API 密钥的 `plugins/StarXServer/auto-detection.json`。
+
+非标准目录可通过 JVM 参数 `-Dstarx.velocity.config=<path>` 或环境变量 `STARX_VELOCITY_CONFIG` 指定。关闭 `infer-*`、`discover-velocity` 或 `manage-heartbeat` 后，相应字段保持人工管理。
 
 ## 平台差异
 

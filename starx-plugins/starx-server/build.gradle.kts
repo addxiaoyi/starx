@@ -11,6 +11,7 @@ java {
 
 dependencies {
     implementation(project(":starx-plugins:starx-api"))
+    implementation(project(":starx-plugins:starx-website-sync"))
     implementation(project(":starx-plugins:starx-extension-runtime"))
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("com.google.zxing:core:3.5.3")

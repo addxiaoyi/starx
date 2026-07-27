@@ -4,7 +4,7 @@
 
 ## 部署边界
 
-- 生产环境只部署 `starx-velocity.jar`。
+- 生产环境只部署 `starx-universal.jar`；Uworld 类虽然包含在通用包中，但只会由 Velocity 入口加载。
 - `starx-standalone-limbo`、`starx-limbo-api` 和 Uworld 都不是第二个插件。
 - `starx-standalone-limbo` 是内嵌构建库，不能把它的 JAR 复制到 Velocity `plugins/`。
 - 禁止同时安装外置 LimboAPI。

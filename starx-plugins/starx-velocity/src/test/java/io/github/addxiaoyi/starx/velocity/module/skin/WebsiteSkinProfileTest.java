@@ -33,7 +33,7 @@ final class WebsiteSkinProfileTest {
 
     WebsiteSkinProfile profile = WebsiteSkinProfile.parse(body, GSON).orElseThrow();
     String decoded = new String(
-        Base64.getDecoder().decode(profile.textureProperty(uuid, "Alex").getValue()),
+        Base64.getDecoder().decode(profile.textureValue(uuid, "Alex")),
         StandardCharsets.UTF_8);
     JsonObject textures = GSON.fromJson(decoded, JsonObject.class).getAsJsonObject("textures");
 

@@ -10,6 +10,7 @@ rootProject.name = "starx"
 include("starx-plugins:starx-api")
 include("starx-plugins:starx-extension-runtime")
 include("starx-plugins:starx-common")
+include("starx-plugins:starx-website-sync")
 include("starx-plugins:starx-limbo-api")
 include("starx-plugins:starx-standalone-limbo")
 include("starx-plugins:starx-velocity")

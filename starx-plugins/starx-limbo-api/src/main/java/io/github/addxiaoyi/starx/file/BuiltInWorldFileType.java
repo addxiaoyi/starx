@@ -10,5 +10,6 @@ package io.github.addxiaoyi.starx.file;
 public enum BuiltInWorldFileType {
   SCHEMATIC,
   WORLDEDIT_SCHEM,
-  STRUCTURE
+  STRUCTURE,
+  LITEMATIC
 }

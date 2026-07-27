@@ -91,7 +91,8 @@ public record UworldConfig(
         "VOID",
         "SCHEMATIC",
         "WORLDEDIT_SCHEM",
-        "STRUCTURE");
+        "STRUCTURE",
+        "LITEMATIC");
 
     public World {
       dimension = normalizeName(dimension, "dimension");
@@ -101,7 +102,7 @@ public record UworldConfig(
 
       if (!LOADERS.contains(loaderType)) {
         throw new IllegalArgumentException(
-            "loaderType must be AUTO, VOID, SCHEMATIC, WORLDEDIT_SCHEM, or STRUCTURE");
+            "loaderType must be AUTO, VOID, SCHEMATIC, WORLDEDIT_SCHEM, STRUCTURE, or LITEMATIC");
       }
       requireFinite(spawnX, "spawnX");
       requireFinite(spawnY, "spawnY");

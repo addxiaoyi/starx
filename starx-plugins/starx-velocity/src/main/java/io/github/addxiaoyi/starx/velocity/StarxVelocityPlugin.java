@@ -50,6 +50,7 @@ import io.github.addxiaoyi.starx.uworld.UworldRuntime;
 import io.github.addxiaoyi.starx.velocity.bridge.VelocityBackendBridge;
 import io.github.addxiaoyi.starx.velocity.config.ConfigLoader;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
+import io.github.addxiaoyi.starx.velocity.config.VelocityAutoConfigurator;
 import io.github.addxiaoyi.starx.velocity.database.DatabaseManager;
 import io.github.addxiaoyi.starx.velocity.event.VelocityEventBus;
 import io.github.addxiaoyi.starx.velocity.operations.IncidentTimeline;
@@ -109,6 +110,8 @@ import io.github.addxiaoyi.starx.velocity.module.uworld.UworldModule;
 import io.github.addxiaoyi.starx.velocity.module.vote.VoteModule;
 import io.github.addxiaoyi.starx.velocity.module.welcome.WelcomeModule;
 import io.github.addxiaoyi.starx.velocity.security.HmacWebhookSigner;
+import io.github.addxiaoyi.starx.velocity.website.VelocityWebsiteSync;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Clock;
@@ -204,7 +207,14 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
 
     private void initialize() throws Exception {
         this.logger.info("StarX Velocity \u521d\u59cb\u5316\u4e2d...");
-        this.config = ConfigLoader.load(this.dataDirectory.resolve("config.yml"));
+        Path configFile = this.dataDirectory.resolve("config.yml");
+        boolean firstBoot = Files.notExists(configFile);
+        this.config = ConfigLoader.load(configFile, this.logger::warning);
+        VelocityAutoConfigurator.Result autoConfig = VelocityAutoConfigurator.apply(
+            configFile, this.proxy, firstBoot, this.logger::info);
+        if (autoConfig.changed()) {
+            this.config = ConfigLoader.load(configFile, this.logger::warning);
+        }
         this.eventBus = new VelocityEventBus();
         this.lifecycle.own("event bus", this.eventBus::close);
         this.extensionService = new DefaultStarxService(
@@ -384,6 +394,9 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             MaintenanceModule.Config.defaultConfig(),
             new MaintenanceStateService(new JdbcRuntimeSettingRepository(defaultDataSource)));
         this.moduleManager.register(maintenanceModule);
+        VelocityWebsiteSync websiteSync = new VelocityWebsiteSync(
+            this, backendBridge, maintenanceModule, userRepository);
+        this.lifecycle.own("website synchronization", websiteSync::close);
         this.moduleManager.register(new ChatModule(this, messageBridge, ChatModule.Config.defaultConfig()));
         this.moduleManager.register(new RedirectModule(this, RedirectModule.Config.defaultConfig()));
         QueueModule queueModule = new QueueModule(
@@ -459,6 +472,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         });
         this.lifecycle.own("webhook publisher", webhookPublisher::close);
         this.moduleManager.enableAll();
+        websiteSync.start();
         authFallback.release();
         this.httpApiServer.start();
         this.logger.info("StarX Velocity \u521d\u59cb\u5316\u5b8c\u6210");
