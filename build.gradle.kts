@@ -8,7 +8,7 @@ plugins {
 
 allprojects {
     group = "io.github.addxiaoyi.starx"
-    version = "0.3.0"
+    version = "0.3.1"
 
     repositories {
         mavenCentral()
@@ -141,6 +141,92 @@ val prepareVelocityBuild606Compile = tasks.register<org.gradle.api.tasks.bundlin
     destinationDirectory.set(layout.buildDirectory.dir("velocity-build606"))
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
+}
+
+val releaseVersion = version.toString()
+val releaseReadme = layout.projectDirectory.file("README.md")
+val releaseChangelog = layout.projectDirectory.file("CHANGELOG.md")
+val releaseNotes = layout.projectDirectory.file("docs/releases/$releaseVersion.md")
+val extensionCompatibilityPolicy = layout.projectDirectory.file(
+    "docs/EXTENSION_COMPATIBILITY_POLICY.md"
+)
+val releaseWorkflow = layout.projectDirectory.file(".github/workflows/release.yml")
+val requiredReadmeDocumentation = listOf(
+    "docs/STARX_PLATFORMS.md",
+    "docs/COMPATIBILITY.md",
+    "docs/UWORLD_CONFIGURATION.md",
+    "docs/UWORLD_ACCEPTANCE.md",
+    "docs/UWORLD_ENVIRONMENT.md",
+    "starx-plugins/starx-universal/README.md"
+).map(layout.projectDirectory::file)
+
+val verifyReleaseMetadata = tasks.register("verifyReleaseMetadata") {
+    group = "verification"
+    description = "Verifies release documentation and assets match the project version"
+    inputs.files(
+        releaseReadme,
+        releaseChangelog,
+        releaseNotes,
+        extensionCompatibilityPolicy,
+        releaseWorkflow,
+        requiredReadmeDocumentation
+    )
+    inputs.property("releaseVersion", releaseVersion)
+
+    doLast {
+        fun requireFile(file: java.io.File, label: String): String {
+            if (!file.isFile) {
+                throw GradleException("Missing $label: ${file.path}")
+            }
+            return file.readText(Charsets.UTF_8)
+        }
+
+        fun requireMarkers(file: java.io.File, label: String, markers: List<String>) {
+            val content = requireFile(file, label)
+            val missing = markers.filterNot(content::contains)
+            if (missing.isNotEmpty()) {
+                throw GradleException("$label is missing release markers: $missing")
+            }
+        }
+
+        requireMarkers(
+            releaseReadme.asFile,
+            "README.md",
+            listOf(
+                "当前插件版本：**$releaseVersion**",
+                "starx-universal-$releaseVersion.jar",
+                "release-manifest.json",
+                "AUTOMATED_VERIFIED"
+            )
+        )
+        requireMarkers(
+            releaseChangelog.asFile,
+            "CHANGELOG.md",
+            listOf("## [$releaseVersion]")
+        )
+        requireMarkers(
+            releaseNotes.asFile,
+            "release notes",
+            listOf("# StarX $releaseVersion", "starx-universal-$releaseVersion.jar")
+        )
+        requireMarkers(
+            extensionCompatibilityPolicy.asFile,
+            "extension compatibility policy",
+            listOf("插件实现当前为 `$releaseVersion`", "公共扩展 API")
+        )
+        requireMarkers(
+            releaseWorkflow.asFile,
+            "release workflow",
+            listOf("release-manifest.json", "docs/releases/", "SHA256SUMS")
+        )
+        for (documentation in requiredReadmeDocumentation) {
+            requireFile(documentation.asFile, "README documentation target")
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyReleaseMetadata)
 }
 
 subprojects {

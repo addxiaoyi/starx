@@ -11,7 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v6
@@ -32,7 +32,11 @@ jobs:
           version="$(sed -n 's/^[[:space:]]*version = "\([^"]*\)"/\1/p' build.gradle.kts | head -n 1)"
           test -n "$version"
           test "v$version" = "$GITHUB_REF_NAME"
+          notes="docs/releases/$version.md"
+          test -s "$notes"
+          grep -Fq "# StarX $version" "$notes"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
 
       - name: Run complete release verification
         run: |
@@ -40,12 +44,43 @@ jobs:
           ./gradlew clean check :starx-plugins:starx-universal:check --warning-mode all --no-daemon --console=plain --non-interactive
 
       - name: Prepare release assets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ steps.version.outputs.version }}"
-          cp starx-plugins/starx-universal/build/libs/starx-universal.jar "starx-universal-$version.jar"
-          sha256sum "starx-universal-$version.jar" > SHA256SUMS
+          artifact="starx-universal-$VERSION.jar"
+          cp starx-plugins/starx-universal/build/libs/starx-universal.jar "$artifact"
+          sha256sum "$artifact" > SHA256SUMS
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          artifact = Path(f"starx-universal-{version}.jar")
+          digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+          manifest = {
+              "schemaVersion": 1,
+              "version": version,
+              "tag": os.environ["TAG"],
+              "commit": os.environ["COMMIT"],
+              "artifact": artifact.name,
+              "sha256": digest,
+              "sizeBytes": artifact.stat().st_size,
+              "java": 21,
+              "platforms": ["Velocity", "Paper", "Folia"],
+              "extensionApi": "1.0.0",
+          }
+          Path("release-manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          grep -Fq "$(cut -d' ' -f1 SHA256SUMS)" release-manifest.json
 
       - name: Upload release verification evidence
         uses: actions/upload-artifact@v6
@@ -55,6 +90,8 @@ jobs:
           path: |
             starx-universal-${{ steps.version.outputs.version }}.jar
             SHA256SUMS
+            release-manifest.json
+            docs/releases/${{ steps.version.outputs.version }}.md
             **/build/test-results/test/*.xml
 
       - name: Publish GitHub Release
@@ -64,4 +101,11 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
-          gh release create "$GITHUB_REF_NAME" "starx-universal-$version.jar" SHA256SUMS --verify-tag --generate-notes --title "StarX $version"
+          notes="${{ steps.version.outputs.notes }}"
+          gh release create "$GITHUB_REF_NAME" \
+            "starx-universal-$version.jar" \
+            SHA256SUMS \
+            release-manifest.json \
+            --verify-tag \
+            --notes-file "$notes" \
+            --title "StarX $version"
