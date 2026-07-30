@@ -35,6 +35,11 @@ desktop.ini
 *.class
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+!vendor/
+!vendor/velocity/
+!vendor/velocity/*.jar
+!starx-plugins/starx-standalone-limbo/vendor/
+!starx-plugins/starx-standalone-limbo/vendor/*.jar
 *.war
 *.zip
 *.tar
@@ -44,7 +49,9 @@ desktop.ini
 # Runtime state, logs and databases
 *.log
 *.pid
-*.lock
+*.pid.lock
+*.lck
+**/session.lock
 *.db
 *.db-*
 *.sqlite
@@ -105,7 +112,6 @@ desktop.ini
 /plugins/
 /decompiled/
 /LimboAPI-source/
-/vendor/
 /tools/ponytail-source/
 /cfr-*.jar
 /gradle-*.zip
@@ -132,3 +138,22 @@ desktop.ini
 # Generated code-index output and accidental nested workspace copies
 **/graphify-out/
 /starx-plugins/starmc-website/
+
+# Nested browser/test output and historical website build trees
+**/.playwright-cli/
+**/.playwright-mcp/
+**/.superpowers/
+**/test-results/
+**/output/playwright/
+**/dist-*/
+/重构/starmc/release/
+/重构/starmc/release-*/
+/重构/starmc/output/
+
+# Local website runtime state and sensitive machine-only files
+/重构/backend/data/store.json
+/secret
+
+# External reference repositories kept outside the product source tree
+/插件开发/
+/重构/starmc/public/pixel2motion/
