@@ -7,12 +7,25 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Objects;
+import java.util.UUID;
 
 public final class BindingChallengeService {
+  private static final Duration DEFAULT_EXECUTION_LEASE = Duration.ofSeconds(30);
+
   private final JdbcBindingChallengeRepository challenges;
+  private final Duration executionLease;
 
   public BindingChallengeService(JdbcBindingChallengeRepository challenges) {
+    this(challenges, DEFAULT_EXECUTION_LEASE);
+  }
+
+  public BindingChallengeService(
+      JdbcBindingChallengeRepository challenges, Duration executionLease) {
     this.challenges = Objects.requireNonNull(challenges, "challenges");
+    this.executionLease = Objects.requireNonNull(executionLease, "executionLease");
+    if (executionLease.isZero() || executionLease.isNegative()) {
+      throw new IllegalArgumentException("executionLease must be positive");
+    }
   }
 
   public String begin(
@@ -62,6 +75,44 @@ public final class BindingChallengeService {
     return null;
   }
 
+  public BindingChallenge inspectExecutable(String kind, String rawToken, Instant now) {
+    Objects.requireNonNull(now, "now");
+    BindingChallenge challenge = challenges.findExecutable(
+        requireText(kind, "kind"), hash(kind, requireToken(rawToken))).orElse(null);
+    if (challenge == null) return null;
+    if (challenge.state() == BindingState.CONFIRMED) return challenge;
+    if (now.toEpochMilli() <= challenge.expiresAt()) return challenge;
+    challenges.transition(
+        challenge.id(), BindingState.SENT, BindingAction.EXPIRE, now.toEpochMilli());
+    return null;
+  }
+
+  public Execution acquire(BindingChallenge challenge, Instant now) {
+    Objects.requireNonNull(challenge, "challenge");
+    Objects.requireNonNull(now, "now");
+    String owner = UUID.randomUUID().toString();
+    long leaseUntil = now.plus(this.executionLease).toEpochMilli();
+    return challenges.acquireExecution(
+        challenge.id(), owner, now.toEpochMilli(), leaseUntil)
+        ? new Execution(challenge, owner) : null;
+  }
+
+  public boolean consume(Execution execution, Instant now) {
+    Objects.requireNonNull(execution, "execution");
+    Objects.requireNonNull(now, "now");
+    return challenges.completeExecution(
+        execution.challenge().id(), execution.owner(), BindingAction.CONSUME,
+        now.toEpochMilli());
+  }
+
+  public boolean release(Execution execution, Instant now) {
+    Objects.requireNonNull(execution, "execution");
+    Objects.requireNonNull(now, "now");
+    return challenges.completeExecution(
+        execution.challenge().id(), execution.owner(), BindingAction.RELEASE,
+        now.toEpochMilli());
+  }
+
   public boolean consume(String id, Instant now) {
     Objects.requireNonNull(now, "now");
     return challenges.transition(
@@ -103,5 +154,16 @@ public final class BindingChallengeService {
     String text = Objects.requireNonNull(value, field).trim();
     if (text.isEmpty()) throw new IllegalArgumentException(field + " must not be blank");
     return text;
+  }
+
+  public record Execution(BindingChallenge challenge, String owner) {
+    public Execution {
+      Objects.requireNonNull(challenge, "challenge");
+      owner = requireText(owner, "owner");
+    }
+
+    public String operationId() {
+      return this.challenge.id();
+    }
   }
 }

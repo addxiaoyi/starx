@@ -38,7 +38,7 @@ final class ConfigSchemaUpgraderTest {
 
     Map<String, Object> current = root(original);
     Map<String, Object> defaults = root("""
-        schema-version: 3
+        schema-version: 5
         auth:
           allow-offline-default: false
           ux:
@@ -58,7 +58,7 @@ final class ConfigSchemaUpgraderTest {
 
     assertTrue(result.changed());
     assertEquals(0, result.sourceVersion());
-    assertEquals(3, result.targetVersion());
+    assertEquals(5, result.targetVersion());
     assertTrue(Files.isRegularFile(result.backup()));
     assertTrue(Files.isRegularFile(result.report()));
     assertEquals(original, Files.readString(result.backup()));
@@ -67,21 +67,21 @@ final class ConfigSchemaUpgraderTest {
     assertEquals(1, warnings.size());
 
     Map<String, Object> upgraded = root(Files.readString(config));
-    assertEquals(3, upgraded.get("schema-version"));
+    assertEquals(5, upgraded.get("schema-version"));
     assertEquals(true, mapping(upgraded.get("auth")).get("allow-offline-default"));
     assertEquals(
         true,
         mapping(mapping(upgraded.get("auth")).get("ux")).get("titles-enabled"));
     assertEquals("yes", mapping(upgraded.get("custom-root")).get("retained"));
     assertTrue(Files.readString(result.report()).contains("\"fromSchema\": 0"));
-    assertTrue(Files.readString(result.report()).contains("\"toSchema\": 3"));
+    assertTrue(Files.readString(result.report()).contains("\"toSchema\": 5"));
   }
 
   @Test
   void currentCompleteSchemaDoesNotRewriteOrCreateBackup() throws Exception {
     Path config = this.tempDir.resolve("config.yml");
     String yaml = """
-        schema-version: 3
+        schema-version: 5
         auth:
           allow-offline-default: false
         """;
@@ -115,7 +115,7 @@ final class ConfigSchemaUpgraderTest {
         () -> ConfigSchemaUpgrader.upgrade(
             config,
             root(yaml),
-            root("schema-version: 3\n"),
+            root("schema-version: 5\n"),
             ignored -> { }));
 
     assertTrue(error.getMessage().contains("newer than supported"));
@@ -130,7 +130,7 @@ final class ConfigSchemaUpgraderTest {
     StarxConfig loaded = ConfigLoader.load(config);
 
     assertNotNull(loaded);
-    assertEquals(3, root(Files.readString(config)).get("schema-version"));
+    assertEquals(5, root(Files.readString(config)).get("schema-version"));
   }
 
   @SuppressWarnings("unchecked")

@@ -33,8 +33,17 @@ public final class EmailChallengeHandler implements AdminHandler {
     try {
       this.challenges.begin(uuid(request), request.email);
       ctx.status(200).json(Map.of("success", true, "message", "验证码已发送"));
+    } catch (IllegalArgumentException error) {
+      ctx.status(400).json(Map.of("error", Objects.requireNonNullElse(
+          error.getMessage(), "\u90ae\u7bb1\u5730\u5740\u6216\u8d26\u53f7\u65e0\u6548")));
+    } catch (IllegalStateException error) {
+      ctx.status(503).json(Map.of(
+          "error", Objects.requireNonNullElse(error.getMessage(), "\u90ae\u4ef6\u53d1\u9001\u670d\u52a1\u6682\u4e0d\u53ef\u7528"),
+          "code", "email_delivery_unavailable"));
     } catch (RuntimeException error) {
-      ctx.status(400).json(Map.of("error", error.getMessage()));
+      ctx.status(500).json(Map.of(
+          "error", "\u90ae\u4ef6\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5",
+          "code", "email_delivery_failed"));
     }
   }
 
@@ -44,7 +53,7 @@ public final class EmailChallengeHandler implements AdminHandler {
       UUID playerId = uuid(request);
       boolean bound = this.challenges.confirmAndExecute(
           playerId, request.code,
-          email -> this.auth.bindEmail(playerId, email).success());
+          (operationId, email) -> this.auth.bindEmail(playerId, email).success());
       if (!bound) {
         ctx.status(400).json(Map.of("error", "邮箱验证码无效、已使用，或绑定失败"));
         return;

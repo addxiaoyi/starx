@@ -101,7 +101,7 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", "code is required"));
             return;
         }
-        UUID playerUuid = this.verificationService.verifyAndExecute(req.code, candidate -> {
+        UUID playerUuid = this.verificationService.verifyAndExecute(req.code, (operationId, candidate) -> {
             PlayerBinding binding = new PlayerBinding(
                 candidate, req.qqId, null, System.currentTimeMillis());
             this.repo.save(binding);

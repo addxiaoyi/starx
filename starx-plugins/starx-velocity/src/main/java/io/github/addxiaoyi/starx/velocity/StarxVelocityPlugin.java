@@ -66,6 +66,10 @@ import io.github.addxiaoyi.starx.velocity.integration.FloodgateIntegrationModule
 import io.github.addxiaoyi.starx.velocity.integration.LuckPermsContextModule;
 import io.github.addxiaoyi.starx.velocity.integration.TabIntegrationModule;
 import io.github.addxiaoyi.starx.velocity.messaging.VelocityMessageBridge;
+import io.github.addxiaoyi.starx.velocity.network.NetworkAutomationService;
+import io.github.addxiaoyi.starx.velocity.network.RuntimePortConfiguration;
+import io.github.addxiaoyi.starx.velocity.network.RuntimeEndpointRegistry;
+import io.github.addxiaoyi.starx.velocity.network.TcpPortAllocator;
 import io.github.addxiaoyi.starx.velocity.module.ModuleManager;
 import io.github.addxiaoyi.starx.velocity.module.admin.AdminCommandsModule;
 import io.github.addxiaoyi.starx.velocity.module.auth.AuthModule;
@@ -139,6 +143,8 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
     private DatabaseManager databaseManager;
     private VelocityEventBus eventBus;
     private HttpApiServer httpApiServer;
+    private NetworkAutomationService networkAutomationService;
+    private RuntimeEndpointRegistry runtimeEndpointRegistry;
     private WebhookClient webhookClient;
     private ModuleManager moduleManager;
     private UworldRuntime uworld;
@@ -225,6 +231,10 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         if (autoConfig.changed()) {
             this.config = ConfigLoader.load(configFile, this.logger::warning);
         }
+        this.runtimeEndpointRegistry = RuntimeEndpointRegistry.open(this.dataDirectory);
+        this.lifecycle.own(
+            "runtime endpoint registry",
+            this.runtimeEndpointRegistry::close);
         this.compatibilityReport = VelocityCompatibility.evaluate(
             this.proxy, configFile, this.dataDirectory, this.logger::info, this.logger::warning);
         this.lifecycle.own("compatibility report", () -> this.compatibilityReport = null);
@@ -472,6 +482,9 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             metrics.put("maintenance", maintenanceModule.isEnabled());
             metrics.put("queue", queueModule.runtimeSnapshot());
             metrics.put("smartQueue", smartQueueModule.runtimeSnapshot());
+            metrics.put("networkAutomation", this.networkAutomationService == null
+                ? Map.of("status", "not_started")
+                : this.networkAutomationService.snapshot());
             return Map.copyOf(metrics);
         }, backendBridge.commandMailbox(), backendBridge::acceptHttpMessage, incidentTimeline, playerSessions, accountDeletions, crossDeviceApprovals, bindingChallenges, accountIdentities::accountId);
         this.lifecycle.own("HTTP API", this.httpApiServer::stop);
@@ -487,7 +500,38 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager.enableAll();
         websiteSync.start();
         authFallback.release();
-        this.httpApiServer.start();
+        java.util.OptionalInt leasedHttpPort =
+            this.config.http().portConflictPolicy().usesLease()
+                ? this.runtimeEndpointRegistry.leasedPort(this.config.http().port())
+                : java.util.OptionalInt.empty();
+        TcpPortAllocator.Selection httpPortSelection =
+            this.httpApiServer.start(leasedHttpPort);
+        this.runtimeEndpointRegistry.publish(
+            this.config.http(),
+            this.httpApiServer.effectiveHttp(),
+            httpPortSelection);
+        RuntimePortConfiguration.Result runtimePorts = RuntimePortConfiguration.resolve(
+            this.config.http(),
+            this.httpApiServer.effectiveHttp(),
+            this.config.networkAutomation(),
+            httpPortSelection);
+        Map<String, Object> runtimePortReport =
+            new java.util.LinkedHashMap<>(runtimePorts.snapshot());
+        runtimePortReport.put("runtimeEndpoint", Map.of(
+            "endpointFile",
+            this.runtimeEndpointRegistry.endpointFile().getFileName().toString(),
+            "lockFile",
+            this.runtimeEndpointRegistry.lockFile().getFileName().toString(),
+            "leaseFile",
+            this.runtimeEndpointRegistry.leaseFile().getFileName().toString()));
+        this.networkAutomationService = new NetworkAutomationService(
+            runtimePorts.networkAutomation(),
+            runtimePorts.http(),
+            this.dataDirectory,
+            this.logger,
+            Map.copyOf(runtimePortReport));
+        this.lifecycle.own("network automation", this.networkAutomationService::close);
+        this.networkAutomationService.start();
         this.logger.info("StarX Velocity \u521d\u59cb\u5316\u5b8c\u6210");
     }
 

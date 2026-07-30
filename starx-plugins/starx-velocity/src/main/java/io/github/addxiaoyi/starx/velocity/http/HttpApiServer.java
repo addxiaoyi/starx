@@ -27,12 +27,16 @@ import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
 import io.github.addxiaoyi.starx.velocity.http.admin.*;
 import io.github.addxiaoyi.starx.velocity.module.skin.SkinBridgeModule;
 import io.github.addxiaoyi.starx.velocity.operations.IncidentTimeline;
+import io.github.addxiaoyi.starx.velocity.network.TcpPortAllocator;
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
@@ -90,6 +94,8 @@ public final class HttpApiServer implements RouteRegistrar {
             4096, SENSITIVE_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, Clock.systemUTC());
     private HttpServer server;
     private ExecutorService executor;
+    private StarxConfig.HttpConfig effectiveHttp;
+    private TcpPortAllocator.Selection portSelection;
     private static final long RATE_LIMIT_WINDOW_MS = 60000L;
     private static final int RATE_LIMIT_MAX_REQUESTS = 100;
     private static final int SENSITIVE_RATE_LIMIT_MAX = 10;
@@ -122,6 +128,7 @@ public final class HttpApiServer implements RouteRegistrar {
             BindingChallengeService bindingChallenges,
             Function<UUID, String> accountIdResolver) {
         this.config = Objects.requireNonNull(config, "config");
+        this.effectiveHttp = this.config.http();
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.proxy = Objects.requireNonNull(proxy, "proxy");
         this.backendNodes = Objects.requireNonNull(backendNodes, "backendNodes");
@@ -150,8 +157,24 @@ public final class HttpApiServer implements RouteRegistrar {
         this.accountIdResolver = Objects.requireNonNull(accountIdResolver, "accountIdResolver");
     }
 
-    public void start() throws IOException {
-        this.server = HttpServer.create(new InetSocketAddress(this.config.http().bind(), this.config.http().port()), 0);
+    public TcpPortAllocator.Selection start() throws IOException {
+        return start(OptionalInt.empty());
+    }
+
+    public TcpPortAllocator.Selection start(OptionalInt leasedPort) throws IOException {
+        if (this.server != null && this.portSelection != null) {
+            return this.portSelection;
+        }
+        this.portSelection = bindAvailableHttpServer(
+                leasedPort == null ? OptionalInt.empty() : leasedPort);
+        if (this.portSelection.changed()) {
+            log.warn(
+                    "Configured HTTP API port {} is occupied; selected unused port {} (mode={}, occupied={})",
+                    this.portSelection.preferredPort(),
+                    this.portSelection.selectedPort(),
+                    this.portSelection.mode(),
+                    this.portSelection.occupiedPorts());
+        }
         ThreadFactory threads = runnable -> {
             Thread thread = new Thread(runnable, "starx-http");
             thread.setDaemon(true);
@@ -225,9 +248,106 @@ public final class HttpApiServer implements RouteRegistrar {
                 this.backendMessageConsumer).register(this, requireAuth);
         new NetworkStatusHandler(this.proxy, this.backendNodes, this.networkMetricsSupplier).register(this, requireAuth);
         new IncidentTimelineHandler(this.incidentTimeline).register(this, requireAuth);
+        new BridgePingHandler(java.time.Clock.systemUTC()).register(this, requireAuth);
         this.server.start();
-        log.info("HTTP API server started on {}:{} (secured)", this.config.http().bind(), this.config.http().port());
+        log.info("HTTP API server started on {}:{} (secured)", this.effectiveHttp.bind(), this.effectiveHttp.port());
         this.logExposure();
+        return this.portSelection;
+    }
+
+    public StarxConfig.HttpConfig effectiveHttp() {
+        return this.effectiveHttp;
+    }
+
+    private TcpPortAllocator.Selection bindAvailableHttpServer(
+            OptionalInt leasedPort) throws IOException {
+        Set<Integer> unavailablePorts = new LinkedHashSet<>();
+        BindException lastRace = null;
+        int preferredPort = this.config.http().port();
+        StarxConfig.HttpConfig.PortConflictPolicy policy =
+                this.config.http().portConflictPolicy();
+
+        if (policy == StarxConfig.HttpConfig.PortConflictPolicy.STRICT) {
+            try {
+                int actualPort = bindPort(preferredPort);
+                return new TcpPortAllocator.Selection(
+                        preferredPort, actualPort, java.util.List.of(), java.util.List.of(), false);
+            } catch (BindException occupied) {
+                throw new IOException(
+                        "Configured HTTP API port " + preferredPort
+                                + " is occupied and http.port-conflict-policy is strict",
+                        occupied);
+            }
+        }
+
+        if (policy.usesLease()
+                && leasedPort.isPresent()
+                && leasedPort.getAsInt() != preferredPort) {
+            try {
+                int actualPort = bindPort(preferredPort);
+                return new TcpPortAllocator.Selection(
+                        preferredPort, actualPort, java.util.List.of(), java.util.List.of(), false);
+            } catch (BindException occupied) {
+                unavailablePorts.add(preferredPort);
+                lastRace = occupied;
+            }
+            int previousPort = leasedPort.getAsInt();
+            try {
+                int actualPort = bindPort(previousPort);
+                log.info(
+                        "Configured HTTP API port {} remains occupied; reused leased port {}",
+                        preferredPort,
+                        actualPort);
+                return new TcpPortAllocator.Selection(
+                        preferredPort,
+                        actualPort,
+                        java.util.List.copyOf(unavailablePorts),
+                        java.util.List.of(),
+                        false);
+            } catch (BindException occupied) {
+                unavailablePorts.add(previousPort);
+                lastRace = occupied;
+            }
+        }
+
+        for (int attempt = 0; attempt < 16; attempt++) {
+            TcpPortAllocator.Selection selection = TcpPortAllocator.select(
+                    this.config.http().bind(),
+                    preferredPort,
+                    unavailablePorts,
+                    this.config.http().fallbackRangeStart(),
+                    this.config.http().fallbackRangeEnd(),
+                    policy.allowsEphemeralFallback());
+            try {
+                int actualPort = bindPort(selection.selectedPort());
+                TcpPortAllocator.Selection bound = new TcpPortAllocator.Selection(
+                        selection.preferredPort(),
+                        actualPort,
+                        selection.occupiedPorts(),
+                        selection.reservedPorts(),
+                        selection.ephemeralFallback());
+                return bound.withAdditionalUnavailable(unavailablePorts);
+            } catch (BindException race) {
+                unavailablePorts.add(selection.selectedPort());
+                lastRace = race;
+            }
+        }
+        throw new IOException("Unable to bind an unused HTTP API port after repeated races", lastRace);
+    }
+
+    private int bindPort(int port) throws IOException {
+        this.server = HttpServer.create(
+                new InetSocketAddress(this.config.http().bind(), port),
+                0);
+        int actualPort = this.server.getAddress().getPort();
+        this.effectiveHttp = new StarxConfig.HttpConfig(
+                this.config.http().bind(),
+                actualPort,
+                this.config.http().frpPublicUrl(),
+                this.config.http().portConflictPolicy(),
+                this.config.http().fallbackRangeStart(),
+                this.config.http().fallbackRangeEnd());
+        return actualPort;
     }
 
     public void stop() {
@@ -246,10 +366,10 @@ public final class HttpApiServer implements RouteRegistrar {
     private void logExposure() {
         ApiExposureResolver.Exposure exposure;
         try {
-            exposure = ApiExposureResolver.resolve(this.config.http());
+            exposure = ApiExposureResolver.resolve(this.effectiveHttp);
         } catch (SocketException error) {
             log.warn("Unable to inspect local network interfaces; using configured API fallback", error);
-            exposure = ApiExposureResolver.resolve(this.config.http(), java.util.List.of());
+            exposure = ApiExposureResolver.resolve(this.effectiveHttp, java.util.List.of());
         }
         ApiConsoleReport.lines(exposure, this.routes, PUBLIC_ENDPOINTS).forEach(log::info);
         if (!exposure.publiclyReachable()) {

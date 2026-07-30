@@ -1,12 +1,13 @@
 package io.github.addxiaoyi.starx.velocity.http.admin;
 
-import io.github.addxiaoyi.starx.common.auth.CrossDeviceApprovalService;
 import io.github.addxiaoyi.starx.common.auth.AuthLease;
+import io.github.addxiaoyi.starx.common.auth.CrossDeviceApprovalService;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiFunction;
 
-public final class CrossDeviceActionExecutor implements CrossDeviceApprovalHandler.ApprovalExecutor {
+public final class CrossDeviceActionExecutor
+    implements CrossDeviceApprovalHandler.ApprovalExecutor {
   private final BiFunction<UUID, String, Boolean> emailBinder;
   private final BiFunction<UUID, String, Boolean> skinRefresher;
   private final BiFunction<UUID, AuthLease, Boolean> loginApprover;
@@ -14,7 +15,7 @@ public final class CrossDeviceActionExecutor implements CrossDeviceApprovalHandl
   public CrossDeviceActionExecutor(
       BiFunction<UUID, String, Boolean> emailBinder,
       BiFunction<UUID, String, Boolean> skinRefresher) {
-    this(emailBinder, skinRefresher, (ignoredPlayer, ignoredLease) -> false);
+    this(emailBinder, skinRefresher, (uuid, lease) -> false);
   }
 
   public CrossDeviceActionExecutor(
@@ -26,8 +27,17 @@ public final class CrossDeviceActionExecutor implements CrossDeviceApprovalHandl
     this.loginApprover = Objects.requireNonNull(loginApprover, "loginApprover");
   }
 
-  @Override
   public boolean execute(CrossDeviceApprovalService.Challenge challenge, String email) {
+    Objects.requireNonNull(challenge, "challenge");
+    return execute(challenge.token(), challenge, email);
+  }
+
+  @Override
+  public boolean execute(
+      String operationId, CrossDeviceApprovalService.Challenge challenge, String email) {
+    if (Objects.requireNonNull(operationId, "operationId").isBlank()) {
+      throw new IllegalArgumentException("operationId must not be blank");
+    }
     Objects.requireNonNull(challenge, "challenge");
     return switch (challenge.action()) {
       case BIND_EMAIL -> email != null && !email.isBlank()

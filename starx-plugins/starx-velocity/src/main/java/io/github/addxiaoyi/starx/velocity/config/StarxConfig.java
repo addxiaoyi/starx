@@ -22,6 +22,7 @@ public final class StarxConfig {
     private final AuthConfig auth;
     private final PlayerListConfig playerList;
     private final WebsiteSyncConfig websiteSync;
+    private final NetworkAutomationConfig networkAutomation;
     private final Map<String, ModuleConfig> modules;
 
     public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, Map<String, ModuleConfig> modules) {
@@ -35,6 +36,11 @@ public final class StarxConfig {
     }
 
     public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, PlayerListConfig playerList, WebsiteSyncConfig websiteSync, Map<String, ModuleConfig> modules) {
+        this(apiKey, http, webhook, database, uniauth, napcat, totp, uworld, auth, playerList,
+                websiteSync, NetworkAutomationConfig.defaults(), modules);
+    }
+
+    public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, PlayerListConfig playerList, WebsiteSyncConfig websiteSync, NetworkAutomationConfig networkAutomation, Map<String, ModuleConfig> modules) {
         this.apiKey = apiKey;
         this.http = Objects.requireNonNull(http, "http");
         this.webhook = webhook;
@@ -48,6 +54,9 @@ public final class StarxConfig {
         this.websiteSync = websiteSync == null
                 ? WebsiteSyncConfig.disabled("proxy-1", WebsitePlatform.VELOCITY)
                 : websiteSync;
+        this.networkAutomation = networkAutomation == null
+                ? NetworkAutomationConfig.defaults()
+                : networkAutomation;
         this.modules = modules == null ? Map.of() : Map.copyOf(modules);
     }
 
@@ -95,6 +104,10 @@ public final class StarxConfig {
         return this.websiteSync;
     }
 
+    public NetworkAutomationConfig networkAutomation() {
+        return this.networkAutomation;
+    }
+
     public Map<String, ModuleConfig> modules() {
         return this.modules;
     }
@@ -121,58 +134,166 @@ public final class StarxConfig {
         return module != null && module.enabled();
     }
 
-    public static final class HttpConfig {
-        private final String bind;
-        private final int port;
-        private final String frpPublicUrl;
 
-        public HttpConfig(String bind, int port) {
-            this(bind, port, "");
+public static final class HttpConfig {
+    private static final int MAX_FALLBACK_RANGE_WIDTH = 4096;
+    private final String bind;
+    private final int port;
+    private final String frpPublicUrl;
+    private final PortConflictPolicy portConflictPolicy;
+    private final int fallbackRangeStart;
+    private final int fallbackRangeEnd;
+
+    public HttpConfig(String bind, int port) {
+        this(bind, port, "");
+    }
+
+    public HttpConfig(String bind, int port, String frpPublicUrl) {
+        this(
+                bind,
+                normalizePort(port),
+                frpPublicUrl,
+                PortConflictPolicy.PERSIST,
+                normalizePort(port),
+                Math.min(65_535, normalizePort(port) + 100));
+    }
+
+    public HttpConfig(
+            String bind,
+            int port,
+            String frpPublicUrl,
+            String portConflictPolicy,
+            int fallbackRangeStart,
+            int fallbackRangeEnd) {
+        this(
+                bind,
+                port,
+                frpPublicUrl,
+                PortConflictPolicy.parse(portConflictPolicy),
+                fallbackRangeStart,
+                fallbackRangeEnd);
+    }
+
+    public HttpConfig(
+            String bind,
+            int port,
+            String frpPublicUrl,
+            PortConflictPolicy portConflictPolicy,
+            int fallbackRangeStart,
+            int fallbackRangeEnd) {
+        this.bind = bind == null || bind.isBlank() ? "127.0.0.1" : bind.trim();
+        this.port = normalizePort(port);
+        this.frpPublicUrl = normalizePublicUrl(frpPublicUrl);
+        this.portConflictPolicy = Objects.requireNonNull(
+                portConflictPolicy, "portConflictPolicy");
+        requirePort(fallbackRangeStart, "http.fallback-range-start");
+        requirePort(fallbackRangeEnd, "http.fallback-range-end");
+        if (fallbackRangeEnd < fallbackRangeStart) {
+            throw new IllegalArgumentException(
+                    "http.fallback-range-end must be greater than or equal to "
+                            + "http.fallback-range-start");
         }
-
-        public HttpConfig(String bind, int port, String frpPublicUrl) {
-            this.bind = bind == null || bind.isBlank() ? "127.0.0.1" : bind;
-            this.port = port <= 0 || port > 65535 ? 8788 : port;
-            this.frpPublicUrl = normalizePublicUrl(frpPublicUrl);
+        if (fallbackRangeEnd - fallbackRangeStart + 1 > MAX_FALLBACK_RANGE_WIDTH) {
+            throw new IllegalArgumentException(
+                    "HTTP fallback range may contain at most "
+                            + MAX_FALLBACK_RANGE_WIDTH + " ports");
         }
+        this.fallbackRangeStart = fallbackRangeStart;
+        this.fallbackRangeEnd = fallbackRangeEnd;
+    }
 
-        public String bind() {
-            return this.bind;
-        }
+    public String bind() {
+        return this.bind;
+    }
 
-        public int port() {
-            return this.port;
-        }
+    public int port() {
+        return this.port;
+    }
 
-        public String frpPublicUrl() {
-            return this.frpPublicUrl;
-        }
+    public String frpPublicUrl() {
+        return this.frpPublicUrl;
+    }
 
-        private static String normalizePublicUrl(String value) {
-            if (value == null || value.isBlank()) {
-                return "";
-            }
-            String normalized = value.trim();
-            java.net.URI uri;
-            try {
-                uri = java.net.URI.create(normalized);
-            } catch (IllegalArgumentException error) {
-                throw new IllegalArgumentException("http.frp-public-url must be a valid URL", error);
-            }
-            String scheme = uri.getScheme();
-            boolean supportedScheme = "http".equalsIgnoreCase(scheme)
-                    || "https".equalsIgnoreCase(scheme);
-            if (!supportedScheme || uri.getHost() == null || uri.getUserInfo() != null
-                    || uri.getQuery() != null || uri.getFragment() != null) {
-                throw new IllegalArgumentException(
-                        "http.frp-public-url must be an HTTP(S) base URL without credentials, query, or fragment");
-            }
-            while (normalized.endsWith("/")) {
-                normalized = normalized.substring(0, normalized.length() - 1);
-            }
-            return normalized;
+    public PortConflictPolicy portConflictPolicy() {
+        return this.portConflictPolicy;
+    }
+
+    public int fallbackRangeStart() {
+        return this.fallbackRangeStart;
+    }
+
+    public int fallbackRangeEnd() {
+        return this.fallbackRangeEnd;
+    }
+
+    private static int normalizePort(int port) {
+        return port <= 0 || port > 65_535 ? 8788 : port;
+    }
+
+    private static void requirePort(int port, String name) {
+        if (port < 1 || port > 65_535) {
+            throw new IllegalArgumentException(name + " must be between 1 and 65535");
         }
     }
+
+    private static String normalizePublicUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.trim();
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(normalized);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("http.frp-public-url must be a valid URL", error);
+        }
+        String scheme = uri.getScheme();
+        boolean supportedScheme = "http".equalsIgnoreCase(scheme)
+                || "https".equalsIgnoreCase(scheme);
+        if (!supportedScheme || uri.getHost() == null || uri.getUserInfo() != null
+                || uri.getQuery() != null || uri.getFragment() != null) {
+            throw new IllegalArgumentException(
+                    "http.frp-public-url must be an HTTP(S) base URL without credentials, query, or fragment");
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    public enum PortConflictPolicy {
+        STRICT,
+        FALLBACK,
+        PERSIST,
+        EPHEMERAL;
+
+        static PortConflictPolicy parse(String value) {
+            String normalized = value == null || value.isBlank()
+                    ? "persist"
+                    : value.trim().replace('-', '_');
+            try {
+                return PortConflictPolicy.valueOf(
+                        normalized.toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException error) {
+                throw new IllegalArgumentException(
+                        "http.port-conflict-policy must be strict, fallback, persist, or ephemeral",
+                        error);
+            }
+        }
+
+        public boolean usesLease() {
+            return this == PERSIST || this == EPHEMERAL;
+        }
+
+        public boolean allowsFallbackRange() {
+            return this != STRICT;
+        }
+
+        public boolean allowsEphemeralFallback() {
+            return this == EPHEMERAL;
+        }
+    }
+}
 
     public static final class WebhookConfig {
         private final String url;

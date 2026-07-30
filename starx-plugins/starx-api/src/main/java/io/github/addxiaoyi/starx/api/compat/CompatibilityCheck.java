@@ -2,7 +2,16 @@ package io.github.addxiaoyi.starx.api.compat;
 
 import java.util.Objects;
 
-/** One compatibility decision without any secret or machine credential. */
+/**
+ * One compatibility decision without any secret or machine credential.
+ *
+ * @param id stable machine-readable check identifier
+ * @param component human-readable component name
+ * @param detectedVersion version reported by the runtime or integration
+ * @param supportedRange range certified by StarX
+ * @param status resulting compatibility severity
+ * @param message operator-facing explanation of the decision
+ */
 public record CompatibilityCheck(
     String id,
     String component,
@@ -11,6 +20,7 @@ public record CompatibilityCheck(
     CompatibilityStatus status,
     String message
 ) {
+  /** Validates and normalizes one compatibility decision. */
   public CompatibilityCheck {
     id = requireText(id, "id");
     component = requireText(component, "component");
@@ -20,6 +30,11 @@ public record CompatibilityCheck(
     message = normalize(message);
   }
 
+  /**
+   * Returns whether strict compatibility mode must reject startup.
+   *
+   * @return {@code true} only for an unsupported component
+   */
   public boolean blocksStrictStartup() {
     return this.status == CompatibilityStatus.UNSUPPORTED;
   }

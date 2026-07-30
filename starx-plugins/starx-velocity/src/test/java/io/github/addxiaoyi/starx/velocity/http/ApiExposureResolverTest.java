@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.velocity.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import java.net.InetAddress;
@@ -19,6 +20,7 @@ final class ApiExposureResolverTest {
 
     assertEquals(ApiExposureResolver.Source.LOCAL_PUBLIC, exposure.source());
     assertEquals("http://8.8.8.8:8788", exposure.baseUrl());
+    assertFalse(exposure.publiclyReachable());
   }
 
   @Test
@@ -32,6 +34,7 @@ final class ApiExposureResolverTest {
 
     assertEquals(ApiExposureResolver.Source.FRP, exposure.source());
     assertEquals("https://api.star.example.com/starx", exposure.baseUrl());
+    assertFalse(exposure.publiclyReachable());
   }
 
   @Test

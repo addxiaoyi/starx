@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.website;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 
 public interface WebsiteSyncClient {
   Enrollment enroll(
@@ -31,6 +32,15 @@ public interface WebsiteSyncClient {
       Collection<PlayerTexture> entries
   ) throws WebsiteSyncApiException {
     return submitManifest(nodeToken, entries);
+  }
+
+  default void applyCatalogSkin(
+      SecretValue nodeToken,
+      String catalogId,
+      UUID playerUuid,
+      String username
+  ) throws WebsiteSyncApiException {
+    throw new UnsupportedOperationException("Catalog skin application is not supported by this client");
   }
 
   void uploadTexture(

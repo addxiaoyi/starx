@@ -19,12 +19,14 @@ class AccountCommandSimplicityContractTest {
     assertTrue(pluginYaml.contains("aliases: [starxaccount, account]"));
     assertTrue(controller.contains("args.length == 0"));
     assertTrue(controller.contains("this.openMenu(player)"));
-    assertTrue(controller.contains("Bukkit.createInventory(player, 9"));
-    assertTrue(controller.contains("new MenuSession(menu)"));
-    assertTrue(controller.contains("case 1 -> this.open(player, Mode.EMAIL)"));
-    assertTrue(controller.contains("case 3 -> this.open(player, Mode.TOTP)"));
-    assertTrue(controller.contains("case 5 -> this.open(player, Mode.TOTP_DISABLE)"));
-    assertTrue(controller.contains("case 7 -> this.open(player, Mode.TOTP_RESET)"));
+    assertTrue(controller.contains(
+        "new AccountInventoryHolder(player.getUniqueId(), Screen.MENU)"));
+    assertTrue(controller.contains("Bukkit.createInventory(holder, 9"));
+    assertTrue(controller.contains("new MenuSession(holder)"));
+    assertTrue(controller.contains("case 1 -> Mode.EMAIL"));
+    assertTrue(controller.contains("case 3 -> Mode.TOTP"));
+    assertTrue(controller.contains("case 5 -> Mode.TOTP_DISABLE"));
+    assertTrue(controller.contains("case 7 -> Mode.TOTP_RESET"));
     assertTrue(controller.contains("case \"\u90ae\u7bb1\""));
     assertTrue(controller.contains("case \"\u9a8c\u8bc1\""));
     assertTrue(controller.contains("case \"\u5173\u95ed\""));
@@ -32,7 +34,8 @@ class AccountCommandSimplicityContractTest {
     assertFalse(controller.contains("\u7528\u6cd5\uff1a/starxaccount <"));
     assertFalse(controller.contains("event.getInventory().setRepairCost(0)"));
     assertFalse(controller.contains("anvil.getRenameText()"));
-    assertTrue(controller.contains("event.getView().setRepairCost(0)"));
+    assertTrue(controller.contains("this.runNextTick(player, () -> this.open(player, selected))"));
+    assertTrue(controller.contains("makeAnvilFree(event.getView())"));
     assertTrue(controller.contains("anvilView.getRenameText()"));
   }
 

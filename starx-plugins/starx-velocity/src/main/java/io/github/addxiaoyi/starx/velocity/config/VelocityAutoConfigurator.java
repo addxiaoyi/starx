@@ -357,11 +357,10 @@ public final class VelocityAutoConfigurator {
           stack.removeLast();
         }
         String key = matcher.group(2).trim();
-        if (stack.size() == depth) {
-          stack.add(key);
-        } else {
-          stack.set(depth, key);
+        if (stack.size() != depth) {
+          continue;
         }
+        stack.add(key);
         if (!stack.equals(expectedPath)) {
           continue;
         }

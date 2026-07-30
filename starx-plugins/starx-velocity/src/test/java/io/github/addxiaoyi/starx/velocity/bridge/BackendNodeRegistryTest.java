@@ -2,16 +2,23 @@ package io.github.addxiaoyi.starx.velocity.bridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
 import io.github.addxiaoyi.starx.api.bridge.BridgeProtocol;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 final class BackendNodeRegistryTest {
@@ -95,6 +102,78 @@ final class BackendNodeRegistryTest {
   }
 
   @Test
+  void offlineNodesAreRemovedFromEveryRegistryIndex() {
+    MutableClock clock = new MutableClock(NOW);
+    BackendNodeRegistry registry = new BackendNodeRegistry(
+        clock, Duration.ofMinutes(5), 10);
+    registry.observeServer("temporary");
+    registry.update("temporary", BridgeMessage.statusResponse(
+        "temporary", PlatformKind.PAPER, "request-1", Map.of()), NOW);
+    registry.markHeartbeatHealthy("temporary");
+
+    clock.advance(Duration.ofMinutes(5).plusSeconds(1));
+
+    assertEquals(1, registry.pruneExpired());
+    assertTrue(registry.serverNames().isEmpty());
+    assertTrue(registry.find("temporary").isEmpty());
+    assertEquals(0, registry.trackedNodeCount());
+    assertEquals(0, registry.healthEntryCount());
+  }
+
+  @Test
+  void capacityLimitEvictsTheOldestObservedServer() {
+    MutableClock clock = new MutableClock(NOW);
+    BackendNodeRegistry registry = new BackendNodeRegistry(
+        clock, Duration.ofHours(1), 2);
+    registry.observeServer("temporary-a");
+    clock.advance(Duration.ofSeconds(1));
+    registry.observeServer("temporary-b");
+    clock.advance(Duration.ofSeconds(1));
+    registry.observeServer("temporary-c");
+
+    assertEquals(List.of("temporary-b", "temporary-c"), registry.serverNames());
+    assertEquals(2, registry.trackedNodeCount());
+  }
+
+  @Test
+  void concurrentCapacityTrackingLeavesNoOrphanedIndexes() throws Exception {
+    BackendNodeRegistry registry = new BackendNodeRegistry(
+        Clock.systemUTC(), Duration.ofHours(1), 16);
+    var executor = Executors.newFixedThreadPool(8);
+    var start = new CountDownLatch(1);
+    var failure = new AtomicReference<Throwable>();
+    var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+
+    try {
+      for (int worker = 0; worker < 8; worker++) {
+        int workerId = worker;
+        futures.add(executor.submit(() -> {
+          await(start, failure);
+          for (int i = 0; i < 200 && failure.get() == null; i++) {
+            String server = "dynamic-" + workerId + '-' + i;
+            Instant seenAt = Instant.now();
+            registry.update(server, BridgeMessage.statusResponse(
+                server, PlatformKind.PAPER, server, Map.of("online", "0")), seenAt);
+            registry.markHeartbeatHealthy(server);
+          }
+        }));
+      }
+
+      start.countDown();
+      for (var future : futures) future.get();
+      assertNull(failure.get(), () -> "concurrent registry failure: " + failure.get());
+      assertTrue(registry.trackedNodeCount() <= 16);
+      assertTrue(registry.serverNames().size() <= 16);
+      assertTrue(registry.all().size() <= 16);
+      assertTrue(registry.healthEntryCount() <= 16);
+      assertTrue(registry.serverNames().containsAll(
+          registry.all().stream().map(BackendNode::registeredServer).toList()));
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
   void ignoresOutOfOrderHeartbeatResponses() {
     BackendNodeRegistry registry = new BackendNodeRegistry();
     registry.update("lobby", BridgeMessage.statusResponse(
@@ -108,5 +187,41 @@ final class BackendNodeRegistryTest {
     assertEquals(8, node.onlinePlayers());
     assertEquals(NOW.plusSeconds(10), node.lastSeen());
     assertEquals(weightBeforeStaleResponse, registry.admissionWeight("lobby"));
+  }
+
+  private static void await(CountDownLatch start, AtomicReference<Throwable> failure) {
+    try {
+      start.await();
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      failure.compareAndSet(null, interrupted);
+    }
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant current;
+
+    private MutableClock(Instant current) {
+      this.current = current;
+    }
+
+    private void advance(Duration duration) {
+      this.current = this.current.plus(duration);
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return this.current;
+    }
   }
 }

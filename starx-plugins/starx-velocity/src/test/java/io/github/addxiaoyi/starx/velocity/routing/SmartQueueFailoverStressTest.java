@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -87,7 +88,7 @@ final class SmartQueueFailoverStressTest {
         int next = online.compute(selected, (ignored, value) -> value == null ? 1 : value + 1);
         admitted.merge(selected, 1, Integer::sum);
         update(registry, selected, next, NOW);
-        return true;
+        return CompletableFuture.completedFuture(true);
       }, 500);
     }
 

@@ -390,6 +390,8 @@ public final class VelocityBackendBridge implements VelocityModule {
         }
       });
     });
+    this.registry.pruneExpired();
+    this.commandMailbox.pruneIdle();
     refreshStatuses(servers, this.channel, () -> UUID.randomUUID().toString());
   }
 

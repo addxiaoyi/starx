@@ -58,11 +58,12 @@ implements AutoCloseable {
             stmt.execute(JdbcPlayerSessionRepository.CREATE_SESSIONS_SQL);
             stmt.execute(JdbcPlayerSessionRepository.CREATE_SEGMENTS_SQL);
             stmt.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
-            try {
-                stmt.execute("ALTER TABLE starx_binding_challenges ADD COLUMN payload VARCHAR(512)");
-            } catch (java.sql.SQLException ignored) {
-                // Existing installations already have the payload column.
-            }
+            JdbcSchema.addColumnIfMissing(
+                conn, "starx_binding_challenges", "payload", "VARCHAR(512)");
+            JdbcSchema.addColumnIfMissing(
+                conn, "starx_binding_challenges", "execution_owner", "VARCHAR(36)");
+            JdbcSchema.addColumnIfMissing(
+                conn, "starx_binding_challenges", "execution_lease_until", "BIGINT");
             stmt.execute(JdbcAccountDeletionRepository.CREATE_TABLE_SQL);
             stmt.execute(JdbcRuntimeSettingRepository.CREATE_TABLE_SQL);
             stmt.execute(JdbcTutorialProgressRepository.CREATE_TABLE_SQL);

@@ -9,10 +9,12 @@ import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class SmartQueueServiceTest {
+
   @Test
   void snapshotExposesQueueSizesWithoutPlayers() {
     SmartQueueService queue = new SmartQueueService();
@@ -30,6 +32,7 @@ class SmartQueueServiceTest {
     service.clear();
     assertEquals(Map.of(), service.snapshot());
   }
+
   @Test
   void priorityQueueIsIdempotentAndReportsRankAndEta() {
     SmartQueueService queue = new SmartQueueService();
@@ -57,9 +60,93 @@ class SmartQueueServiceTest {
 
     assertEquals(1, queue.processQueues((player, ignored) -> {
       attempts.incrementAndGet();
-      return true;
+      return CompletableFuture.completedFuture(true);
     }, 2));
     assertEquals(1, attempts.get());
+    assertEquals(0, queue.size(server));
+  }
+
+  @Test
+  void pendingVipDoesNotSerializeLowerPriorityConnections() {
+    SmartQueueService queue = new SmartQueueService();
+    RegisteredServer server = server("survival");
+    Player vip = player("00000000-0000-0000-0000-000000000001", true);
+    Player second = player("00000000-0000-0000-0000-000000000002", true);
+    Player third = player("00000000-0000-0000-0000-000000000003", true);
+    CompletableFuture<Boolean> slow = new CompletableFuture<>();
+    AtomicInteger attempts = new AtomicInteger();
+    queue.enqueue(server, vip, 500);
+    queue.enqueue(server, second, 300);
+    queue.enqueue(server, third, 100);
+
+    assertEquals(3, queue.processQueues((player, ignored) -> {
+      attempts.incrementAndGet();
+      return player.getUniqueId().equals(vip.getUniqueId())
+          ? slow
+          : CompletableFuture.completedFuture(true);
+    }, 3));
+    assertEquals(3, attempts.get());
+    assertEquals(1, queue.size(server));
+    assertEquals(0, queue.processQueues((player, ignored) ->
+        CompletableFuture.completedFuture(true), 3));
+
+    slow.complete(false);
+    assertEquals(1, queue.size(server));
+    assertEquals(1, queue.processQueues((player, ignored) ->
+        CompletableFuture.completedFuture(true), 3));
+    assertEquals(0, queue.size(server));
+  }
+
+  @Test
+  void releaseLimitCapsConcurrentAttempts() {
+    SmartQueueService queue = new SmartQueueService();
+    RegisteredServer server = server("survival");
+    Player first = player("00000000-0000-0000-0000-000000000001", true);
+    Player second = player("00000000-0000-0000-0000-000000000002", true);
+    Player third = player("00000000-0000-0000-0000-000000000003", true);
+    CompletableFuture<Boolean> firstAttempt = new CompletableFuture<>();
+    CompletableFuture<Boolean> secondAttempt = new CompletableFuture<>();
+    AtomicInteger attempts = new AtomicInteger();
+    queue.enqueue(server, first, 500);
+    queue.enqueue(server, second, 300);
+    queue.enqueue(server, third, 100);
+
+    assertEquals(2, queue.processQueues((player, ignored) -> {
+      attempts.incrementAndGet();
+      return player.getUniqueId().equals(first.getUniqueId())
+          ? firstAttempt
+          : secondAttempt;
+    }, 2));
+    assertEquals(2, attempts.get());
+    assertEquals(0, queue.processQueues((player, ignored) -> {
+      attempts.incrementAndGet();
+      return CompletableFuture.completedFuture(true);
+    }, 2));
+
+    firstAttempt.complete(true);
+    assertEquals(2, queue.size(server));
+    assertEquals(1, queue.processQueues((player, ignored) ->
+        CompletableFuture.completedFuture(true), 2));
+    assertEquals(1, queue.size(server));
+    secondAttempt.complete(false);
+    assertEquals(1, queue.processQueues((player, ignored) ->
+        CompletableFuture.completedFuture(true), 2));
+    assertEquals(0, queue.size(server));
+  }
+
+  @Test
+  void synchronousConnectorFailureDoesNotLeakClaim() {
+    SmartQueueService queue = new SmartQueueService();
+    RegisteredServer server = server("survival");
+    queue.enqueue(server, player("00000000-0000-0000-0000-000000000001", true), 100);
+
+    assertEquals(0, queue.processQueues((player, ignored) -> {
+      throw new IllegalStateException("executor closed");
+    }, 1));
+    assertEquals(1, queue.size(server));
+    assertEquals(1, queue.processQueues((player, ignored) ->
+        CompletableFuture.completedFuture(true), 1));
+    assertEquals(0, queue.size(server));
   }
 
   private static RegisteredServer server(String name) {

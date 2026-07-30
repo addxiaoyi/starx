@@ -2,14 +2,18 @@ package io.github.addxiaoyi.starx.velocity.module.proxytools.queue;
 
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
+import java.util.ArrayList;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class QueueService {
   private final Map<String, Bucket> queues = new ConcurrentHashMap<>();
+  private final AtomicBoolean dispatching = new AtomicBoolean();
 
   public void enqueue(RegisteredServer server, Player player) {
     String name = serverName(server);
@@ -66,26 +70,34 @@ public final class QueueService {
   }
 
   public int processQueues(PlayerConnector connector) {
-    int connected = 0;
-    for (Map.Entry<String, Bucket> entry : queues.entrySet()) {
-      Bucket bucket = entry.getValue();
-      if (!bucket.beginProcessing()) continue;
-      try {
-        while (true) {
-          Player player = bucket.peek();
-          if (player == null) break;
-          if (!player.isActive()) {
-            bucket.removeHead(player);
-            continue;
-          }
-          if (!connector.connect(player, entry.getKey())) break;
-          if (bucket.removeHead(player)) connected++;
+    Objects.requireNonNull(connector, "connector");
+    if (!this.dispatching.compareAndSet(false, true)) return 0;
+    int dispatched = 0;
+    try {
+      for (Map.Entry<String, Bucket> entry : queues.entrySet()) {
+        Bucket bucket = entry.getValue();
+        Player player = bucket.claimNext();
+        if (player == null) continue;
+        UUID playerId = player.getUniqueId();
+        CompletionStage<Boolean> result;
+        try {
+          result = connector.connect(player, entry.getKey());
+        } catch (RuntimeException error) {
+          bucket.complete(playerId, false);
+          continue;
         }
-      } finally {
-        bucket.endProcessing();
+        if (result == null) {
+          bucket.complete(playerId, false);
+          continue;
+        }
+        dispatched++;
+        result.whenComplete((success, error) ->
+            bucket.complete(playerId, error == null && Boolean.TRUE.equals(success)));
       }
+    } finally {
+      this.dispatching.set(false);
     }
-    return connected;
+    return dispatched;
   }
 
   private static String serverName(RegisteredServer server) {
@@ -94,53 +106,63 @@ public final class QueueService {
 
   @FunctionalInterface
   public interface PlayerConnector {
-    boolean connect(Player player, String serverName);
+    CompletionStage<Boolean> connect(Player player, String serverName);
   }
 
   private static final class Bucket {
     private final ConcurrentLinkedDeque<Player> players = new ConcurrentLinkedDeque<>();
     private final ConcurrentHashMap<UUID, Boolean> members = new ConcurrentHashMap<>();
-    private final AtomicBoolean processing = new AtomicBoolean();
+    private final java.util.Set<UUID> inFlight = ConcurrentHashMap.newKeySet();
 
-    boolean beginProcessing() {
-      return processing.compareAndSet(false, true);
+    synchronized void add(Player player) {
+      if (members.putIfAbsent(player.getUniqueId(), Boolean.TRUE) == null) {
+        players.addLast(player);
+      }
     }
 
-    void endProcessing() {
-      processing.set(false);
+    synchronized Player claimNext() {
+      for (Player player : new ArrayList<>(players)) {
+        UUID playerId = player.getUniqueId();
+        if (!members.containsKey(playerId)) continue;
+        if (!player.isActive()) {
+          remove(playerId);
+          continue;
+        }
+        if (inFlight.add(playerId)) return player;
+      }
+      return null;
     }
 
-    void add(Player player) {
-      if (members.putIfAbsent(player.getUniqueId(), Boolean.TRUE) == null) players.addLast(player);
+    synchronized void complete(UUID playerId, boolean success) {
+      if (!inFlight.remove(playerId)) return;
+      if (!success) return;
+      if (members.remove(playerId) != null) {
+        players.removeIf(player -> player.getUniqueId().equals(playerId));
+      }
     }
 
-    Player peek() {
-      return players.peekFirst();
-    }
-
-    Player poll() {
+    synchronized Player poll() {
       Player player = players.pollFirst();
-      if (player != null) members.remove(player.getUniqueId());
+      if (player != null) {
+        UUID playerId = player.getUniqueId();
+        members.remove(playerId);
+        inFlight.remove(playerId);
+      }
       return player;
     }
 
-    boolean removeHead(Player expected) {
-      if (!players.removeFirstOccurrence(expected)) return false;
-      members.remove(expected.getUniqueId());
-      return true;
-    }
-
-    boolean remove(UUID playerId) {
+    synchronized boolean remove(UUID playerId) {
+      inFlight.remove(playerId);
       if (members.remove(playerId) == null) return false;
       players.removeIf(player -> player.getUniqueId().equals(playerId));
       return true;
     }
 
-    int size() {
+    synchronized int size() {
       return members.size();
     }
 
-    int position(UUID playerId) {
+    synchronized int position(UUID playerId) {
       int position = 0;
       for (Player player : players) {
         position++;

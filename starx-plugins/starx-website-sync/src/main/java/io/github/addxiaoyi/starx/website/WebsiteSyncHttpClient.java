@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
   private static final int MAX_RESPONSE_CHARS = 1_048_576;
@@ -90,6 +91,27 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
   ) throws WebsiteSyncApiException {
     return submitManifestPage(
         nodeToken, java.util.UUID.randomUUID().toString(), 0, 1, entries);
+  }
+
+  @Override
+  public void applyCatalogSkin(
+      SecretValue nodeToken,
+      String catalogId,
+      UUID playerUuid,
+      String username
+  ) throws WebsiteSyncApiException {
+    String id = Objects.requireNonNullElse(catalogId, "").trim();
+    String playerName = Objects.requireNonNullElse(username, "").trim();
+    if (id.isEmpty() || playerName.isEmpty()) {
+      throw new IllegalArgumentException("Catalog ID and player name are required");
+    }
+    post(
+        "/api/v1/plugin/skins/apply",
+        requireSecret(nodeToken, "node token"),
+        Map.of(
+            "catalogId", id,
+            "playerUuid", Objects.requireNonNull(playerUuid, "playerUuid").toString(),
+            "username", playerName));
   }
 
   @Override

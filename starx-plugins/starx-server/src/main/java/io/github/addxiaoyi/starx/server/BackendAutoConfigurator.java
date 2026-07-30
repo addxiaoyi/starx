@@ -1,9 +1,15 @@
 package io.github.addxiaoyi.starx.server;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -51,7 +57,7 @@ final class BackendAutoConfigurator {
 
     Optional<VelocityEndpoint> velocity = Optional.empty();
     if (config.getBoolean("auto-config.discover-velocity", true)) {
-      velocity = discoverVelocity(serverRoot, configuredVelocityPath());
+      velocity = discoverVelocity(plugin);
     }
 
     if (config.getBoolean("auto-config.manage-heartbeat", true)) {
@@ -96,6 +102,12 @@ final class BackendAutoConfigurator {
     return "backend-" + fingerprint;
   }
 
+  static Optional<VelocityEndpoint> discoverVelocity(StarxServerPlugin plugin) {
+    Path serverRoot = plugin.getServer().getWorldContainer().toPath()
+        .toAbsolutePath().normalize();
+    return discoverVelocity(serverRoot, configuredVelocityPath());
+  }
+
   static Optional<VelocityEndpoint> discoverVelocity(Path serverRoot, Path explicitPath) {
     LinkedHashSet<Path> candidates = new LinkedHashSet<>();
     if (explicitPath != null) {
@@ -108,9 +120,12 @@ final class BackendAutoConfigurator {
       if (parent != null) {
         candidates.add(parent.resolve("velocity/plugins/starx/config.yml"));
         candidates.add(parent.resolve("proxy/plugins/starx/config.yml"));
+        candidates.add(parent.resolve("vc/plugins/starx/config.yml"));
         Path grandparent = parent.getParent();
         if (grandparent != null) {
           candidates.add(grandparent.resolve("velocity/plugins/starx/config.yml"));
+          candidates.add(grandparent.resolve("proxy/plugins/starx/config.yml"));
+          candidates.add(grandparent.resolve("vc/plugins/starx/config.yml"));
         }
       }
     }
@@ -134,10 +149,93 @@ final class BackendAutoConfigurator {
     if (key.isBlank() || port < 1 || port > 65_535) {
       return Optional.empty();
     }
-    String host = isLoopbackBind(bind) ? "127.0.0.1" : bind;
-    String uriHost = host.contains(":") && !host.startsWith("[") ? "[" + host + "]" : host;
+    Optional<String> runtimeBaseUrl = loadRuntimeEndpoint(path, port);
+    String baseUrl = runtimeBaseUrl.orElseGet(() -> httpBaseUrl(bind, port));
     return Optional.of(new VelocityEndpoint(
-        path.toAbsolutePath().normalize(), "http://" + uriHost + ":" + port, key));
+        path.toAbsolutePath().normalize(),
+        baseUrl,
+        key,
+        runtimeBaseUrl.isPresent()));
+  }
+
+  private static Optional<String> loadRuntimeEndpoint(Path configPath, int configuredPort) {
+    Path parent = configPath.toAbsolutePath().normalize().getParent();
+    if (parent == null) {
+      return Optional.empty();
+    }
+    Path endpointFile = parent.resolve("runtime-endpoint.json");
+    Path lockFile = parent.resolve("runtime-endpoint.lock");
+    if (!Files.isRegularFile(endpointFile) || !Files.isRegularFile(lockFile)) {
+      return Optional.empty();
+    }
+    try {
+      JsonObject root = JsonParser.parseString(
+          Files.readString(endpointFile, StandardCharsets.UTF_8)).getAsJsonObject();
+      if (jsonInteger(root, "schemaVersion") != 1
+          || jsonInteger(root, "configuredPort") != configuredPort) {
+        return Optional.empty();
+      }
+      int effectivePort = jsonInteger(root, "effectivePort");
+      long processId = jsonLong(root, "processId");
+      String runtimeBind = jsonString(root, "bind");
+      if (effectivePort < 1 || effectivePort > 65_535
+          || processId < 1
+          || runtimeBind.isBlank()
+          || ProcessHandle.of(processId).filter(ProcessHandle::isAlive).isEmpty()
+          || !runtimeLockHeld(lockFile)) {
+        return Optional.empty();
+      }
+      return Optional.of(httpBaseUrl(runtimeBind, effectivePort));
+    } catch (IOException | RuntimeException invalidEndpoint) {
+      return Optional.empty();
+    }
+  }
+
+  private static boolean runtimeLockHeld(Path lockFile) {
+    try (FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.WRITE)) {
+      try {
+        FileLock acquired = channel.tryLock();
+        if (acquired == null) {
+          return true;
+        }
+        acquired.release();
+        return false;
+      } catch (OverlappingFileLockException heldInCurrentJvm) {
+        return true;
+      }
+    } catch (IOException unavailable) {
+      return false;
+    }
+  }
+
+  private static int jsonInteger(JsonObject root, String name) {
+    if (!root.has(name) || !root.get(name).isJsonPrimitive()) {
+      return -1;
+    }
+    return root.get(name).getAsInt();
+  }
+
+  private static long jsonLong(JsonObject root, String name) {
+    if (!root.has(name) || !root.get(name).isJsonPrimitive()) {
+      return -1L;
+    }
+    return root.get(name).getAsLong();
+  }
+
+  private static String jsonString(JsonObject root, String name) {
+    if (!root.has(name) || !root.get(name).isJsonPrimitive()) {
+      return "";
+    }
+    return root.get(name).getAsString().trim();
+  }
+
+  private static String httpBaseUrl(String bind, int port) {
+    String host = isLoopbackBind(bind) ? "127.0.0.1" : bind.trim();
+    if (host.startsWith("[") && host.endsWith("]")) {
+      host = host.substring(1, host.length() - 1);
+    }
+    String uriHost = host.contains(":") ? "[" + host + "]" : host;
+    return "http://" + uriHost + ":" + port;
   }
 
   private static boolean isLoopbackBind(String bind) {
@@ -186,6 +284,8 @@ final class BackendAutoConfigurator {
     String nodeId = plugin.getConfig().getString("node-id", "backend");
     String serverType = plugin.getConfig().getString("server-type", "backend");
     String discovered = velocity == null ? null : velocity.configPath().toString();
+    String velocityBaseUrl = velocity == null ? null : velocity.baseUrl();
+    boolean velocityRuntimeEndpoint = velocity != null && velocity.runtimeEndpoint();
     List<String> publicChanges = changed.stream()
         .filter(path -> !path.equals("bridge.heartbeat.api-key"))
         .toList();
@@ -199,6 +299,9 @@ final class BackendAutoConfigurator {
         + "  \"serverType\": " + json(serverType) + ",\n"
         + "  \"plugins\": " + jsonArray(plugins) + ",\n"
         + "  \"velocityConfig\": " + (discovered == null ? "null" : json(discovered)) + ",\n"
+        + "  \"velocityBaseUrl\": "
+        + (velocityBaseUrl == null ? "null" : json(velocityBaseUrl)) + ",\n"
+        + "  \"velocityRuntimeEndpoint\": " + velocityRuntimeEndpoint + ",\n"
         + "  \"changedPaths\": " + jsonArray(publicChanges) + "\n"
         + "}\n";
     Files.createDirectories(data);
@@ -260,7 +363,11 @@ final class BackendAutoConfigurator {
         .replace("\t", "\\t") + "\"";
   }
 
-  record VelocityEndpoint(Path configPath, String baseUrl, String apiKey) {
+  record VelocityEndpoint(
+      Path configPath,
+      String baseUrl,
+      String apiKey,
+      boolean runtimeEndpoint) {
   }
 
   record Result(boolean changed, List<String> changedPaths, Path reportFile) {

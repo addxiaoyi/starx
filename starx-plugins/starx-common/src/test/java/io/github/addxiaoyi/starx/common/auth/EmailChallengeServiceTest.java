@@ -75,6 +75,23 @@ final class EmailChallengeServiceTest {
     assertFalse(service.confirmAndExecute(playerId, delivered.get(), ignored -> true));
   }
   @Test
+  void memoryEmailCodeSurvivesFailedBinding() {
+    AtomicReference<String> delivered = new AtomicReference<>();
+    EmailChallengeService service = new EmailChallengeService(
+        (email, code) -> delivered.set(code), Duration.ofMinutes(10));
+    UUID playerId = UUID.randomUUID();
+    service.begin(playerId, "player@example.com");
+
+    assertFalse(service.confirmAndExecute(playerId, delivered.get(), ignored -> false));
+    assertFalse(service.confirmAndExecute(playerId, delivered.get(), ignored -> {
+      throw new IllegalStateException("binding unavailable");
+    }));
+    assertTrue(service.confirmAndExecute(playerId, delivered.get(), ignored -> true));
+    assertThrows(IllegalStateException.class,
+        () -> service.confirmAndExecute(playerId, delivered.get(), ignored -> true));
+  }
+
+  @Test
   void confirmsOnceAndRejectsReplay() {
     AtomicReference<String> delivered = new AtomicReference<>();
     EmailChallengeService service = new EmailChallengeService(

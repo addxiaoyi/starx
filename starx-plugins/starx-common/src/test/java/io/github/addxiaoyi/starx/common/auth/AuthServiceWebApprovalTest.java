@@ -60,6 +60,8 @@ class AuthServiceWebApprovalTest {
 
       assertTrue(auth.approveWebLogin(current, playerId).success());
       assertTrue(sessions.isState(playerId, current, AuthSession.State.AUTHENTICATED));
+      assertTrue(auth.isAuthenticated(current, playerId));
+      assertTrue(auth.approveWebLogin(current, playerId).success());
     } finally {
       sessions.shutdown();
     }

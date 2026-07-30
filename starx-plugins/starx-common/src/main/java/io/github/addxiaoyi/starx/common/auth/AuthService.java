@@ -479,9 +479,18 @@ public final class AuthService {
         return this.authenticate(user, lease, AuthSession.State.AUTHENTICATING);
     }
 
+    public boolean isAuthenticated(AuthLease lease, UUID uuid) {
+        Objects.requireNonNull(lease, "lease");
+        Objects.requireNonNull(uuid, "uuid");
+        return this.sessionManager.isState(uuid, lease, AuthSession.State.AUTHENTICATED);
+    }
+
     public AuthResult approveWebLogin(AuthLease lease, UUID uuid) {
         Objects.requireNonNull(lease, "lease");
         Objects.requireNonNull(uuid, "uuid");
+        if (this.sessionManager.isState(uuid, lease, AuthSession.State.AUTHENTICATED)) {
+            return AuthResult.success("网页登录确认已完成");
+        }
         if (!this.sessionManager.isState(
                 uuid, lease, AuthSession.State.WEB_APPROVAL_PENDING)) {
             return AuthResult.failure("网页登录确认已过期，请重新连接。");

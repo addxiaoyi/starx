@@ -1,5 +1,8 @@
 package io.github.addxiaoyi.starx.common.auth;
 
+import io.github.addxiaoyi.starx.common.binding.BindingChallenge;
+import io.github.addxiaoyi.starx.common.binding.BindingChallengeAction;
+import io.github.addxiaoyi.starx.common.binding.BindingChallengeService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -14,8 +17,6 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-import io.github.addxiaoyi.starx.common.binding.BindingChallenge;
-import io.github.addxiaoyi.starx.common.binding.BindingChallengeService;
 
 public final class CrossDeviceApprovalService {
   private static final int TOKEN_BYTES = 32;
@@ -61,7 +62,9 @@ public final class CrossDeviceApprovalService {
     this.accountByPlayer = accountByPlayer;
     this.playerByAccount = playerByAccount;
     this.nameByAccount = nameByAccount;
-    if (ttl.isZero() || ttl.isNegative()) throw new IllegalArgumentException("Approval TTL must be positive");
+    if (ttl.isZero() || ttl.isNegative()) {
+      throw new IllegalArgumentException("Approval TTL must be positive");
+    }
     if (persistentChallenges != null) {
       Objects.requireNonNull(accountByPlayer, "accountByPlayer");
       Objects.requireNonNull(playerByAccount, "playerByAccount");
@@ -88,7 +91,9 @@ public final class CrossDeviceApprovalService {
     Objects.requireNonNull(action, "action");
     String playerName = normalizeName(username);
     String token = Objects.requireNonNull(tokens.next(), "token").trim();
-    if (token.length() < 32) throw new IllegalStateException("Approval token has insufficient entropy");
+    if (token.length() < 32) {
+      throw new IllegalStateException("Approval token has insufficient entropy");
+    }
     Instant expiresAt = this.clock.instant().plus(this.ttl);
     if (this.persistentChallenges != null) {
       String accountId = this.accountByPlayer.apply(playerId);
@@ -101,6 +106,7 @@ public final class CrossDeviceApprovalService {
       return new Challenge(token, playerId, playerName, action, expiresAt, authLease);
     }
     this.pending.put(hash(token), new Pending(
+        UUID.randomUUID().toString(),
         playerId, playerName, action, expiresAt, authLease));
     return new Challenge(token, playerId, playerName, action, expiresAt, authLease);
   }
@@ -114,8 +120,19 @@ public final class CrossDeviceApprovalService {
       UUID playerId,
       String username,
       Action action,
-      Function<Challenge, Boolean> executor
-  ) {
+      Function<Challenge, Boolean> executor) {
+    Objects.requireNonNull(executor, "executor");
+    return approveAndExecute(
+        token, playerId, username, action,
+        (ignoredOperationId, challenge) -> Boolean.TRUE.equals(executor.apply(challenge)));
+  }
+
+  public Approval approveAndExecute(
+      String token,
+      UUID playerId,
+      String username,
+      Action action,
+      BindingChallengeAction<Challenge> executor) {
     if (token == null || token.isBlank() || playerId == null || action == null) {
       return new Approval(Status.UNKNOWN);
     }
@@ -123,6 +140,7 @@ public final class CrossDeviceApprovalService {
     if (this.persistentChallenges != null) {
       return approvePersistent(token.trim(), playerId, username, action, executor);
     }
+
     String tokenHash = hash(token.trim());
     Pending challenge = this.pending.get(tokenHash);
     if (challenge == null) return new Approval(Status.UNKNOWN);
@@ -134,13 +152,16 @@ public final class CrossDeviceApprovalService {
         && challenge.username().equals(normalizeName(username))
         && challenge.action() == action;
     if (!matches) return new Approval(Status.MISMATCH);
+
     synchronized (challenge) {
-      if (this.pending.get(tokenHash) != challenge) return new Approval(Status.UNKNOWN);
+      if (this.pending.get(tokenHash) != challenge) {
+        return new Approval(Status.UNKNOWN);
+      }
       boolean executed;
       try {
-          executed = Boolean.TRUE.equals(executor.apply(new Challenge(
+        executed = executor.execute(challenge.operationId(), new Challenge(
             token.trim(), challenge.playerId(), challenge.username(), challenge.action(),
-            challenge.expiresAt(), challenge.authLease())));
+            challenge.expiresAt(), challenge.authLease()));
       } catch (RuntimeException error) {
         executed = false;
       }
@@ -167,10 +188,12 @@ public final class CrossDeviceApprovalService {
           return new Approval(Status.MISMATCH);
         }
         return this.persistentChallenges.revoke(challenge.id(), this.clock.instant())
-            ? new Approval(Status.CANCELLED) : new Approval(Status.UNKNOWN);
+            ? new Approval(Status.CANCELLED)
+            : new Approval(Status.UNKNOWN);
       }
       return new Approval(Status.UNKNOWN);
     }
+
     String tokenHash = hash(token.trim());
     Pending challenge = this.pending.get(tokenHash);
     if (challenge == null) return new Approval(Status.UNKNOWN);
@@ -193,9 +216,10 @@ public final class CrossDeviceApprovalService {
       UUID playerId,
       String username,
       Action action,
-      Function<Challenge, Boolean> executor) {
+      BindingChallengeAction<Challenge> executor) {
     Instant now = this.clock.instant();
-    BindingChallenge stored = this.persistentChallenges.inspect(kind(action), token, now);
+    BindingChallenge stored =
+        this.persistentChallenges.inspectExecutable(kind(action), token, now);
     if (stored == null) return new Approval(Status.UNKNOWN);
     UUID expectedPlayer = this.playerByAccount.apply(stored.accountId());
     String expectedName = this.nameByAccount.apply(stored.accountId());
@@ -203,26 +227,28 @@ public final class CrossDeviceApprovalService {
         || !normalizeName(username).equals(normalizeName(expectedName))) {
       return new Approval(Status.MISMATCH);
     }
+
+    BindingChallengeService.Execution execution =
+        this.persistentChallenges.acquire(stored, now);
+    if (execution == null) return new Approval(Status.UNKNOWN);
     Challenge challenge = new Challenge(
         token, expectedPlayer, normalizeName(expectedName), action,
         Instant.ofEpochMilli(stored.expiresAt()), authLease(action, stored.payload()));
-    if (!this.persistentChallenges.confirm(stored.id(), token, now)) {
-      return new Approval(Status.UNKNOWN);
-    }
+
     boolean executed;
     try {
-      executed = Boolean.TRUE.equals(executor.apply(challenge));
+      executed = executor.execute(execution.operationId(), challenge);
     } catch (RuntimeException error) {
       executed = false;
     }
     if (!executed) {
-      if (!this.persistentChallenges.release(stored.id(), now)) {
-        return new Approval(Status.UNKNOWN);
-      }
-      return new Approval(Status.EXECUTION_FAILED);
+      return this.persistentChallenges.release(execution, now)
+          ? new Approval(Status.EXECUTION_FAILED)
+          : new Approval(Status.UNKNOWN);
     }
-    return this.persistentChallenges.consume(stored.id(), now)
-        ? new Approval(Status.APPROVED) : new Approval(Status.UNKNOWN);
+    return this.persistentChallenges.consume(execution, now)
+        ? new Approval(Status.APPROVED)
+        : new Approval(Status.UNKNOWN);
   }
 
   private static String kind(Action action) {
@@ -243,7 +269,8 @@ public final class CrossDeviceApprovalService {
     try {
       return new AuthLease(UUID.fromString(Objects.requireNonNull(payload, "payload")));
     } catch (IllegalArgumentException | NullPointerException error) {
-      throw new IllegalStateException("Login approval has an invalid authentication lease", error);
+      throw new IllegalStateException(
+          "Login approval has an invalid authentication lease", error);
     }
   }
 
@@ -295,8 +322,7 @@ public final class CrossDeviceApprovalService {
       String username,
       Action action,
       Instant expiresAt,
-      AuthLease authLease
-  ) { }
+      AuthLease authLease) {}
 
   public record Approval(Status status) {
     public boolean success() {
@@ -310,9 +336,10 @@ public final class CrossDeviceApprovalService {
   }
 
   private record Pending(
+      String operationId,
       UUID playerId,
       String username,
       Action action,
       Instant expiresAt,
-      AuthLease authLease) { }
+      AuthLease authLease) {}
 }

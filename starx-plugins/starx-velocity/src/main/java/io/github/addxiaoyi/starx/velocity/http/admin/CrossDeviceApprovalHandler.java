@@ -15,7 +15,7 @@ public final class CrossDeviceApprovalHandler implements AdminHandler {
   private final ApprovalExecutor executor;
 
   public CrossDeviceApprovalHandler(CrossDeviceApprovalService approvals, String websiteOrigin) {
-    this(approvals, websiteOrigin, (ignored, email) -> true);
+    this(approvals, websiteOrigin, (ignoredOperationId, ignoredChallenge, email) -> true);
   }
 
   public CrossDeviceApprovalHandler(
@@ -54,7 +54,7 @@ public final class CrossDeviceApprovalHandler implements AdminHandler {
     CrossDeviceApprovalService.Action requested = action(request.action);
     CrossDeviceApprovalService.Approval approval = this.approvals.approveAndExecute(
         request.token, UUID.fromString(request.playerId), request.username, requested,
-        challenge -> this.executor.execute(challenge, request.email));
+        (operationId, challenge) -> this.executor.execute(operationId, challenge, request.email));
     ctx.status(approval.success() ? 200 : 409).json(Map.of(
         "ok", approval.success(), "status", approval.status().name()));
   }
@@ -123,6 +123,6 @@ public final class CrossDeviceApprovalHandler implements AdminHandler {
 
   @FunctionalInterface
   public interface ApprovalExecutor {
-    boolean execute(CrossDeviceApprovalService.Challenge challenge, String email);
+    boolean execute(String operationId, CrossDeviceApprovalService.Challenge challenge, String email);
   }
 }

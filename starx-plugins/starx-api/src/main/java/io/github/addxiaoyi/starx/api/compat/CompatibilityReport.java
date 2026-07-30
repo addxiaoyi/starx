@@ -10,7 +10,15 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
-/** Secret-free compatibility report suitable for commands, logs and support bundles. */
+/**
+ * Secret-free compatibility report suitable for commands, logs and support bundles.
+ *
+ * @param platform platform that produced the report
+ * @param runtimeVersion detected platform runtime version
+ * @param javaVersion detected Java runtime version
+ * @param generatedAt report generation time
+ * @param checks immutable compatibility decisions included in the report
+ */
 public record CompatibilityReport(
     String platform,
     String runtimeVersion,
@@ -18,6 +26,7 @@ public record CompatibilityReport(
     Instant generatedAt,
     List<CompatibilityCheck> checks
 ) {
+  /** Validates report metadata and copies the supplied check list. */
   public CompatibilityReport {
     platform = requireText(platform, "platform");
     runtimeVersion = normalize(runtimeVersion);
@@ -26,6 +35,11 @@ public record CompatibilityReport(
     checks = List.copyOf(Objects.requireNonNull(checks, "checks"));
   }
 
+  /**
+   * Computes the most severe status across all checks.
+   *
+   * @return aggregate compatibility status
+   */
   public CompatibilityStatus overallStatus() {
     CompatibilityStatus status = CompatibilityStatus.SUPPORTED;
     for (CompatibilityCheck check : this.checks) {
@@ -34,10 +48,21 @@ public record CompatibilityReport(
     return status;
   }
 
+  /**
+   * Returns whether any check blocks strict startup.
+   *
+   * @return {@code true} when at least one check is unsupported
+   */
   public boolean blocksStrictStartup() {
     return this.checks.stream().anyMatch(CompatibilityCheck::blocksStrictStartup);
   }
 
+  /**
+   * Writes this report as UTF-8 JSON using an atomic replacement when supported.
+   *
+   * @param target destination JSON file
+   * @throws IOException when the report cannot be written or replaced
+   */
   public void writeAtomically(Path target) throws IOException {
     Objects.requireNonNull(target, "target");
     Path absolute = target.toAbsolutePath().normalize();
@@ -57,6 +82,11 @@ public record CompatibilityReport(
     }
   }
 
+  /**
+   * Serializes this report to a stable, secret-free JSON document.
+   *
+   * @return JSON document terminated by a newline
+   */
   public String toJson() {
     StringBuilder json = new StringBuilder(512);
     json.append("{\n")

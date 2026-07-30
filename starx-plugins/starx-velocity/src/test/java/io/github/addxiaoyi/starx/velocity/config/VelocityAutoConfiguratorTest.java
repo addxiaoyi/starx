@@ -111,6 +111,57 @@ class VelocityAutoConfiguratorTest {
   }
 
   @Test
+  void skipsSequenceMappingsAndContinuesEditingManagedScalars() throws Exception {
+    Path config = this.temporary.resolve("config.yml");
+    Files.writeString(config, """
+        auto-config:
+          enabled: true
+          generate-api-key: false
+          manage-optional-integrations: true
+          manage-texture-source: true
+          select-auth-target: false
+          report-file: ""
+        api-key: "manual"
+        unrelated:
+          entries:
+            -
+              name: "first"
+              enabled: true
+        website-sync:
+          node-id: "proxy-manual"
+          textures:
+            enabled: false
+        modules:
+          starx.integrations.luckperms:
+            enabled: false
+          starx.integrations.floodgate:
+            enabled: true
+          starx.integrations.tab:
+            enabled: true
+          starx.integrations.plan:
+            enabled: true
+          starx.proxytools.raknet:
+            enabled: false
+        """);
+
+    VelocityAutoConfigurator.Result result = VelocityAutoConfigurator.apply(
+        config,
+        Set.of("luckperms", "skinsrestorer", "geyser"),
+        Set.of("lobby"),
+        "ignored",
+        false,
+        ignored -> { });
+
+    Map<String, Object> root = load(config);
+    assertTrue(result.changed());
+    assertEquals(true, nested(root, "unrelated", "entries", "0", "enabled"));
+    assertEquals(true, nested(root, "website-sync", "textures", "enabled"));
+    assertEquals(true, nested(root, "modules", "starx.integrations.luckperms", "enabled"));
+    assertEquals(false, nested(root, "modules", "starx.integrations.floodgate", "enabled"));
+    assertEquals(true, nested(root, "modules", "starx.proxytools.raknet", "enabled"));
+  }
+
+  @Test
   void targetSelectionUsesStablePriority() {
     assertEquals("lobby", VelocityAutoConfigurator.chooseTargetServer(
         Set.of("survival", "lobby", "hub")));
@@ -128,7 +179,11 @@ class VelocityAutoConfiguratorTest {
   private static Object nested(Map<String, Object> root, String... path) {
     Object current = root;
     for (String part : path) {
-      current = ((Map<?, ?>) current).get(part);
+      if (current instanceof List<?> list) {
+        current = list.get(Integer.parseInt(part));
+      } else {
+        current = ((Map<?, ?>) current).get(part);
+      }
     }
     return current;
   }

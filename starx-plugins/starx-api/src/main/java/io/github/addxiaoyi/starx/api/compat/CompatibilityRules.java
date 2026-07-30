@@ -12,6 +12,12 @@ public final class CompatibilityRules {
   private CompatibilityRules() {
   }
 
+  /**
+   * Evaluates the Java runtime against the certified StarX bytecode baseline.
+   *
+   * @param version detected Java version
+   * @return compatibility decision for Java
+   */
   public static CompatibilityCheck javaRuntime(String version) {
     int major = javaMajor(version);
     if (major < 0) {
@@ -26,6 +32,12 @@ public final class CompatibilityRules {
     return degraded("java", "Java", version, "21", "较新的 Java 可运行但尚未纳入认证矩阵");
   }
 
+  /**
+   * Evaluates Velocity, including the internal API build used by Uworld.
+   *
+   * @param version detected Velocity version string
+   * @return compatibility decision for Velocity
+   */
   public static CompatibilityCheck velocityRuntime(String version) {
     int[] parsed = versionParts(version);
     if (parsed == null) {
@@ -53,6 +65,12 @@ public final class CompatibilityRules {
             "检测到未认证的 Velocity 内部 API 构建 " + build);
   }
 
+  /**
+   * Evaluates the Minecraft protocol and server API baseline.
+   *
+   * @param version detected Minecraft version
+   * @return compatibility decision for Minecraft
+   */
   public static CompatibilityCheck minecraftRuntime(String version) {
     int[] parsed = versionParts(version);
     if (parsed == null) {
@@ -69,6 +87,14 @@ public final class CompatibilityRules {
         "新的 1.21 补丁版本需要补充真实服务器验收");
   }
 
+  /**
+   * Evaluates one optional integration using the certified major-version matrix.
+   *
+   * @param id stable integration identifier
+   * @param displayName human-readable integration name
+   * @param version detected version, or blank when the integration is absent
+   * @return compatibility decision for the integration
+   */
   public static CompatibilityCheck integration(String id, String displayName, String version) {
     String key = normalize(id).toLowerCase(Locale.ROOT);
     int[] parsed = versionParts(version);
@@ -102,6 +128,12 @@ public final class CompatibilityRules {
         "集成将保持软依赖和安全降级，但该主版本未认证");
   }
 
+  /**
+   * Extracts up to three numeric version components from an arbitrary version string.
+   *
+   * @param version version string to inspect
+   * @return three numeric components, or {@code null} when no version can be parsed
+   */
   public static int[] versionParts(String version) {
     Matcher matcher = VERSION.matcher(normalize(version));
     if (!matcher.find()) {

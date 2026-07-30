@@ -31,6 +31,8 @@ import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.bridge.VelocityBackendBridge;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import io.github.addxiaoyi.starx.website.WebsiteSyncConfig;
+import io.github.addxiaoyi.starx.website.WebsiteSyncHttpClient;
+import io.github.addxiaoyi.starx.website.WebsiteSyncApiException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -48,6 +50,8 @@ implements VelocityModule {
     private final EventBus eventBus;
     private final Supplier<SkinRepository> repositoryFactory;
     private final String skinProfileBaseUrl;
+    private final WebsiteSyncConfig websiteSyncConfig;
+    private final WebsiteSyncHttpClient websiteCommandClient;
     private SkinService skinService;
     private SkinRepository writableSkinRepository;
     private WebsiteSkinRepository websiteRepository;
@@ -62,6 +66,8 @@ implements VelocityModule {
         this.proxy = Objects.requireNonNull(proxy, "proxy");
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.skinProfileBaseUrl = null;
+        this.websiteSyncConfig = null;
+        this.websiteCommandClient = null;
         this.repositoryFactory = null;
         this.backendBridge = null;
         this.backendSkinCache = null;
@@ -77,6 +83,8 @@ implements VelocityModule {
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.backendBridge = Objects.requireNonNull(backendBridge, "backendBridge");
         WebsiteSyncConfig websiteSync = plugin.config().websiteSync();
+        this.websiteSyncConfig = websiteSync;
+        this.websiteCommandClient = websiteSync.enabled() ? new WebsiteSyncHttpClient(websiteSync) : null;
         this.skinProfileBaseUrl = websiteSync.enabled()
             ? websiteSync.siteUrl().resolve("/api/public/skin-profile").toString()
             : null;
@@ -92,6 +100,8 @@ implements VelocityModule {
         this.proxy = Objects.requireNonNull(proxy, "proxy");
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.skinProfileBaseUrl = skinProfileBaseUrl;
+        this.websiteSyncConfig = null;
+        this.websiteCommandClient = null;
         this.repositoryFactory = null;
         this.backendBridge = null;
         this.backendSkinCache = null;
@@ -103,6 +113,8 @@ implements VelocityModule {
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.repositoryFactory = Objects.requireNonNull(repositoryFactory, "repositoryFactory");
         this.skinProfileBaseUrl = null;
+        this.websiteSyncConfig = null;
+        this.websiteCommandClient = null;
         this.backendBridge = null;
         this.backendSkinCache = null;
     }
@@ -356,6 +368,49 @@ implements VelocityModule {
         this.proxy.getCommandManager().register(this.skinCommandMeta, (Command)new SkinCommand());
     }
 
+    private boolean canApplyCatalogSkin() {
+        return this.plugin != null
+            && this.websiteCommandClient != null
+            && this.websiteSyncConfig != null
+            && this.websiteSyncConfig.hasNodeCredential();
+    }
+
+    private void applyCatalogSkin(Player player, String catalogId) {
+        if (!this.canApplyCatalogSkin()) {
+            player.sendMessage(Component.text("网站皮肤同步尚未完成节点授权，暂时无法在游戏内应用皮肤。"));
+            return;
+        }
+        if (!catalogId.matches("[A-Za-z0-9._-]{1,96}")) {
+            player.sendMessage(Component.text("皮肤编号格式无效。"));
+            return;
+        }
+        player.sendMessage(Component.text("正在应用网站皮肤……"));
+        this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
+            try {
+                this.websiteCommandClient.applyCatalogSkin(
+                    this.websiteSyncConfig.nodeToken(),
+                    catalogId,
+                    player.getUniqueId(),
+                    player.getUsername());
+                boolean refreshed = this.refreshSkinFromWebsite(
+                    player.getUniqueId(), player.getUsername());
+                if (refreshed) {
+                    player.sendMessage(Component.text("皮肤已应用并同步到当前服务器。"));
+                } else {
+                    player.sendMessage(Component.text("皮肤已保存；同步将在下次进服时重试。"));
+                }
+            } catch (WebsiteSyncApiException error) {
+                LOGGER.warning("Website catalog skin apply failed for " + player.getUsername()
+                    + ": " + error.errorCode());
+                player.sendMessage(Component.text("网站未接受该皮肤：" + error.errorCode()));
+            } catch (RuntimeException error) {
+                LOGGER.warning("Website catalog skin apply failed for " + player.getUsername()
+                    + ": " + error.getClass().getSimpleName());
+                player.sendMessage(Component.text("皮肤应用失败，请稍后重试。"));
+            }
+        }).schedule();
+    }
+
     static boolean shouldRefreshAfterConnect(
         boolean backendBridgeAvailable,
         boolean proxyProviderAvailable,
@@ -395,6 +450,15 @@ implements VelocityModule {
             CommandSource source = invocation.source();
             if (source instanceof Player) {
                 Player player = (Player)source;
+                String[] arguments = invocation.arguments();
+                if (arguments.length > 0) {
+                    if (arguments.length == 2 && "apply".equalsIgnoreCase(arguments[0])) {
+                        SkinBridgeModule.this.applyCatalogSkin(player, arguments[1]);
+                        return;
+                    }
+                    source.sendMessage(Component.text("用法：/sxskin 或 /sxskin apply <皮肤编号>"));
+                    return;
+                }
                 if (SkinBridgeModule.this.skinProfileBaseUrl != null && !SkinBridgeModule.this.skinProfileBaseUrl.isBlank()) {
                     source.sendMessage((Component)Component.text((String)("正在从网站获取 " + player.getUsername() + " 的皮肤……")));
                     SkinBridgeModule.this.refreshSkinFromWebsite(player.getUniqueId(), player.getUsername());

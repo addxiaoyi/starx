@@ -1,19 +1,19 @@
 schema-version: 1
 
-# Runtime and third-party plugin compatibility reporting.
+# 运行环境与第三方插件兼容性报告。
 compatibility:
   strict-platform: true
   report-file: "compatibility-report.json"
 
-# Safe first-boot and startup environment detection.
-# Disable a management switch when that section is maintained manually.
+# 安全的首次启动与运行环境自动检测。
+# 若某一部分由你手工维护，请关闭对应的管理开关。
 auto-config:
   enabled: true
   infer-node-id: true
   infer-server-type: true
   discover-velocity: true
   manage-heartbeat: true
-  # Contains platform/plugin/path metadata only; secrets are never written.
+  # 报告只包含平台、插件和路径元数据，绝不会写入任何密钥。
   report-file: "auto-detection.json"
 
 # 建议与 Velocity velocity.toml 的 [servers] 键保持一致，便于识别子服。

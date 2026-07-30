@@ -5,11 +5,16 @@ import com.velocitypowered.api.proxy.server.RegisteredServer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class SmartQueueService {
   private static final long MILLIS_PER_MINUTE = 60_000L;
@@ -19,6 +24,7 @@ public final class SmartQueueService {
 
   private final Map<String, Bucket> queues = new ConcurrentHashMap<>();
   private final Map<UUID, Long> joinTimestamps = new ConcurrentHashMap<>();
+  private final AtomicBoolean dispatching = new AtomicBoolean();
 
   public void enqueue(RegisteredServer server, Player player, int baseScore) {
     String serverName = server.getServerInfo().getName();
@@ -88,14 +94,45 @@ public final class SmartQueueService {
   }
 
   public int processQueues(PlayerConnector connector, int maxRelease) {
+    Objects.requireNonNull(connector, "connector");
     if (maxRelease < 0) throw new IllegalArgumentException("maxRelease must not be negative");
-    int connected = 0;
-    for (Map.Entry<String, Bucket> entry : queues.entrySet()) {
-      if (connected >= maxRelease) break;
-      connected += entry.getValue().process(
-          connector, entry.getKey(), maxRelease - connected);
+    if (maxRelease == 0 || !this.dispatching.compareAndSet(false, true)) return 0;
+    int dispatched = 0;
+    try {
+      int remaining = Math.max(0, maxRelease - this.inFlightCount());
+      if (remaining == 0) return 0;
+      for (Map.Entry<String, Bucket> queue : queues.entrySet()) {
+        if (remaining == 0) break;
+        List<SmartQueueEntry> claims = queue.getValue().claim(remaining);
+        remaining -= claims.size();
+        for (SmartQueueEntry entry : claims) {
+          UUID playerId = entry.player().getUniqueId();
+          CompletionStage<Boolean> result;
+          try {
+            result = connector.connect(entry.player(), queue.getKey());
+          } catch (RuntimeException error) {
+            queue.getValue().complete(playerId, false);
+            continue;
+          }
+          if (result == null) {
+            queue.getValue().complete(playerId, false);
+            continue;
+          }
+          dispatched++;
+          result.whenComplete((success, error) -> queue.getValue().complete(
+              playerId, error == null && Boolean.TRUE.equals(success)));
+        }
+      }
+    } finally {
+      this.dispatching.set(false);
     }
-    return connected;
+    return dispatched;
+  }
+
+  private int inFlightCount() {
+    int count = 0;
+    for (Bucket queue : queues.values()) count += queue.inFlightCount();
+    return count;
   }
 
   private int computeActivityScore(Player player, long now) {
@@ -108,12 +145,13 @@ public final class SmartQueueService {
 
   @FunctionalInterface
   public interface PlayerConnector {
-    boolean connect(Player player, String serverName);
+    CompletionStage<Boolean> connect(Player player, String serverName);
   }
 
   private static final class Bucket {
     private final PriorityQueue<SmartQueueEntry> ordered = new PriorityQueue<>(PRIORITY);
     private final Map<UUID, SmartQueueEntry> byPlayer = new HashMap<>();
+    private final Set<UUID> inFlight = new HashSet<>();
 
     synchronized void add(SmartQueueEntry entry) {
       UUID playerId = entry.player().getUniqueId();
@@ -124,17 +162,49 @@ public final class SmartQueueService {
 
     synchronized SmartQueueEntry poll() {
       SmartQueueEntry entry = ordered.poll();
-      if (entry != null) byPlayer.remove(entry.player().getUniqueId());
+      if (entry != null) {
+        UUID playerId = entry.player().getUniqueId();
+        byPlayer.remove(playerId);
+        inFlight.remove(playerId);
+      }
       return entry;
     }
 
+    synchronized List<SmartQueueEntry> claim(int limit) {
+      if (limit <= 0) return List.of();
+      List<SmartQueueEntry> snapshot = new ArrayList<>(ordered);
+      snapshot.sort(PRIORITY);
+      List<SmartQueueEntry> claimed = new ArrayList<>(Math.min(limit, snapshot.size()));
+      for (SmartQueueEntry entry : snapshot) {
+        UUID playerId = entry.player().getUniqueId();
+        if (!entry.player().isActive()) {
+          removeInternal(playerId);
+          continue;
+        }
+        if (inFlight.add(playerId)) {
+          claimed.add(entry);
+          if (claimed.size() == limit) break;
+        }
+      }
+      return List.copyOf(claimed);
+    }
+
+    synchronized void complete(UUID playerId, boolean success) {
+      if (!inFlight.remove(playerId)) return;
+      if (success) removeInternal(playerId);
+    }
+
     synchronized boolean remove(UUID playerId) {
-      SmartQueueEntry entry = byPlayer.remove(playerId);
-      return entry != null && ordered.remove(entry);
+      inFlight.remove(playerId);
+      return removeInternal(playerId);
     }
 
     synchronized int size() {
       return byPlayer.size();
+    }
+
+    synchronized int inFlightCount() {
+      return inFlight.size();
     }
 
     synchronized int position(UUID playerId) {
@@ -146,20 +216,9 @@ public final class SmartQueueService {
       return 0;
     }
 
-    synchronized int process(PlayerConnector connector, String serverName, int limit) {
-      int connected = 0;
-      while (connected < limit) {
-        SmartQueueEntry entry = ordered.peek();
-        if (entry == null) break;
-        if (!entry.player().isActive()) {
-          poll();
-          continue;
-        }
-        if (!connector.connect(entry.player(), serverName)) break;
-        poll();
-        connected++;
-      }
-      return connected;
+    private boolean removeInternal(UUID playerId) {
+      SmartQueueEntry entry = byPlayer.remove(playerId);
+      return entry != null && ordered.remove(entry);
     }
   }
 }

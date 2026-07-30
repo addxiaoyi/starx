@@ -28,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -76,10 +77,14 @@ public final class ConfigLoader {
 
     String apiKey = stringValue(root, "api-key", "");
     Map<String, Object> httpNode = child(root, "http");
+    int httpPort = integer(httpNode, "port", 8788);
     StarxConfig.HttpConfig http = new StarxConfig.HttpConfig(
         stringValue(httpNode, "bind", "127.0.0.1"),
-        integer(httpNode, "port", 8788),
-        stringValue(httpNode, "frp-public-url", ""));
+        httpPort,
+        stringValue(httpNode, "frp-public-url", ""),
+        stringValue(httpNode, "port-conflict-policy", "persist"),
+        integer(httpNode, "fallback-range-start", httpPort),
+        integer(httpNode, "fallback-range-end", Math.min(65_535, httpPort + 100)));
     Map<String, Object> webhookNode = child(root, "webhook");
     StarxConfig.WebhookConfig webhook = new StarxConfig.WebhookConfig(
         stringValue(webhookNode, "url", ""),
@@ -92,6 +97,8 @@ public final class ConfigLoader {
     StarxConfig.PlayerListConfig playerList = parsePlayerListConfig(child(root, "player-list"));
     WebsiteSyncConfig websiteSync = VelocityWebsiteSyncConfigParser.parse(
         child(root, "website-sync"));
+    NetworkAutomationConfig networkAutomation = parseNetworkAutomationConfig(
+        child(root, "network-automation"));
 
     return new StarxConfig(
         apiKey,
@@ -105,6 +112,7 @@ public final class ConfigLoader {
         auth,
         playerList,
         websiteSync,
+        networkAutomation,
         modules);
   }
 
@@ -296,6 +304,74 @@ public final class ConfigLoader {
   private static String stringValue(Map<String, Object> map, String key, String fallback) {
     Object value = map.get(key);
     return value == null ? fallback : value.toString();
+  }
+
+  private static NetworkAutomationConfig parseNetworkAutomationConfig(
+      Map<String, Object> node
+  ) {
+    NetworkAutomationConfig defaults = NetworkAutomationConfig.defaults();
+    Map<String, Object> publicNode = child(node, "public-address");
+    Map<String, Object> frpNode = child(node, "frp");
+    Map<String, Object> certificateNode = child(node, "certificate");
+    NetworkAutomationConfig.PublicAddress publicAddress = new NetworkAutomationConfig.PublicAddress(
+        booleanValue(publicNode, "enabled", defaults.publicAddress().enabled()),
+        integer(publicNode, "minimum-agreement", defaults.publicAddress().minimumAgreement()),
+        integer(publicNode, "timeout-ms", defaults.publicAddress().timeoutMs()),
+        stringList(publicNode, "endpoints", defaults.publicAddress().endpoints(),
+            "network-automation.public-address.endpoints"));
+    NetworkAutomationConfig.Frp frp = new NetworkAutomationConfig.Frp(
+        NetworkAutomationConfig.Frp.Mode.parse(stringValue(frpNode, "mode", "detect")),
+        stringValue(frpNode, "public-host", ""),
+        stringValue(frpNode, "public-scheme", "http"),
+        stringValue(frpNode, "public-url", ""),
+        stringValue(frpNode, "proxy-name", "starx-api"),
+        stringValue(frpNode, "local-address", "127.0.0.1"),
+        integer(frpNode, "local-port", 8788),
+        integer(frpNode, "remote-port", 0),
+        stringValue(frpNode, "frpc-command", "frpc"),
+        stringValue(frpNode, "main-config-file", ""),
+        stringValue(frpNode, "managed-config-file", "frp/starx-api.toml"),
+        booleanValue(frpNode, "auto-apply", false));
+    NetworkAutomationConfig.Certificate certificate = new NetworkAutomationConfig.Certificate(
+        booleanValue(certificateNode, "enabled", false),
+        stringValue(certificateNode, "domain", ""),
+        stringValue(certificateNode, "email", ""),
+        NetworkAutomationConfig.Certificate.Client.parse(
+            stringValue(certificateNode, "client", "auto")),
+        NetworkAutomationConfig.Certificate.Challenge.parse(
+            stringValue(certificateNode, "challenge", "http-01")),
+        booleanValue(certificateNode, "staging-first", true),
+        booleanValue(certificateNode, "auto-run", false),
+        integer(certificateNode, "http01-local-port", 8789),
+        booleanValue(certificateNode, "http01-public-route-confirmed", false),
+        integer(certificateNode, "renew-before-days", 30));
+    return new NetworkAutomationConfig(
+        booleanValue(node, "enabled", defaults.enabled()),
+        stringValue(node, "report-file", defaults.reportFile()),
+        publicAddress,
+        frp,
+        certificate);
+  }
+
+  private static List<String> stringList(
+      Map<String, Object> node,
+      String key,
+      List<String> fallback,
+      String fullKey
+  ) {
+    Object value = node.get(key);
+    if (value == null) {
+      return fallback;
+    }
+    if (!(value instanceof List<?> list)) {
+      throw new IllegalArgumentException(fullKey + " must be a list");
+    }
+    return list.stream().map(item -> {
+      if (item == null) {
+        throw new IllegalArgumentException(fullKey + " contains null");
+      }
+      return item.toString();
+    }).toList();
   }
 
   private static int aliasInteger(

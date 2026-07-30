@@ -9,6 +9,7 @@ import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -31,6 +32,7 @@ class QueueServiceTest {
     service.clear();
     assertEquals(Map.of(), service.snapshot());
   }
+
   @Test
   void duplicateKickKeepsOneEntryAndReportsPositionAndEta() {
     QueueService queue = new QueueService();
@@ -58,9 +60,78 @@ class QueueServiceTest {
 
     assertEquals(1, queue.processQueues((player, ignored) -> {
       attempts.incrementAndGet();
-      return true;
+      return CompletableFuture.completedFuture(true);
     }));
     assertEquals(1, attempts.get());
+    assertEquals(0, queue.size(server));
+  }
+
+  @Test
+  void slowHeadDoesNotBlockNextPlayerAndFailedHeadCanRetry() {
+    QueueService queue = new QueueService();
+    RegisteredServer server = server("survival");
+    Player first = player("00000000-0000-0000-0000-000000000001", true);
+    Player second = player("00000000-0000-0000-0000-000000000002", true);
+    CompletableFuture<Boolean> slow = new CompletableFuture<>();
+    queue.enqueue(server, first);
+    queue.enqueue(server, second);
+
+    assertEquals(1, queue.processQueues((player, ignored) -> {
+      assertEquals(first.getUniqueId(), player.getUniqueId());
+      return slow;
+    }));
+    assertEquals(2, queue.size(server));
+
+    assertEquals(1, queue.processQueues((player, ignored) -> {
+      assertEquals(second.getUniqueId(), player.getUniqueId());
+      return CompletableFuture.completedFuture(true);
+    }));
+    assertEquals(1, queue.size(server));
+
+    slow.complete(false);
+    assertEquals(1, queue.size(server));
+    assertEquals(1, queue.processQueues((player, ignored) ->
+        CompletableFuture.completedFuture(true)));
+    assertEquals(0, queue.size(server));
+  }
+
+  @Test
+  void pendingPlayerIsNotDispatchedTwice() {
+    QueueService queue = new QueueService();
+    RegisteredServer server = server("survival");
+    Player player = player("00000000-0000-0000-0000-000000000001", true);
+    CompletableFuture<Boolean> pending = new CompletableFuture<>();
+    AtomicInteger attempts = new AtomicInteger();
+    queue.enqueue(server, player);
+
+    assertEquals(1, queue.processQueues((ignored, serverName) -> {
+      attempts.incrementAndGet();
+      return pending;
+    }));
+    assertEquals(0, queue.processQueues((ignored, serverName) -> {
+      attempts.incrementAndGet();
+      return CompletableFuture.completedFuture(true);
+    }));
+    assertEquals(1, attempts.get());
+
+    pending.complete(false);
+    assertEquals(1, queue.processQueues((ignored, serverName) ->
+        CompletableFuture.completedFuture(true)));
+    assertEquals(0, queue.size(server));
+  }
+
+  @Test
+  void synchronousConnectorFailureDoesNotLeakClaim() {
+    QueueService queue = new QueueService();
+    RegisteredServer server = server("survival");
+    queue.enqueue(server, player("00000000-0000-0000-0000-000000000001", true));
+
+    assertEquals(0, queue.processQueues((player, ignored) -> {
+      throw new IllegalStateException("executor closed");
+    }));
+    assertEquals(1, queue.size(server));
+    assertEquals(1, queue.processQueues((player, ignored) ->
+        CompletableFuture.completedFuture(true)));
     assertEquals(0, queue.size(server));
   }
 

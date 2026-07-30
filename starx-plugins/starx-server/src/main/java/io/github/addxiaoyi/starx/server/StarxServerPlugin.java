@@ -9,7 +9,9 @@ import io.github.addxiaoyi.starx.api.extension.StarxServiceProvider;
 import io.github.addxiaoyi.starx.runtime.extension.DefaultStarxService;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import java.io.File;
+import java.net.URI;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -40,9 +42,15 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
   private StarxPlaceholderExpansion placeholders;
   private AccountAnvilController accountController;
   private volatile SkinsRestorerBackendSkinResolver skinResolver;
-  private BackendHeartbeatClient heartbeatClient;
+  private volatile BackendHeartbeatClient heartbeatClient;
+  private volatile URI heartbeatVelocityUrl;
+  private volatile String heartbeatApiKey;
+  private volatile String heartbeatNodeId;
+  private volatile Duration heartbeatTimeout;
   private ScheduledTask heartbeatTask;
   private final AtomicBoolean heartbeatDegraded = new AtomicBoolean();
+  private final AtomicBoolean heartbeatEndpointRefreshScheduled = new AtomicBoolean();
+  private volatile boolean heartbeatEndpointRefreshEnabled;
   private BackendMaintenanceState maintenance;
   private String serverType;
   private DefaultStarxService extensionService;
@@ -207,6 +215,14 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
       return;
     }
 
+    this.heartbeatVelocityUrl = config.velocityUrl();
+    this.heartbeatApiKey = config.apiKey();
+    this.heartbeatNodeId = config.serverName();
+    this.heartbeatTimeout = config.timeout();
+    this.heartbeatEndpointRefreshEnabled =
+        this.getConfig().getBoolean("auto-config.enabled", true)
+            && this.getConfig().getBoolean("auto-config.discover-velocity", true)
+            && this.getConfig().getBoolean("auto-config.manage-heartbeat", true);
     this.heartbeatClient = new BackendHeartbeatClient(
         config.velocityUrl(), config.apiKey(), config.serverName(), config.timeout());
     long periodTicks = Math.multiplyExact(config.interval().toSeconds(), 20L);
@@ -250,6 +266,7 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
             }
             return;
           }
+          this.requestHeartbeatEndpointRefresh();
           if (this.heartbeatDegraded.compareAndSet(false, true)) {
             this.getLogger().log(
                 Level.WARNING,
@@ -257,6 +274,72 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
                 heartbeatFailureMessage(error));
           }
         });
+  }
+
+  private void requestHeartbeatEndpointRefresh() {
+    if (!this.heartbeatEndpointRefreshEnabled
+        || !this.heartbeatEndpointRefreshScheduled.compareAndSet(false, true)) {
+      return;
+    }
+    try {
+      this.getServer().getGlobalRegionScheduler().run(this, ignored -> {
+        try {
+          this.refreshHeartbeatEndpoint();
+        } finally {
+          this.heartbeatEndpointRefreshScheduled.set(false);
+        }
+      });
+    } catch (RuntimeException schedulingFailure) {
+      this.heartbeatEndpointRefreshScheduled.set(false);
+    }
+  }
+
+  private void refreshHeartbeatEndpoint() {
+    Optional<BackendAutoConfigurator.VelocityEndpoint> discovered;
+    try {
+      discovered = BackendAutoConfigurator.discoverVelocity(this);
+    } catch (RuntimeException discoveryFailure) {
+      this.getLogger().log(
+          Level.FINE,
+          "StarX runtime endpoint rediscovery failed",
+          discoveryFailure);
+      return;
+    }
+    if (discovered.isEmpty()) {
+      return;
+    }
+    BackendAutoConfigurator.VelocityEndpoint endpoint = discovered.orElseThrow();
+    URI velocityUrl;
+    try {
+      velocityUrl = URI.create(endpoint.baseUrl());
+    } catch (IllegalArgumentException invalidEndpoint) {
+      return;
+    }
+    String apiKey = endpoint.apiKey();
+    if (velocityUrl.equals(this.heartbeatVelocityUrl)
+        && apiKey.equals(this.heartbeatApiKey)) {
+      return;
+    }
+    String nodeId = this.heartbeatNodeId;
+    Duration timeout = this.heartbeatTimeout;
+    if (nodeId == null || timeout == null) {
+      return;
+    }
+
+    BackendHeartbeatClient replacement =
+        new BackendHeartbeatClient(velocityUrl, apiKey, nodeId, timeout);
+    this.heartbeatClient = replacement;
+    this.heartbeatVelocityUrl = velocityUrl;
+    this.heartbeatApiKey = apiKey;
+    this.getConfig().set("bridge.heartbeat.velocity-url", endpoint.baseUrl());
+    this.getConfig().set("bridge.heartbeat.api-key", apiKey);
+    this.saveConfig();
+    AccountAnvilController controller = this.accountController;
+    if (controller != null) {
+      controller.updateClient(new StarxAccountClient(endpoint.baseUrl(), apiKey));
+    }
+    this.getLogger().info(
+        "StarX heartbeat switched to live Velocity runtime endpoint " + endpoint.baseUrl());
   }
 
   static String heartbeatFailureMessage(Throwable error) {

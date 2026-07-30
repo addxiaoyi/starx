@@ -20,6 +20,7 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.view.AnvilView;
@@ -27,7 +28,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 final class AccountAnvilController implements CommandExecutor, Listener {
   private final StarxServerPlugin plugin;
-  private final StarxAccountClient client;
+  private volatile StarxAccountClient client;
   private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
   private final Map<UUID, MenuSession> menus = new ConcurrentHashMap<>();
   private final Map<UUID, Long> activeRequests = new ConcurrentHashMap<>();
@@ -36,6 +37,10 @@ final class AccountAnvilController implements CommandExecutor, Listener {
 
   AccountAnvilController(StarxServerPlugin plugin, StarxAccountClient client) {
     this.plugin = plugin;
+    this.client = client;
+  }
+
+  void updateClient(StarxAccountClient client) {
     this.client = client;
   }
 
@@ -73,14 +78,22 @@ final class AccountAnvilController implements CommandExecutor, Listener {
 
   private void openMenu(Player player) {
     if (this.closed || !player.isOnline()) return;
-    Inventory menu = Bukkit.createInventory(player, 9, Component.text("StarX 账号安全"));
+    AccountInventoryHolder holder =
+        new AccountInventoryHolder(player.getUniqueId(), Screen.MENU);
+    Inventory menu = Bukkit.createInventory(holder, 9, Component.text("StarX 账号安全"));
+    holder.attach(menu);
     menu.setItem(1, menuItem(Material.PAPER, "绑定邮箱", NamedTextColor.AQUA));
     menu.setItem(3, menuItem(Material.LIME_DYE, "开启二步验证", NamedTextColor.GREEN));
     menu.setItem(5, menuItem(Material.RED_DYE, "关闭二步验证", NamedTextColor.RED));
     menu.setItem(7, menuItem(Material.MAP, "重置恢复码", NamedTextColor.GOLD));
     this.sessions.remove(player.getUniqueId());
-    this.menus.put(player.getUniqueId(), new MenuSession(menu));
-    player.openInventory(menu);
+    MenuSession menuSession = new MenuSession(holder);
+    this.menus.put(player.getUniqueId(), menuSession);
+    InventoryView view = player.openInventory(menu);
+    if (view == null || !menuSession.owns(view, player.getUniqueId())) {
+      this.menus.remove(player.getUniqueId(), menuSession);
+      sendFailure(player, "账号安全菜单未能打开，请稍后重试。");
+    }
   }
 
   private static ItemStack menuItem(Material material, String name, NamedTextColor color) {
@@ -127,16 +140,24 @@ final class AccountAnvilController implements CommandExecutor, Listener {
           "账号界面暂不可用：子服未配置 bridge.heartbeat.api-key", NamedTextColor.RED));
       return;
     }
-    Inventory anvil = Bukkit.createInventory(player, org.bukkit.event.inventory.InventoryType.ANVIL,
+    AccountInventoryHolder holder =
+        new AccountInventoryHolder(player.getUniqueId(), Screen.ANVIL);
+    Inventory anvil = Bukkit.createInventory(holder, org.bukkit.event.inventory.InventoryType.ANVIL,
         Component.text(mode.title, NamedTextColor.DARK_PURPLE));
-    ItemStack input = new ItemStack(Material.PAPER);
-    ItemMeta meta = input.getItemMeta();
-    meta.displayName(Component.text(" "));
-    input.setItemMeta(meta);
-    anvil.setItem(0, input);
+    holder.attach(anvil);
     this.activeRequests.remove(player.getUniqueId());
-    this.sessions.put(player.getUniqueId(), new Session(mode, anvil));
-    player.openInventory(anvil);
+    Session session = new Session(mode, holder);
+    this.sessions.put(player.getUniqueId(), session);
+    InventoryView view = player.openInventory(anvil);
+    if (!(view instanceof AnvilView anvilView)
+        || !session.owns(view, player.getUniqueId())) {
+      this.sessions.remove(player.getUniqueId(), session);
+      sendFailure(player, "账号输入界面未能打开，请稍后重试。");
+      return;
+    }
+    makeAnvilFree(anvilView);
+    view.setItem(0, inputItem());
+    player.updateInventory();
     player.sendMessage(Component.text(mode.hint, NamedTextColor.GRAY));
   }
 
@@ -144,15 +165,11 @@ final class AccountAnvilController implements CommandExecutor, Listener {
   public void onPrepare(PrepareAnvilEvent event) {
     Player player = player(event.getView());
     Session session = player == null ? null : this.sessions.get(player.getUniqueId());
-    if (session == null || session.inventory() != event.getInventory()) {
+    if (session == null || !session.owns(event.getView(), player.getUniqueId())) {
       return;
     }
-    ItemStack confirm = new ItemStack(Material.LIME_DYE);
-    ItemMeta meta = confirm.getItemMeta();
-    meta.displayName(Component.text("点击确认", NamedTextColor.GREEN));
-    confirm.setItemMeta(meta);
-    event.setResult(confirm);
-    event.getView().setRepairCost(0);
+    makeAnvilFree(event.getView());
+    event.setResult(confirmItem());
   }
 
   @EventHandler
@@ -161,25 +178,32 @@ final class AccountAnvilController implements CommandExecutor, Listener {
       return;
     }
     MenuSession menu = this.menus.get(player.getUniqueId());
-    if (menu != null && menu.inventory() == event.getInventory()) {
+    if (menu != null && menu.owns(event.getView(), player.getUniqueId())) {
       event.setCancelled(true);
-      switch (event.getRawSlot()) {
-        case 1 -> this.open(player, Mode.EMAIL);
-        case 3 -> this.open(player, Mode.TOTP);
-        case 5 -> this.open(player, Mode.TOTP_DISABLE);
-        case 7 -> this.open(player, Mode.TOTP_RESET);
-        default -> { }
+      Mode selected = switch (event.getRawSlot()) {
+        case 1 -> Mode.EMAIL;
+        case 3 -> Mode.TOTP;
+        case 5 -> Mode.TOTP_DISABLE;
+        case 7 -> Mode.TOTP_RESET;
+        default -> null;
+      };
+      if (selected != null) {
+        this.menus.remove(player.getUniqueId());
+        this.runNextTick(player, () -> this.open(player, selected));
       }
       return;
     }
     Session session = this.sessions.get(player.getUniqueId());
-    if (session == null || session.inventory() != event.getInventory() || event.getRawSlot() != 2) {
+    if (session == null
+        || !session.owns(event.getView(), player.getUniqueId())
+        || event.getRawSlot() != 2) {
       return;
     }
     event.setCancelled(true);
     if (!(event.getView() instanceof AnvilView anvilView)) {
       return;
     }
+    makeAnvilFree(anvilView);
     String raw = anvilView.getRenameText();
     String value;
     try {
@@ -194,7 +218,7 @@ final class AccountAnvilController implements CommandExecutor, Listener {
       return;
     }
     this.sessions.remove(player.getUniqueId());
-    player.closeInventory();
+    this.runNextTick(player, player::closeInventory);
     player.sendMessage(Component.text("正在提交账号安全设置…", NamedTextColor.GRAY));
     long requestGeneration = this.beginRequest(player);
     var future = switch (session.mode()) {
@@ -208,12 +232,11 @@ final class AccountAnvilController implements CommandExecutor, Listener {
     future.whenComplete((reply, error) -> player.getScheduler().run(this.plugin, ignored -> {
       if (!this.isCurrent(player, requestGeneration)) return;
       if (error != null) {
-        player.sendMessage(Component.text(
-            "提交失败：" + rootMessage(error), NamedTextColor.RED));
+        sendFailure(player, playerError(rootMessage(error)));
         return;
       }
       if (!reply.ok()) {
-        player.sendMessage(Component.text(reply.message(), NamedTextColor.RED));
+        sendFailure(player, playerError(reply.message()));
         return;
       }
       if (session.mode() == Mode.EMAIL) {
@@ -260,9 +283,9 @@ final class AccountAnvilController implements CommandExecutor, Listener {
   public void onClose(InventoryCloseEvent event) {
     UUID playerId = event.getPlayer().getUniqueId();
     this.menus.computeIfPresent(playerId, (ignored, menu) ->
-        menu.inventory() == event.getInventory() ? null : menu);
+        menu.owns(event.getView(), playerId) ? null : menu);
     this.sessions.computeIfPresent(playerId, (ignored, session) ->
-        session.inventory() == event.getInventory() ? null : session);
+        session.owns(event.getView(), playerId) ? null : session);
   }
 
   @EventHandler
@@ -279,6 +302,54 @@ final class AccountAnvilController implements CommandExecutor, Listener {
     this.menus.clear();
     this.sessions.clear();
     this.activeRequests.clear();
+  }
+
+  private static ItemStack inputItem() {
+    ItemStack input = new ItemStack(Material.PAPER);
+    ItemMeta meta = input.getItemMeta();
+    meta.displayName(Component.text(" "));
+    input.setItemMeta(meta);
+    return input;
+  }
+
+  private static ItemStack confirmItem() {
+    ItemStack confirm = new ItemStack(Material.LIME_DYE);
+    ItemMeta meta = confirm.getItemMeta();
+    meta.displayName(Component.text("\u70b9\u51fb\u786e\u8ba4", NamedTextColor.GREEN));
+    confirm.setItemMeta(meta);
+    return confirm;
+  }
+
+  private void runNextTick(Player player, Runnable action) {
+    player.getScheduler().run(this.plugin, ignored -> {
+      if (!this.closed && player.isOnline()) {
+        action.run();
+      }
+    }, null);
+  }
+
+  static void makeAnvilFree(AnvilView view) {
+    view.setRepairItemCountCost(0);
+    view.setRepairCost(0);
+    view.setMaximumRepairCost(Integer.MAX_VALUE);
+    view.bypassEnchantmentLevelRestriction(true);
+  }
+
+  private static void sendFailure(Player player, String text) {
+    Component message = Component.text(text, NamedTextColor.RED);
+    player.sendMessage(message);
+    player.sendActionBar(message);
+  }
+
+  static String playerError(String raw) {
+    String message = raw == null ? "" : raw.trim();
+    if (message.isBlank()) {
+      return "\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
+    }
+    if (message.contains("webhook.url/secret") || message.contains("\u90ae\u4ef6\u7f51\u5173")) {
+      return "\u90ae\u7bb1\u7ed1\u5b9a\u6682\u4e0d\u53ef\u7528\uff1a\u670d\u52a1\u5668\u5c1a\u672a\u914d\u7f6e\u90ae\u4ef6\u53d1\u9001\u670d\u52a1\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u3002";
+    }
+    return message.length() <= 240 ? message : message.substring(0, 240);
   }
 
   private boolean isCurrent(Player player, long requestGeneration) {
@@ -331,9 +402,49 @@ final class AccountAnvilController implements CommandExecutor, Listener {
     }
   }
 
-  private record Session(Mode mode, Inventory inventory) {
+  private enum Screen {
+    MENU,
+    ANVIL
   }
 
-  private record MenuSession(Inventory inventory) {
+  private record Session(Mode mode, AccountInventoryHolder holder) {
+    private boolean owns(InventoryView view, UUID playerId) {
+      return this.holder.owns(view, playerId, Screen.ANVIL);
+    }
+  }
+
+  private record MenuSession(AccountInventoryHolder holder) {
+    private boolean owns(InventoryView view, UUID playerId) {
+      return this.holder.owns(view, playerId, Screen.MENU);
+    }
+  }
+
+  private static final class AccountInventoryHolder implements InventoryHolder {
+    private final UUID playerId;
+    private final Screen screen;
+    private Inventory inventory;
+
+    private AccountInventoryHolder(UUID playerId, Screen screen) {
+      this.playerId = playerId;
+      this.screen = screen;
+    }
+
+    private void attach(Inventory inventory) {
+      if (this.inventory != null) {
+        throw new IllegalStateException("Account inventory holder is already attached");
+      }
+      this.inventory = inventory;
+    }
+
+    private boolean owns(InventoryView view, UUID playerId, Screen screen) {
+      return this.playerId.equals(playerId)
+          && this.screen == screen
+          && view.getTopInventory().getHolder() == this;
+    }
+
+    @Override
+    public Inventory getInventory() {
+      return this.inventory;
+    }
   }
 }

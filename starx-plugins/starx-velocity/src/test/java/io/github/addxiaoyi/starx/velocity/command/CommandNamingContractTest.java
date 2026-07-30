@@ -70,7 +70,9 @@ class CommandNamingContractTest {
     for (Path doc : docs) {
       if (!Files.exists(doc)) continue;
       String text = Files.readString(doc);
-      assertFalse(text.contains("/starxaccount"), () -> "Removed command in " + doc);
+      if (doc.getFileName().toString().equals("UWORLD_CONFIGURATION.md")) {
+        assertFalse(text.contains("/starxaccount"), () -> "Removed Velocity command in " + doc);
+      }
       for (String legacy : List.of("`/tutorial", "`/uworld", "`/hub", "`/lobby")) {
         assertFalse(text.contains(legacy), () -> "Legacy command in " + doc + ": " + legacy);
       }

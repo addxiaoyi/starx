@@ -1,25 +1,25 @@
-schema-version: 3
+schema-version: 5
 
 # StarX Velocity 默认配置
 # 只需先修改 uworld.auth.target-server；其余项目都有可直接运行的安全默认值。
 # 修改后必须完整重启 Velocity，不支持热重载。
 
 # HTTP 管理接口密钥。生产环境必须设置高强度随机值。
-# Automatic environment detection. Disable individual manage switches for manual ownership.
+# 自动检测运行环境。若某一部分由你手工维护，请关闭对应的 manage 开关。
 auto-config:
   enabled: true
   generate-api-key: true
   manage-optional-integrations: true
   manage-texture-source: true
   select-auth-target: true
-  # Contains platform/plugin/server metadata only; secrets are never written.
+  # 报告只包含平台、插件和服务器元数据，绝不会写入任何密钥。
   report-file: "auto-detection.json"
 
-# HTTP management key. A 384-bit random value is generated when blank.
+# HTTP 管理接口密钥。留空时会自动生成 384 位随机密钥。
 api-key: ""
 
-# Runtime and integration compatibility gate. UNKNOWN/DEGRADED continue with warnings;
-# UNSUPPORTED stops startup when strict-platform is true.
+# 运行环境与外部集成兼容性检查。UNKNOWN/DEGRADED 只会告警并继续启动；
+# 当 strict-platform 为 true 时，UNSUPPORTED 会阻止插件启动。
 compatibility:
   strict-platform: true
   report-file: "compatibility-report.json"
@@ -28,8 +28,60 @@ compatibility:
 http:
   bind: "127.0.0.1"
   port: 8788
-  # 本机没有可直连公网地址时，填写管理员配置的 FRP HTTP(S) 入口。
+  # strict: 冲突即停止；fallback: 仅在范围内换端口；
+  # persist: 优先复用上次端口；ephemeral: 范围耗尽后允许系统临时端口。
+  port-conflict-policy: "persist"
+  # 有界候选范围，避免在整个 1-65535 空间中无约束漂移。最多 4096 个端口。
+  fallback-range-start: 8788
+  fallback-range-end: 8888
+  # 兼容手工配置。自动 FRP 结果由 network-automation 报告给出。
   frp-public-url: ""
+
+# 类似面板的一键网络配置助手。默认只检测和生成方案，不擅自开放公网端口。
+network-automation:
+  enabled: true
+  report-file: "network-automation.json"
+  public-address:
+    enabled: true
+    # 至少两个不同服务商返回相同地址，才确认外网出口地址。
+    minimum-agreement: 2
+    timeout-ms: 2500
+    endpoints:
+      - "https://api64.ipify.org"
+      - "https://checkip.amazonaws.com"
+      - "https://icanhazip.com"
+  frp:
+    # off / detect / managed。managed 只允许 remote-port: 0，由 frps 原子分配空闲端口。
+    mode: "detect"
+    public-host: ""
+    public-scheme: "http"
+    public-url: ""
+    proxy-name: "starx-api"
+    local-address: "127.0.0.1"
+    # 与 http.port 相同时，会跟随 HTTP API 最终成功绑定的端口。
+    local-port: 8788
+    remote-port: 0
+    frpc-command: "frpc"
+    # 留空时只检查运行中的 frpc 参数和有限的常见配置目录，不遍历磁盘。
+    # detect 可读取 TOML/YAML/INI；managed 自动应用仅支持可精确校验 includes 的 TOML。
+    main-config-file: ""
+    # managed 模式写入的 StarX 专属代理片段；主 TOML 必须通过 includes 精确包含它。
+    managed-config-file: "frp/starx-api.toml"
+    auto-apply: false
+  certificate:
+    # 免费证书使用 Let's Encrypt。未满足域名、80 端口路由等前置条件时只生成诊断方案。
+    enabled: false
+    domain: ""
+    email: ""
+    client: "auto"
+    challenge: "http-01"
+    staging-first: true
+    auto-run: false
+    # 已占用时自动选择其他本地端口；变更后公网路由确认会自动失效。
+    http01-local-port: 8789
+    http01-public-route-confirmed: false
+    # 仅在正式证书缺失、损坏或进入该到期窗口时尝试申请/续期。
+    renew-before-days: 30
 
 webhook:
   url: ""

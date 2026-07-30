@@ -128,6 +128,23 @@ class WebsiteSyncHttpClientTest {
   }
 
   @Test
+  void appliesCatalogSkinWithTheNodeCredentialAndPlayerIdentity() throws Exception {
+    WebsiteSyncHttpClient client = client();
+
+    client.applyCatalogSkin(
+        SecretValue.of("stx_node_test"),
+        "k_797a15fca2ce",
+        java.util.UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7"),
+        "LinkedPlayer");
+
+    assertEquals(1, this.requests.size());
+    assertEquals("/api/v1/plugin/skins/apply", this.requests.get(0).path());
+    assertEquals("Bearer stx_node_test", this.requests.get(0).authorization());
+    assertTrue(this.requests.get(0).body().contains("\"catalogId\":\"k_797a15fca2ce\""));
+    assertTrue(this.requests.get(0).body().contains("\"username\":\"LinkedPlayer\""));
+  }
+
+  @Test
   void mapsUnauthorizedWithoutExposingToken() {
     WebsiteSyncHttpClient client = client();
     WebsiteSyncApiException error = assertThrows(

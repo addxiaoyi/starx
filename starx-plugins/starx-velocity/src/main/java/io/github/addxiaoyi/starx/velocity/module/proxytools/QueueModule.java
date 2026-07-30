@@ -29,14 +29,15 @@ import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.queue.QueueService;
 import io.github.addxiaoyi.starx.velocity.routing.BackendRoutingService;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
@@ -130,27 +131,37 @@ implements VelocityModule {
     }
 
     void processQueues() {
+        this.queueService.processQueues(this::connect);
+    }
+
+    private CompletableFuture<Boolean> connect(Player player, String serverName) {
         ProxyServer proxy = this.plugin.proxy();
-        this.queueService.processQueues((player, serverName) -> {
-            Optional<String> selected = this.targetPolicy.resolve(
-                serverName, this.queueService.snapshot());
-            if (selected.isEmpty()) {
-                return false;
-            }
-            RegisteredServer server = proxy.getServer(selected.get()).orElse(null);
-            if (server == null) {
-                return false;
-            }
-            try {
-                return (Boolean)((CompletableFuture)((CompletableFuture)player.createConnectionRequest(server)
-                    .connect().thenApply(result -> result.isSuccessful()))
-                    .orTimeout(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                    .exceptionally(ex -> false)).join();
-            }
-            catch (Exception e) {
-                return false;
-            }
-        });
+        Optional<String> selected = this.targetPolicy.resolve(
+            serverName, this.queueService.snapshot());
+        if (selected.isEmpty()) return CompletableFuture.completedFuture(false);
+
+        String selectedName = selected.get();
+        RegisteredServer server = proxy.getServer(selectedName).orElse(null);
+        if (server == null) return CompletableFuture.completedFuture(false);
+
+        try {
+            return player.createConnectionRequest(server).connect()
+                .thenApply(result -> result.isSuccessful())
+                .orTimeout(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(error -> {
+                    this.plugin.logger().log(Level.FINE,
+                        "Queue connection failed for player " + player.getUniqueId()
+                            + " via " + selectedName,
+                        error);
+                    return false;
+                });
+        } catch (RuntimeException error) {
+            this.plugin.logger().log(Level.FINE,
+                "Queue connection could not start for player " + player.getUniqueId()
+                    + " via " + selectedName,
+                error);
+            return CompletableFuture.completedFuture(false);
+        }
     }
 
     private boolean isFullReason(Component reason) {

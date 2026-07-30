@@ -31,7 +31,7 @@ import org.yaml.snakeyaml.Yaml;
 
 final class ConfigSchemaUpgrader {
 
-  static final int CURRENT_SCHEMA_VERSION = 3;
+  static final int CURRENT_SCHEMA_VERSION = 5;
   private static final DateTimeFormatter STAMP = DateTimeFormatter
       .ofPattern("yyyyMMdd-HHmmss-SSS")
       .withZone(ZoneOffset.UTC);

@@ -38,12 +38,12 @@ final class ApiExposureResolver {
           .findFirst()
           .orElse(null);
       if (publicAddress != null) {
-        return new Exposure(Source.LOCAL_PUBLIC, httpUrl(publicAddress, config.port()), true);
+        return new Exposure(Source.LOCAL_PUBLIC, httpUrl(publicAddress, config.port()), false);
       }
     }
 
     if (!config.frpPublicUrl().isBlank()) {
-      return new Exposure(Source.FRP, config.frpPublicUrl(), true);
+      return new Exposure(Source.FRP, config.frpPublicUrl(), false);
     }
 
     return new Exposure(Source.LOCAL_ONLY, localUrl(config), false);

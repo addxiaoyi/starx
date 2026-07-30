@@ -86,7 +86,7 @@ NapCatWebSocketClient.MessageHandler {
             return;
         }
         AtomicReference<String> failure = new AtomicReference<>();
-        UUID playerUuid = this.bindingVerification.verifyAndExecute(code, candidate -> {
+        UUID playerUuid = this.bindingVerification.verifyAndExecute(code, (operationId, candidate) -> {
             String qqId = String.valueOf(userId);
             Optional<PlayerBinding> existing = this.bindingRepo.findByPlayer(candidate);
             if (existing.isPresent() && existing.get().qqId() != null) {

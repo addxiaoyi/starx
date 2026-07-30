@@ -208,6 +208,7 @@ public final class AuthModule implements VelocityModule {
   public boolean approveWebLogin(UUID playerId, AuthLease lease) {
     Objects.requireNonNull(playerId, "playerId");
     Objects.requireNonNull(lease, "lease");
+    if (this.authService.isAuthenticated(lease, playerId)) return true;
     Player player = this.plugin.proxy().getPlayer(playerId).orElse(null);
     if (player == null || this.flows.lease(player).filter(lease::equals).isEmpty()) {
       return false;
