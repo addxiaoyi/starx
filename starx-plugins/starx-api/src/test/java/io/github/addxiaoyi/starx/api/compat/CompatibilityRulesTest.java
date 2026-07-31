@@ -20,6 +20,8 @@ class CompatibilityRulesTest {
         CompatibilityRules.javaRuntime("17.0.15").status());
     assertEquals(CompatibilityStatus.DEGRADED,
         CompatibilityRules.javaRuntime("22.0.2").status());
+    assertEquals(CompatibilityStatus.SUPPORTED,
+        CompatibilityRules.javaRuntime("25.0.4").status());
   }
 
   @Test
@@ -38,8 +40,14 @@ class CompatibilityRulesTest {
         CompatibilityRules.minecraftRuntime("1.21.11").status());
     assertEquals(CompatibilityStatus.DEGRADED,
         CompatibilityRules.minecraftRuntime("1.21.12").status());
+    assertEquals(CompatibilityStatus.SUPPORTED,
+        CompatibilityRules.minecraftRuntime("26.1.2").status());
+    assertEquals(CompatibilityStatus.SUPPORTED,
+        CompatibilityRules.minecraftRuntime("26.2.0").status());
+    assertEquals(CompatibilityStatus.DEGRADED,
+        CompatibilityRules.minecraftRuntime("26.3.0").status());
     assertEquals(CompatibilityStatus.UNSUPPORTED,
-        CompatibilityRules.minecraftRuntime("1.22.0").status());
+        CompatibilityRules.minecraftRuntime("27.0.0").status());
   }
 
   @Test

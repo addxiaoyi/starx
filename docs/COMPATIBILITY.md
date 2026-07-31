@@ -18,11 +18,11 @@
 
 | 组件 | 已认证范围 | 说明 |
 |---|---|---|
-| Java | 21 | Java 17 及以下拒绝；高于 21 标记为 `DEGRADED`，直到补充认证 |
+| Java | 21、25 | Java 21 为通用字节码基线；Java 25 为 Paper/Folia 26.x 运行时基线；其他高版本标记为 `DEGRADED` |
 | Velocity | `3.5.0-SNAPSHOT build 606` | Uworld 使用经过该构建验证的内部 API；其他构建必须重新验收 |
-| Minecraft 后端 | `1.21.0` 至 `1.21.11` | Paper/Folia 入口共享；新的 1.21 补丁先标记为 `DEGRADED` |
-| Paper | 1.21 系列，编译基线 1.21.11 | 使用 Paper API 和安全调度封装 |
-| Folia | 1.21 系列，编译基线 1.21.11 | `folia-supported: true`，所有运行任务必须经过 Folia 调度器 |
+| Minecraft 后端 | `1.21.0`–`1.21.11`、`26.1.x`–`26.2.x` | 26.3+ 同一 26.x 系列允许启动但标记为 `DEGRADED`；其他主版本拒绝 |
+| Paper | 1.21 系列；26.1.2 build 71、26.2 build 84 | 生产 JAR 保持 Java 21 字节码，并以 Java 25 对两个 26.x API 固定版本执行额外编译门禁 |
+| Folia | 1.21、26.1–26.2 系列 | `folia-supported: true`，所有运行任务必须经过 global、region 或 entity scheduler |
 
 Universal JAR 只保证同一文件能被三种加载器正确选择入口，不代表未经测试的平台版本自动获得认证。
 

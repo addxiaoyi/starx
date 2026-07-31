@@ -1,8 +1,8 @@
 # StarX
 
-StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 插件。项目只发布一个可部署文件：`starx-universal-0.3.3.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
+StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。项目只发布一个可部署文件：`starx-universal-0.3.4.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
 
-当前插件版本：**0.3.3**
+当前插件版本：**0.3.4**
 
 公共扩展 API：**1.0.0**
 
@@ -255,7 +255,7 @@ Extension API 1.0.0 提供版本协商、平台与能力查询、扩展注册、
 从 [GitHub Releases](https://github.com/addxiaoyi/starx/releases) 下载：
 
 ```text
-starx-universal-0.3.3.jar
+starx-universal-0.3.4.jar
 ```
 
 将同一个文件分别放入：
@@ -268,7 +268,7 @@ Folia/plugins/
 
 安装时注意：
 
-1. 所有实例使用 Java 21。
+1. Velocity 与 Minecraft 1.21 后端可使用 Java 21；Paper/Folia 26.1–26.2 实例使用 Java 25。
 2. 不要在同一实例同时安装 `starx-universal.jar` 和分端调试 JAR。
 3. 先启动 Velocity，再启动 Paper/Folia，便于同机部署自动发现代理配置。
 4. 配置 Velocity modern forwarding，并确保后端转发密钥一致。
@@ -285,11 +285,11 @@ STARX_VELOCITY_CONFIG=/path/to/velocity/plugins/starx/config.yml
 
 | 项目 | 已认证范围 |
 |---|---|
-| Java | 21 |
+| Java | 21、25 |
 | Velocity | `3.5.0-SNAPSHOT` build 606 |
-| Minecraft 后端 | 1.21.0–1.21.11 |
-| Paper | 1.21 系列，编译基线 1.21.11 |
-| Folia | 1.21 系列，`folia-supported: true` |
+| Minecraft 后端 | 1.21.0–1.21.11、26.1.x–26.2.x |
+| Paper | 1.21 系列；26.1.2 build 71、26.2 build 84 API 编译门禁 |
+| Folia | 1.21、26.1–26.2 系列，`folia-supported: true` |
 
 第三方软依赖的已认证主版本：
 

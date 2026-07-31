@@ -2,6 +2,29 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [0.3.4] - 2026-07-31
+
+### Added
+
+- 新增 Java 25 下的 Paper 26.1.2 build 71 与 Paper 26.2 build 84 双 API 编译门禁。
+- 新增 Minecraft 26.1、26.2 与 Java 25 的运行时兼容规则和回归测试。
+
+### Changed
+
+- Minecraft 26.1.x–26.2.x 现在标记为 `SUPPORTED`；更高的 26.x 允许启动并标记为 `DEGRADED`。
+- Java 21 与 Java 25 均标记为 `SUPPORTED`；Universal JAR 继续输出 Java 21 字节码。
+- Plugin CI 与 Release 验证改用 Java 25，以便读取 Paper 26.x API，同时保留 Java 21 产物基线。
+
+### Fixed
+
+- 修复 Paper 26.1.2 服务端因兼容矩阵仅允许 Minecraft 1.21.x 而在 `onEnable` 阶段主动退出的问题。
+
+### Verification
+
+- 后端源码通过 Paper `26.1.2.build.71-stable` 与 `26.2.build.84-stable` 编译。
+- 完整 `clean check` 与 Universal JAR 校验必须在发布前通过；Paper 26.1.2 生产加载作为发布后部署验收。
+- 公共扩展 API 保持 1.0.0，无破坏性 API 变更。
+
 ## [0.3.3] - 2026-07-31
 
 ### Added

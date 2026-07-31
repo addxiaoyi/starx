@@ -21,15 +21,19 @@ public final class CompatibilityRules {
   public static CompatibilityCheck javaRuntime(String version) {
     int major = javaMajor(version);
     if (major < 0) {
-      return unknown("java", "Java", version, "21", "无法解析 Java 主版本");
+      return unknown("java", "Java", version, "21 or 25", "无法解析 Java 主版本");
     }
     if (major < 21) {
-      return unsupported("java", "Java", version, "21", "StarX 使用 Java 21 字节码");
+      return unsupported("java", "Java", version, "21 or 25", "StarX 使用 Java 21 字节码");
     }
-    if (major == 21) {
-      return supported("java", "Java", version, "21", "已认证运行时");
+    if (major == 21 || major == 25) {
+      String message = major == 21
+          ? "Java 21 字节码基线匹配"
+          : "Java 25 Paper 26.x 运行时基线匹配";
+      return supported("java", "Java", version, "21 or 25", message);
     }
-    return degraded("java", "Java", version, "21", "较新的 Java 可运行但尚未纳入认证矩阵");
+    return degraded("java", "Java", version, "21 or 25",
+        "本版本 Java 未认证但尚未阻止启动");
   }
 
   /**
@@ -73,18 +77,30 @@ public final class CompatibilityRules {
    */
   public static CompatibilityCheck minecraftRuntime(String version) {
     int[] parsed = versionParts(version);
+    String certified = "1.21.0-1.21.11, 26.1.x-26.2.x";
     if (parsed == null) {
-      return unknown("minecraft", "Minecraft", version, "1.21.0-1.21.11", "无法解析 Minecraft 版本");
+      return unknown("minecraft", "Minecraft", version, certified, "无法解析 Minecraft 版本");
     }
-    if (parsed[0] != 1 || parsed[1] != 21) {
-      return unsupported("minecraft", "Minecraft", version, "1.21.0-1.21.11",
-          "插件 API 和协议基线为 Minecraft 1.21.x");
+    if (parsed[0] == 1 && parsed[1] == 21) {
+      if (parsed[2] <= 11) {
+        return supported("minecraft", "Minecraft", version, certified,
+            "已认证 1.21 系列后端基线");
+      }
+      return degraded("minecraft", "Minecraft", version, certified,
+          "新的 1.21 补丁版本需要补充真实服务器验收");
     }
-    if (parsed[2] <= 11) {
-      return supported("minecraft", "Minecraft", version, "1.21.0-1.21.11", "已认证 1.21 系列");
+    if (parsed[0] == 26) {
+      if (parsed[1] == 1 || parsed[1] == 2) {
+        return supported("minecraft", "Minecraft", version, certified,
+            "已认证 Paper/Folia 26.1-26.2 系列");
+      }
+      if (parsed[1] > 2) {
+        return degraded("minecraft", "Minecraft", version, certified,
+            "更新的 26.x 版本允许启动，但尚未完成实服认证");
+      }
     }
-    return degraded("minecraft", "Minecraft", version, "1.21.0-1.21.11",
-        "新的 1.21 补丁版本需要补充真实服务器验收");
+    return unsupported("minecraft", "Minecraft", version, certified,
+        "服务器 Minecraft 主版本未经认证");
   }
 
   /**

@@ -15,7 +15,7 @@ starx-plugins/starx-universal/build/libs/starx-universal.jar
 | `starx-server.jar` | Paper/Folia 分端调试与边界测试 | 否，除非明确不用通用包 |
 | `starx-api-1.0.0.jar` | 第三方扩展编译依赖，不是可安装插件 | 否 |
 
-所有模块要求 Java 21。Velocity 编译和验收基线为 `3.5.0-SNAPSHOT` build 606；后端 API 基线为 Paper 1.21.11，并声明 `folia-supported: true`。
+Universal JAR 保持 Java 21 字节码。Velocity 编译和验收基线为 `3.5.0-SNAPSHOT` build 606；后端保留 Paper 1.21.11 生产编译基线，并使用 Java 25 对 Paper 26.1.2 build 71 与 26.2 build 84 执行双 API 编译门禁。Paper/Folia 26.x 实例使用 Java 25，且继续声明 `folia-supported: true`。
 
 ## 平台职责
 

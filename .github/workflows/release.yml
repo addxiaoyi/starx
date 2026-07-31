@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: gradle
 
       - name: Validate tag and project version
@@ -72,6 +72,13 @@ jobs:
               "sha256": digest,
               "sizeBytes": artifact.stat().st_size,
               "java": 21,
+              "bytecodeJava": 21,
+              "buildJava": 25,
+              "runtimeJava": [21, 25],
+              "certifiedPaperApis": [
+                  "26.1.2.build.71-stable",
+                  "26.2.build.84-stable",
+              ],
               "platforms": ["Velocity", "Paper", "Folia"],
               "extensionApi": "1.0.0",
           }
