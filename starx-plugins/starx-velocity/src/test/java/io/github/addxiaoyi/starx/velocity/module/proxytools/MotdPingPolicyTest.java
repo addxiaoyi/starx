@@ -11,8 +11,11 @@ import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import javax.imageio.ImageIO;
 import net.kyori.adventure.text.Component;
@@ -65,9 +68,27 @@ class MotdPingPolicyTest {
     Path favicon = temp.resolve("server-icon.png");
     Files.write(favicon, png());
 
-    Favicon loaded = MotdModule.loadFavicon(temp, "server-icon.png", message -> { });
-    assertNotNull(loaded);
+    List<String> warnings = new ArrayList<>();
+    Favicon loaded = MotdModule.loadFavicon(temp, "server-icon.png", warnings::add);
+    assertNotNull(loaded, () -> String.join("; ", warnings));
     assertTrue(MotdModule.loadFavicon(temp, "../server-icon.png", message -> { }) == null);
+  }
+
+  @Test
+  void acceptsFaviconThroughCanonicalizedDataDirectory() throws Exception {
+    Path realData = Files.createDirectories(temp.resolve("real-data"));
+    Path alias = temp.resolve("data-alias");
+    try {
+      Files.createSymbolicLink(alias, realData);
+    } catch (IOException | UnsupportedOperationException | SecurityException error) {
+      org.junit.jupiter.api.Assumptions.assumeTrue(false, error.getMessage());
+    }
+    Files.write(realData.resolve("server-icon.png"), png());
+
+    List<String> warnings = new ArrayList<>();
+    Favicon loaded = MotdModule.loadFavicon(alias, "server-icon.png", warnings::add);
+
+    assertNotNull(loaded, () -> String.join("; ", warnings));
   }
 
   @Test

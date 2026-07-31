@@ -89,18 +89,6 @@ jobs:
           PY
           grep -Fq "$(cut -d' ' -f1 SHA256SUMS)" release-manifest.json
 
-      - name: Upload release verification evidence
-        uses: actions/upload-artifact@v6
-        with:
-          name: release-evidence-${{ steps.version.outputs.version }}
-          if-no-files-found: error
-          path: |
-            starx-universal-${{ steps.version.outputs.version }}.jar
-            SHA256SUMS
-            release-manifest.json
-            docs/releases/${{ steps.version.outputs.version }}.md
-            **/build/test-results/test/*.xml
-
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,10 +97,27 @@ jobs:
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
           notes="${{ steps.version.outputs.notes }}"
-          gh release create "$GITHUB_REF_NAME" \
-            "starx-universal-$version.jar" \
-            SHA256SUMS \
-            release-manifest.json \
-            --verify-tag \
-            --notes-file "$notes" \
-            --title "StarX $version"
+          assets=(
+            "starx-universal-$version.jar"
+            SHA256SUMS
+            release-manifest.json
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME"               --notes-file "$notes"               --title "StarX $version"
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}"               --verify-tag               --notes-file "$notes"               --title "StarX $version"
+          fi
+
+      - name: Upload release verification evidence
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-evidence-${{ steps.version.outputs.version }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            starx-universal-${{ steps.version.outputs.version }}.jar
+            SHA256SUMS
+            release-manifest.json
+            docs/releases/${{ steps.version.outputs.version }}.md

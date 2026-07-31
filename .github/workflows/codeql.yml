@@ -168,10 +168,12 @@ jobs:
 
       - name: Upload Trivy reports
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: trivy-security-report
           if-no-files-found: error
+          retention-days: 7
           path: |
             trivy-vulnerability-report.json
             trivy-source-report.json

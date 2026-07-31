@@ -9,6 +9,7 @@ import io.github.addxiaoyi.starx.api.event.StarxEvent;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -95,19 +96,27 @@ public final class MotdModule implements VelocityModule {
         if (configuredPath == null || configuredPath.isBlank()) {
             return null;
         }
-        Path data = dataDirectory.toAbsolutePath().normalize();
-        Path candidate = data.resolve(configuredPath).normalize();
         try {
+            Path data = dataDirectory.toRealPath();
+            Path candidate = data.resolve(configuredPath).normalize();
             if (!candidate.startsWith(data)
                 || Files.isSymbolicLink(candidate)
                 || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)
-                || Files.size(candidate) > MAX_FAVICON_BYTES
-                || !candidate.toRealPath().startsWith(data)
-                || ImageIO.read(candidate.toFile()) == null) {
+                || Files.size(candidate) > MAX_FAVICON_BYTES) {
                 warningSink.accept("StarX favicon ignored: configured file is unsafe or invalid");
                 return null;
             }
-            return Favicon.create(candidate);
+            Path realCandidate = candidate.toRealPath();
+            if (!realCandidate.startsWith(data)) {
+                warningSink.accept("StarX favicon ignored: configured file escapes the data directory");
+                return null;
+            }
+            BufferedImage image = ImageIO.read(realCandidate.toFile());
+            if (image == null) {
+                warningSink.accept("StarX favicon ignored: configured file is not a readable image");
+                return null;
+            }
+            return Favicon.create(image);
         } catch (IOException | RuntimeException error) {
             warningSink.accept("StarX favicon ignored: " + error.getMessage());
             return null;

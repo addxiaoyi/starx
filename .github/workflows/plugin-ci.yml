@@ -47,16 +47,20 @@ jobs:
 
       - name: Upload JUnit XML
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: junit-${{ runner.os }}
           if-no-files-found: warn
+          retention-days: 3
           path: "**/build/test-results/test/*.xml"
 
       - name: Upload universal plugin
         if: runner.os == 'Linux' && success()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: starx-universal
           if-no-files-found: error
+          retention-days: 3
           path: starx-plugins/starx-universal/build/libs/starx-universal.jar
