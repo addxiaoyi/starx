@@ -6,6 +6,7 @@ import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
+import com.velocitypowered.api.proxy.ServerConnection;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import io.github.addxiaoyi.starx.api.event.EventBus;
@@ -111,6 +112,10 @@ public final class VelocityMessageBridge implements VelocityModule {
         @Subscribe
         public void onPluginMessage(PluginMessageEvent event) {
             if (!event.getIdentifier().equals(VelocityMessageBridge.this.channel)) {
+                return;
+            }
+            event.setResult(PluginMessageEvent.ForwardResult.handled());
+            if (!(event.getSource() instanceof ServerConnection)) {
                 return;
             }
             Optional<PluginMessage> decoded = decode(event.getData());

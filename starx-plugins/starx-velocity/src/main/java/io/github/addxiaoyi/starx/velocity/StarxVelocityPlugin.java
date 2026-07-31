@@ -408,7 +408,9 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         MigrationModule migrationModule = new MigrationModule(this, this.eventBus, MigrationModule.Config.defaultConfig(), userRepository, uniAuthClient);
         this.moduleManager.register(migrationModule);
         this.moduleManager.register(new MigrationCommands(this, userRepository, migrationModule, uniAuthClient));
-        this.moduleManager.register(new MotdModule(this, this.eventBus, MotdModule.Config.defaultConfig()));
+        StarxConfig.ModuleConfig motdConfig = this.config.modules().getOrDefault(
+            "starx.motd", new StarxConfig.ModuleConfig(true));
+        this.moduleManager.register(new MotdModule(this, this.eventBus, MotdModule.Config.from(motdConfig)));
         MaintenanceModule maintenanceModule = new MaintenanceModule(
             this,
             this.eventBus,

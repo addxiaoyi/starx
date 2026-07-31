@@ -13,6 +13,7 @@ import io.github.addxiaoyi.starx.uworld.UworldHandle;
 import io.github.addxiaoyi.starx.uworld.UworldOutcome;
 import io.github.addxiaoyi.starx.uworld.UworldOutcomeType;
 import io.github.addxiaoyi.starx.uworld.UworldPhase;
+import io.github.addxiaoyi.starx.uworld.UworldSpec;
 import io.github.addxiaoyi.starx.uworld.UworldTransferPlayer;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -190,6 +191,7 @@ final class ManagedUworldSession implements UworldFlowSession, LimboSessionHandl
       return;
     }
     this.limboPlayer = player;
+    player.setGameMode(this.world.spec().gameMode());
     player.disableFalling();
     try {
       this.replaceTimeout(this.options.activeTimeout(), UworldPhase.ACTIVE,
@@ -211,6 +213,20 @@ final class ManagedUworldSession implements UworldFlowSession, LimboSessionHandl
       return;
     }
     this.invoke(() -> this.handler.onReady(this));
+  }
+
+  @Override
+  public boolean teleportToSpawn() {
+    LimboPlayer current = this.limboPlayer;
+    if (current == null || this.state.phase() != UworldPhase.ACTIVE) {
+      return false;
+    }
+    UworldSpec spec = this.world.spec();
+    current.setGameMode(spec.gameMode());
+    current.disableFalling();
+    current.teleport(
+        spec.spawnX(), spec.spawnY(), spec.spawnZ(), spec.yaw(), spec.pitch());
+    return true;
   }
 
   @Override

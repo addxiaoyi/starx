@@ -40,7 +40,7 @@ final class UworldSpecTest {
         () -> assertEquals(0.5, spec.spawnZ()),
         () -> assertEquals(0.0f, spec.yaw()),
         () -> assertEquals(0.0f, spec.pitch()),
-        () -> assertEquals(GameMode.SURVIVAL, spec.gameMode()),
+        () -> assertEquals(GameMode.ADVENTURE, spec.gameMode()),
         () -> assertEquals(4, spec.viewDistance()),
         () -> assertEquals(4, spec.simulationDistance()),
         () -> assertEquals(30_000, spec.readTimeoutMillis()),

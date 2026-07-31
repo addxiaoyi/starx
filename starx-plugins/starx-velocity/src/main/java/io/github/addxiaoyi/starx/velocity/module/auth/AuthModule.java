@@ -831,9 +831,13 @@ public final class AuthModule implements VelocityModule {
 
   private final class AuthFlowHandler implements UworldFlowHandler {
     private final Player player;
+    private final VoidRescueState voidRescue;
 
     private AuthFlowHandler(Player player) {
       this.player = player;
+      double threshold = AuthModule.this.uworldConfig.auth().world().spawnY()
+          - AuthModule.this.uworldConfig.auth().world().voidRescueThreshold();
+      this.voidRescue = new VoidRescueState(threshold);
     }
 
     @Override
@@ -844,6 +848,17 @@ public final class AuthModule implements VelocityModule {
     @Override
     public void onChat(UworldFlowSession session, String message) {
       AuthModule.this.handleAuthInput(session, this.player, message);
+    }
+
+    @Override
+    public void onMove(UworldFlowSession session, double x, double y, double z) {
+      this.voidRescue.observePosition(y);
+      if (!this.voidRescue.shouldRescue(y)) {
+        return;
+      }
+      if (!session.teleportToSpawn()) {
+        this.voidRescue.cancelPending();
+      }
     }
 
     @Override

@@ -24,8 +24,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,6 +57,14 @@ public final class ConfigLoader {
     ensureConfigExists(path);
 
     Map<String, Object> currentRoot = readRoot(path);
+    MiniMotdMigration.Result migration = MiniMotdMigration.migrate(
+        path.getParent() == null ? Path.of(".") : path.getParent(),
+        currentRoot,
+        warningSink);
+    if (migration.migrated()) {
+      persistMiniMotdMigration(path, currentRoot);
+      MiniMotdMigration.markComplete(migration);
+    }
     Map<String, Object> sourceModules = child(currentRoot, "modules");
     boolean sourceHasUworldRoot = currentRoot.containsKey("uworld");
     boolean sourceHasLegacyRoot = currentRoot.containsKey("limbo");
@@ -116,6 +126,30 @@ public final class ConfigLoader {
         modules);
   }
 
+  private static void persistMiniMotdMigration(Path path, Map<String, Object> root)
+      throws IOException {
+    Path parent = path.toAbsolutePath().normalize().getParent();
+    if (parent == null) {
+      throw new IOException("Cannot persist MiniMOTD migration without a config parent directory");
+    }
+    Files.createDirectories(parent);
+    Path backup = path.resolveSibling(path.getFileName() + ".minimotd-backup");
+    if (Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+        && !Files.exists(backup, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+      Files.copy(path, backup, StandardCopyOption.COPY_ATTRIBUTES);
+    }
+    Path temporary = path.resolveSibling(path.getFileName() + ".minimotd.tmp");
+    Files.writeString(temporary, new Yaml().dump(root), StandardCharsets.UTF_8);
+    try {
+      try {
+        Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+      } catch (AtomicMoveNotSupportedException ignored) {
+        Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING);
+      }
+    } finally {
+      Files.deleteIfExists(temporary);
+    }
+  }
   private static void ensureConfigExists(Path path) throws IOException {
     if (Files.exists(path)) {
       return;
@@ -215,7 +249,7 @@ public final class ConfigLoader {
         decimal(worldNode, "spawn-z", 0.5),
         (float) decimal(worldNode, "spawn-yaw", 0.0),
         (float) decimal(worldNode, "spawn-pitch", 0.0),
-        stringValue(worldNode, "game-mode", "SURVIVAL"),
+        stringValue(worldNode, "game-mode", "ADVENTURE"),
         stringValue(worldNode, "loader-type", "AUTO"),
         stringValue(worldNode, "file-name", "auth_world.schem"),
         configInteger(worldNode, "offset-x", 0, "uworld.auth.world.offset-x"),
@@ -232,7 +266,12 @@ public final class ConfigLoader {
             "platform-radius",
             "platform-size",
             5,
-            "uworld.auth.world"));
+            "uworld.auth.world"),
+        configInteger(
+            worldNode,
+            "void-rescue-threshold",
+            16,
+            "uworld.auth.world.void-rescue-threshold"));
     UworldConfig.Auth auth = new UworldConfig.Auth(
         configInteger(authNode, "timeout-seconds", 300, "uworld.auth.timeout-seconds"),
         stringValue(authNode, "target-server", "lobby"),

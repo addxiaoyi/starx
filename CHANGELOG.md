@@ -2,6 +2,35 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [0.3.5] - 2026-08-01
+
+### Added
+
+- 认证 Uworld 增加 Adventure 状态/数据包强制、可配置虚空救援阈值与传送确认状态机。
+- 启动时安全、幂等迁移 MiniMOTD HOCON 的 `motds` 数组、图标和最大人数配置。
+
+### Fixed
+
+- Proxy Ping 现在报告代理实际在线人数，动态修正非法的最大人数，同时保留原有样本玩家和其他 Ping 字段。
+- MiniMOTD 迁移拒绝符号链接、越界文本、超大或非 PNG 图标，并不覆盖自定义 StarX 配置或现有图标。
+
+### Security
+
+- `starx:main` 消息桥现在只接受后端 `ServerConnection`，拒绝玩家客户端伪造的 Plan 统计和玩家状态事件。
+- `starx:anticheat` 消息桥现在只接受后端 `ServerConnection`，拒绝客户端伪造任意玩家 UUID 的违规记录和安全告警。
+- StarX 私有消息频道在消费后显式标记为 handled，避免可信消息继续被其他端点转发。
+
+### Fixed
+
+- 修复 BCrypt 严格模式在 UTF-8 密码达到 72 字节时抛出异常的问题；长密码使用 SHA-512 预处理后再执行 BCrypt，现有短密码哈希保持兼容。
+- 无效、缺失或格式损坏的密码哈希现在按认证失败处理，不再把运行时异常传播到登录流程。
+
+### Verification
+
+- 新增插件消息来源信任契约测试和长密码、多字节密码、损坏哈希回归测试。
+- Velocity 完整测试集、完整 `clean check`、Paper 26.1/26.2 API 编译门禁和 Universal JAR 校验必须在发布前通过。
+- 公共扩展 API 保持 1.0.0，Paper/Folia 26.1.x–26.2.x 兼容范围不变。
+
 ## [0.3.4] - 2026-07-31
 
 ### Added

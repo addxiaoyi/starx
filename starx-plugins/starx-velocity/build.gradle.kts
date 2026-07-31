@@ -25,6 +25,7 @@ dependencies {
     implementation(project(":starx-plugins:starx-website-sync"))
     implementation(project(":starx-plugins:starx-extension-runtime"))
     implementation(project(":starx-plugins:starx-standalone-limbo"))
+    implementation("com.typesafe:config:1.4.3")
 
     // Uworld uses Velocity internals, so the compiler must match the validated runtime build.
     compileOnly(velocityBuild606Compile)

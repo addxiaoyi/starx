@@ -31,6 +31,7 @@ import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
+import com.velocitypowered.api.proxy.ServerConnection;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import io.github.addxiaoyi.starx.api.event.EventBus;
@@ -140,6 +141,10 @@ implements VelocityModule {
     void onPluginMessage(PluginMessageEvent event) {
         UUID playerId;
         if (!event.getIdentifier().equals((Object)this.channel)) {
+            return;
+        }
+        event.setResult(PluginMessageEvent.ForwardResult.handled());
+        if (!(event.getSource() instanceof ServerConnection)) {
             return;
         }
         Optional<Map<String, Object>> decoded = decodeDetection(event.getData());

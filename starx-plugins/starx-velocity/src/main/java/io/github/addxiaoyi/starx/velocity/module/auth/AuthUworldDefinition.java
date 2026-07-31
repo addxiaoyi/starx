@@ -41,6 +41,11 @@ final class AuthUworldDefinition {
 
   UworldSpec spec() {
     UworldConfig.World world = this.config.world();
+    if (!"ADVENTURE".equals(world.gameMode())) {
+      this.warningSink.accept(
+          "Authentication Uworld game mode is forced to ADVENTURE; configured value was "
+              + world.gameMode());
+    }
     return new UworldSpec(
         "auth",
         parseEnum(Dimension.class, world.dimension(), "dimension"),
@@ -49,7 +54,7 @@ final class AuthUworldDefinition {
         world.spawnZ(),
         world.spawnYaw(),
         world.spawnPitch(),
-        parseEnum(GameMode.class, world.gameMode(), "game mode"),
+        GameMode.ADVENTURE,
         world.viewDistance(),
         world.simulationDistance(),
         30_000,

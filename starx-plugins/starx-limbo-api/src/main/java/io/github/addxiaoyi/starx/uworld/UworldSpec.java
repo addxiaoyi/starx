@@ -77,7 +77,7 @@ public record UworldSpec(
         0.5,
         0.0f,
         0.0f,
-        GameMode.SURVIVAL,
+        GameMode.ADVENTURE,
         4,
         4,
         30_000,

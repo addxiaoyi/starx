@@ -237,6 +237,10 @@ modules:
     enabled: true
   starx.motd:
     enabled: true
+    normal: "欢迎来到 StarX！"
+    maintenance: "StarX 正在维护中。"
+    maximum-players: 100
+    icon-path: ""
   starx.redirect:
     enabled: true
   starx.queue:
@@ -345,7 +349,7 @@ uworld:
       spawn-z: 0.5
       spawn-yaw: 0.0
       spawn-pitch: 0.0
-      game-mode: "SURVIVAL"
+      game-mode: "ADVENTURE"
       loader-type: "AUTO"
       file-name: "auth_world.schem"
       offset-x: 0
@@ -354,6 +358,8 @@ uworld:
       view-distance: 4
       simulation-distance: 4
       platform-radius: 5
+      # 低于出生点多少格触发一次回生；收到客户端传送确认后允许再次救援。
+      void-rescue-threshold: 16
   diagnostics:
     enabled: false
     timeout-seconds: 120

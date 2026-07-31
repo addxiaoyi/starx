@@ -79,13 +79,16 @@ public record UworldConfig(
       int offsetZ,
       int viewDistance,
       int simulationDistance,
-      int platformRadius
+      int platformRadius,
+      int voidRescueThreshold
   ) {
 
     private static final int MIN_DISTANCE = 1;
     private static final int MAX_DISTANCE = 32;
     private static final int MIN_PLATFORM_RADIUS = 1;
     private static final int MAX_PLATFORM_RADIUS = 64;
+    private static final int DEFAULT_VOID_RESCUE_THRESHOLD = 16;
+    private static final int MAX_VOID_RESCUE_THRESHOLD = 256;
     private static final Set<String> LOADERS = Set.of(
         "AUTO",
         "VOID",
@@ -120,6 +123,29 @@ public record UworldConfig(
           MIN_PLATFORM_RADIUS,
           MAX_PLATFORM_RADIUS,
           "platformRadius");
+      requireRange(voidRescueThreshold, 1, MAX_VOID_RESCUE_THRESHOLD, "voidRescueThreshold");
+    }
+
+    public World(
+        String dimension,
+        double spawnX,
+        double spawnY,
+        double spawnZ,
+        float spawnYaw,
+        float spawnPitch,
+        String gameMode,
+        String loaderType,
+        String fileName,
+        int offsetX,
+        int offsetY,
+        int offsetZ,
+        int viewDistance,
+        int simulationDistance,
+        int platformRadius
+    ) {
+      this(dimension, spawnX, spawnY, spawnZ, spawnYaw, spawnPitch, gameMode, loaderType,
+          fileName, offsetX, offsetY, offsetZ, viewDistance, simulationDistance, platformRadius,
+          DEFAULT_VOID_RESCUE_THRESHOLD);
     }
 
     public static World defaults() {
@@ -130,7 +156,7 @@ public record UworldConfig(
           0.5,
           0.0f,
           0.0f,
-          "SURVIVAL",
+          "ADVENTURE",
           "AUTO",
           "auth_world.schem",
           0,
@@ -138,7 +164,8 @@ public record UworldConfig(
           0,
           4,
           4,
-          5);
+          5,
+          DEFAULT_VOID_RESCUE_THRESHOLD);
     }
   }
 

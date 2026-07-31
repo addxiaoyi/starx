@@ -39,4 +39,13 @@ public interface UworldFlowSession {
   CompletionStage<UworldOutcome> completion();
 
   void execute(Runnable action);
+
+  /**
+   * Teleports the player to the configured spawn of the current Uworld.
+   *
+   * @return {@code true} when the teleport was sent to an active low-level player
+   */
+  default boolean teleportToSpawn() {
+    return false;
+  }
 }
