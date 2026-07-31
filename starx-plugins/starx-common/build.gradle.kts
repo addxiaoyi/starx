@@ -31,7 +31,7 @@ dependencies {
     compileOnly("org.slf4j:slf4j-api:2.0.9")
     // Note: OTP (TOTP) 和 BCrypt 源码已直接复制到项目中
 
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("com.google.code.gson:gson:2.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
