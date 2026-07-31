@@ -62,14 +62,29 @@ public final class AuthService {
     private boolean skinSiteBypass = true;  // 皮肤站免密
 
     public AuthService(JdbcUserRepository userRepository, EventBus eventBus, SessionManager sessionManager, UniAuthConfig uniauthConfig, UniAuthBridge uniauthBridge, IpSessionStore ipSessionStore) {
-        this.userRepository = userRepository;
-        this.eventBus = eventBus;
-        this.sessionManager = sessionManager;
+        this(userRepository, eventBus, sessionManager, uniauthConfig, uniauthBridge,
+            ipSessionStore, null);
+    }
+
+    public AuthService(
+        JdbcUserRepository userRepository,
+        EventBus eventBus,
+        SessionManager sessionManager,
+        UniAuthConfig uniauthConfig,
+        UniAuthBridge uniauthBridge,
+        IpSessionStore ipSessionStore,
+        JdbcTrustedDeviceRepository trustedDevices
+    ) {
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository");
+        this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
+        this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager");
         this.bruteForceProtector = new BruteForceProtector();
-        this.uniauthConfig = uniauthConfig;
+        this.uniauthConfig = Objects.requireNonNullElseGet(
+            uniauthConfig, UniAuthConfig::defaults);
         this.uniauthBridge = uniauthBridge;
-        this.ipSessionStore = ipSessionStore;
-        this.trustedDevices = null;
+        this.ipSessionStore = Objects.requireNonNullElseGet(
+            ipSessionStore, InMemoryIpSessionStore::new);
+        this.trustedDevices = trustedDevices;
     }
 
     public AuthService(JdbcUserRepository userRepository, EventBus eventBus, SessionManager sessionManager) {

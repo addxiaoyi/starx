@@ -24,6 +24,8 @@ import io.github.addxiaoyi.starx.common.auth.DeviceFingerprint;
 import io.github.addxiaoyi.starx.common.auth.IpSessionStore;
 import io.github.addxiaoyi.starx.common.auth.PremiumResolver;
 import io.github.addxiaoyi.starx.common.auth.SessionManager;
+import io.github.addxiaoyi.starx.common.auth.uniauth.UniAuthBridge;
+import io.github.addxiaoyi.starx.common.auth.uniauth.UniAuthClient;
 import io.github.addxiaoyi.starx.common.auth.uniauth.UniAuthConfig;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 import io.github.addxiaoyi.starx.common.database.JdbcTrustedDeviceRepository;
@@ -396,10 +398,16 @@ public final class AuthModule implements VelocityModule {
   private void initAuthService(StarxConfig.AuthConfig authConfig) {
     this.sessionManager = new SessionManager(Duration.ofMinutes(10), Instant::now);
     this.premiumResolver = new PremiumResolver();
-    this.authService = this.trustedDeviceRepository == null || this.ipSessionStore == null
-        ? new AuthService(this.userRepository, this.eventBus, this.sessionManager)
-        : new AuthService(this.userRepository, this.eventBus, this.sessionManager,
-            this.ipSessionStore, this.trustedDeviceRepository);
+
+    UniAuthBridge uniAuthBridge = null;
+    if (this.uniauthConfig.enabled() && this.uniauthConfig.bridgeMode()) {
+      UniAuthClient uniAuthClient = new UniAuthClient(this.uniauthConfig);
+      uniAuthBridge = new UniAuthBridge(
+          this.uniauthConfig, uniAuthClient, this.userRepository);
+    }
+    this.authService = new AuthService(this.userRepository, this.eventBus, this.sessionManager,
+        this.uniauthConfig, uniAuthBridge,
+        this.ipSessionStore, this.trustedDeviceRepository);
     this.authService.setIpBypassMinutes(authConfig.passwordBypassMinutes());
     this.commandHandler = new AuthCommandHandler(this.authService);
   }

@@ -123,9 +123,20 @@ uniauth:
   # 可选外部账号服务；关闭时不会发起任何 UniAuth 请求。
   enabled: false
   api-url: "https://api.example.com/uniauth/"
+  # 请使用单独生成的密钥，不要把真实密钥提交到 Git。
   api-key: ""
   timeout-ms: 5000
+  # 启用后，未完成本地迁移的玩家先由 UniAuth 验证，成功后迁移到 StarX。
   bridge-mode: false
+  profile-sync:
+    # 仅通过 UniAuth playerInfo API 同步资料，不读取外部数据库，也不导入密码。
+    enabled: false
+    on-login: true
+    sync-email: true
+    sync-external-user-id: true
+    # false 时，本地已有邮箱或外部用户 ID 不会被远端值覆盖。
+    overwrite-local-values: false
+    source-system: "uniauth"
 
 # 离线模式玩家默认必须在 Uworld 完成登录或注册。
 auth:

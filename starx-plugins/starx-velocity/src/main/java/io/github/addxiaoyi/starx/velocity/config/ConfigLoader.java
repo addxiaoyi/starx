@@ -489,12 +489,20 @@ public final class ConfigLoader {
   }
 
   private static UniAuthConfig parseUniAuthConfig(Map<String, Object> node) {
+    Map<String, Object> profileSync = child(node, "profile-sync");
     return new UniAuthConfig(
         booleanValue(node, "enabled", false),
         stringValue(node, "api-url", "https://api.example.com/uniauth/"),
         stringValue(node, "api-key", ""),
         integer(node, "timeout-ms", 5000),
-        booleanValue(node, "bridge-mode", false));
+        booleanValue(node, "bridge-mode", false),
+        new UniAuthConfig.ProfileSyncConfig(
+            booleanValue(profileSync, "enabled", false),
+            booleanValue(profileSync, "on-login", true),
+            booleanValue(profileSync, "sync-email", true),
+            booleanValue(profileSync, "sync-external-user-id", true),
+            booleanValue(profileSync, "overwrite-local-values", false),
+            stringValue(profileSync, "source-system", "uniauth")));
   }
 
   private static StarxConfig.TotpConfig parseTotpConfig(Map<String, Object> node) {

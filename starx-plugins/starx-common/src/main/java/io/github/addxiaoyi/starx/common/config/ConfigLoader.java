@@ -91,7 +91,21 @@ public final class ConfigLoader {
 
     private static UniAuthConfig loadUniAuth(Map<String, Object> node) {
         UniAuthConfig defaults = UniAuthConfig.defaults();
-        return new UniAuthConfig(ConfigLoader.bool(node, "enabled", defaults.enabled()), ConfigLoader.str(node, "api-url", defaults.apiUrl()), ConfigLoader.str(node, "api-key", defaults.apiKey()), ConfigLoader.integer(node, "timeout-ms", defaults.timeoutMs()), ConfigLoader.bool(node, "bridge-mode", defaults.bridgeMode()));
+        UniAuthConfig.ProfileSyncConfig syncDefaults = defaults.profileSync();
+        Map<String, Object> profileSync = ConfigLoader.child(node, "profile-sync");
+        return new UniAuthConfig(
+            ConfigLoader.bool(node, "enabled", defaults.enabled()),
+            ConfigLoader.str(node, "api-url", defaults.apiUrl()),
+            ConfigLoader.str(node, "api-key", defaults.apiKey()),
+            ConfigLoader.integer(node, "timeout-ms", defaults.timeoutMs()),
+            ConfigLoader.bool(node, "bridge-mode", defaults.bridgeMode()),
+            new UniAuthConfig.ProfileSyncConfig(
+                ConfigLoader.bool(profileSync, "enabled", syncDefaults.enabled()),
+                ConfigLoader.bool(profileSync, "on-login", syncDefaults.onLogin()),
+                ConfigLoader.bool(profileSync, "sync-email", syncDefaults.syncEmail()),
+                ConfigLoader.bool(profileSync, "sync-external-user-id", syncDefaults.syncExternalUserId()),
+                ConfigLoader.bool(profileSync, "overwrite-local-values", syncDefaults.overwriteLocalValues()),
+                ConfigLoader.str(profileSync, "source-system", syncDefaults.sourceSystem())));
     }
 
     private static HttpApiConfig loadHttpApi(Map<String, Object> node) {

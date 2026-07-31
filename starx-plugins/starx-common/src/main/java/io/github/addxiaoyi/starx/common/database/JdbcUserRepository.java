@@ -256,6 +256,21 @@ implements UserRepository {
         });
     }
 
+    public void updateExternalIdentity(
+        UUID uuid,
+        String externalUserId,
+        String sourceSystem
+    ) {
+        Objects.requireNonNull(uuid, "uuid");
+        this.execute(
+            "UPDATE starx_users SET external_user_id = ?, source_system = ? WHERE uuid = ?",
+            stmt -> {
+                stmt.setString(1, externalUserId);
+                stmt.setString(2, sourceSystem);
+                stmt.setString(3, uuid.toString());
+            });
+    }
+
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
         this.execute("UPDATE starx_users SET password_hash = ?, password_migrated_at = ?, migration_state = ? WHERE uuid = ?", stmt -> {
             stmt.setString(1, passwordHash);
