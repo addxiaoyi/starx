@@ -31,19 +31,19 @@ dependencies {
     implementation(project(":starx-plugins:starx-extension-runtime"))
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("com.google.zxing:core:3.5.3")
-    compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:26.2.build.87-stable")
     compileOnly("me.clip:placeholderapi:2.11.7")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    testImplementation("io.papermc.paper:paper-api:26.2.build.87-stable")
     testImplementation("me.clip:placeholderapi:2.11.7")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    add(paper261ApiClasspath.name, "io.papermc.paper:paper-api:26.1.2.build.71-stable")
+    add(paper261ApiClasspath.name, "io.papermc.paper:paper-api:26.2.build.87-stable")
     add(paper261ApiClasspath.name, "me.clip:placeholderapi:2.11.7")
     add(paper261ApiClasspath.name, "org.jetbrains:annotations:26.0.2")
-    add(paper262ApiClasspath.name, "io.papermc.paper:paper-api:26.2.build.84-stable")
+    add(paper262ApiClasspath.name, "io.papermc.paper:paper-api:26.2.build.87-stable")
     add(paper262ApiClasspath.name, "me.clip:placeholderapi:2.11.7")
     add(paper262ApiClasspath.name, "org.jetbrains:annotations:26.0.2")
 }
