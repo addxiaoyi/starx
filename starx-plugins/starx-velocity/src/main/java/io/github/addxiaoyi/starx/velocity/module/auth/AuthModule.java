@@ -418,10 +418,11 @@ public final class AuthModule implements VelocityModule {
     InetAddress address = this.playerAddress(player);
     boolean premium = this.premiumResolver.isPremium(playerId, player.isOnlineMode());
     boolean trustedExternalIdentity = this.trustedIdentity.isTrusted(playerId);
+    boolean trustedWebsiteBinding = this.userRepository.hasTrustedWebsiteBinding(playerId, username);
     boolean recentPasswordLogin = address != null
         && this.authService.shouldBypassAuth(
             playerId, address.getHostAddress(), this.deviceId(player), false, false, false);
-    if (AuthAdmissionPolicy.canAutoLogin(premium, trustedExternalIdentity) || recentPasswordLogin) {
+    if (AuthAdmissionPolicy.canAutoLogin(premium, trustedExternalIdentity || trustedWebsiteBinding) || recentPasswordLogin) {
       AuthResult result = premium
           ? this.authService.autoLogin(lease, playerId, username, address)
           : recentPasswordLogin
@@ -431,7 +432,7 @@ public final class AuthModule implements VelocityModule {
               playerId,
               username,
               address,
-              "floodgate",
+              trustedWebsiteBinding ? "website-binding" : "floodgate",
               false);
       if (!result.success()) {
         return Optional.of(Component.text(result.message()));

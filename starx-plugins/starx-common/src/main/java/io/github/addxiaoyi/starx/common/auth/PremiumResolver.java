@@ -10,6 +10,6 @@ public final class PremiumResolver {
     }
 
     public boolean isPremium(UUID uuid, boolean onlineMode) {
-        return onlineMode && uuid.version() == 4;
+        return onlineMode;
     }
 }

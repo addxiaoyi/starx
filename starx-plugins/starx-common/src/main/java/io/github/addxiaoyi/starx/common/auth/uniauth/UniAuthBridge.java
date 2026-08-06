@@ -47,6 +47,12 @@ public final class UniAuthBridge {
             login.message() == null ? "Authentication failed" : login.message(),
             null));
       }
+      if (login.requiresLocalMigration() && existing.isEmpty()) {
+        return CompletableFuture.completedFuture(new BridgeResult(
+            false,
+            "邮箱未验证账号只能迁移已有本地档案",
+            null));
+      }
       return profileForLogin(username).thenApply(profile -> existing.isPresent()
           ? migrateExisting(existing.get(), username, password, profile)
           : createFromUniAuth(uuid, username, password, login, profile));

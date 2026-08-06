@@ -15,6 +15,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -271,6 +274,26 @@ implements UserRepository {
             });
     }
 
+    public void saveWebsiteBinding(UUID uuid, String username, String externalUserId, boolean verified) {
+        this.execute("DELETE FROM starx_website_bindings WHERE player_uuid = ?", stmt -> stmt.setString(1, uuid.toString()));
+        if (externalUserId == null || externalUserId.isBlank()) return;
+        this.execute(
+            "INSERT INTO starx_website_bindings (player_uuid, username, external_user_id, verified, updated_at) VALUES (?, ?, ?, ?, ?)",
+            stmt -> {
+                stmt.setString(1, uuid.toString());
+                stmt.setString(2, username);
+                stmt.setString(3, externalUserId);
+                stmt.setBoolean(4, verified);
+                stmt.setLong(5, System.currentTimeMillis());
+            });
+    }
+
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+        return this.queryOne(
+            "SELECT 1 FROM starx_website_bindings WHERE player_uuid = ? AND LOWER(username) = LOWER(?) AND verified = TRUE",
+            stmt -> { stmt.setString(1, uuid.toString()); stmt.setString(2, username); }, rs -> 1).isPresent();
+    }
+
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
         this.execute("UPDATE starx_users SET password_hash = ?, password_migrated_at = ?, migration_state = ? WHERE uuid = ?", stmt -> {
             stmt.setString(1, passwordHash);
@@ -485,11 +508,64 @@ implements UserRepository {
     }
 
     private StarxUser mapUser(ResultSet rs) throws SQLException {
-        Timestamp createdAt = rs.getTimestamp("created_at");
-        Timestamp lastLoginAt = rs.getTimestamp("last_login_at");
-        Timestamp passwordMigratedAt = rs.getTimestamp("password_migrated_at");
-        Timestamp lastLogoutAt = rs.getTimestamp("last_logout_at");
-        return new StarxUser(UUID.fromString(rs.getString("uuid")), rs.getString("username"), rs.getString("email"), rs.getString("password_hash"), rs.getString("totp_secret"), rs.getBoolean("premium"), createdAt != null ? createdAt.toInstant() : null, lastLoginAt != null ? lastLoginAt.toInstant() : null, rs.getString("external_user_id"), this.parseTrustedDevices(rs.getString("trusted_devices")), rs.getString("recovery_codes"), rs.getString("source_system"), rs.getString("migration_state"), passwordMigratedAt != null ? passwordMigratedAt.toInstant() : null, rs.getString("last_login_ip"), rs.getString("last_login_isp"), rs.getString("last_login_location"), rs.getLong("total_playtime"), lastLogoutAt != null ? lastLogoutAt.toInstant() : null, rs.getBoolean("welcome_message_shown"));
+        Instant createdAt = readInstant(rs, "created_at");
+        Instant lastLoginAt = readInstant(rs, "last_login_at");
+        Instant passwordMigratedAt = readInstant(rs, "password_migrated_at");
+        Instant lastLogoutAt = readInstant(rs, "last_logout_at");
+        return new StarxUser(UUID.fromString(rs.getString("uuid")), rs.getString("username"), rs.getString("email"), rs.getString("password_hash"), rs.getString("totp_secret"), rs.getBoolean("premium"), createdAt, lastLoginAt, rs.getString("external_user_id"), this.parseTrustedDevices(rs.getString("trusted_devices")), rs.getString("recovery_codes"), rs.getString("source_system"), rs.getString("migration_state"), passwordMigratedAt, rs.getString("last_login_ip"), rs.getString("last_login_isp"), rs.getString("last_login_location"), rs.getLong("total_playtime"), lastLogoutAt, rs.getBoolean("welcome_message_shown"));
+    }
+
+    private static Instant readInstant(ResultSet rs, String column) throws SQLException {
+        Object value = rs.getObject(column);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Instant instant) {
+            return instant;
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toInstant();
+        }
+        if (value instanceof OffsetDateTime offsetDateTime) {
+            return offsetDateTime.toInstant();
+        }
+        if (value instanceof LocalDateTime localDateTime) {
+            return Timestamp.valueOf(localDateTime).toInstant();
+        }
+        if (value instanceof Number number) {
+            return Instant.ofEpochMilli(number.longValue());
+        }
+
+        String text = value.toString().trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        try {
+            return Instant.parse(text);
+        } catch (DateTimeParseException ignored) {
+            // Legacy rows may use an offset rather than a trailing Z.
+        }
+        try {
+            return OffsetDateTime.parse(text).toInstant();
+        } catch (DateTimeParseException ignored) {
+            // Continue with local and SQL timestamp formats.
+        }
+        try {
+            return Timestamp.valueOf(LocalDateTime.parse(text)).toInstant();
+        } catch (DateTimeParseException ignored) {
+            // Continue with the JDBC SQL timestamp format.
+        }
+        try {
+            return Timestamp.valueOf(text).toInstant();
+        } catch (IllegalArgumentException ignored) {
+            // Some SQLite migrations persisted epoch milliseconds as text.
+        }
+        try {
+            return Instant.ofEpochMilli(Long.parseLong(text));
+        } catch (NumberFormatException ignored) {
+            throw new SQLException(
+                "Unsupported timestamp format for column " + column + ": " + text);
+        }
     }
 
     private String toJson(List<String> trustedDevices) {

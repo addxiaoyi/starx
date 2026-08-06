@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.common.auth.uniauth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonParser;
@@ -33,5 +34,28 @@ class UniAuthClientProfileTest {
     assertEquals("IMPORTED", profile.status());
     assertEquals("legacy-7", profile.externalUserId());
     assertEquals("legacy@example.test", profile.email());
+  }
+
+  @Test
+  void unverifiedEmailStillConfirmsPasswordForLocalMigration() {
+    UniAuthClient.LoginResponse login = UniAuthClient.parseLoginResponse(
+        JsonParser.parseString("""
+            {"success":false,"code":403,"message":"Email is not verified"}
+            """).getAsJsonObject());
+
+    assertTrue(login.success());
+    assertTrue(login.requiresLocalMigration());
+    assertEquals("邮箱未验证，已转为本地认证", login.message());
+  }
+
+  @Test
+  void wrongPasswordCannotStartLocalMigration() {
+    UniAuthClient.LoginResponse login = UniAuthClient.parseLoginResponse(
+        JsonParser.parseString("""
+            {"success":false,"code":401,"message":"Invalid password"}
+            """).getAsJsonObject());
+
+    assertFalse(login.success());
+    assertFalse(login.requiresLocalMigration());
   }
 }

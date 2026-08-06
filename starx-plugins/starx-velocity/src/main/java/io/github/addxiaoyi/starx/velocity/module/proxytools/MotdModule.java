@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Objects;
 import java.util.function.Consumer;
 import javax.imageio.ImageIO;
@@ -72,8 +73,33 @@ public final class MotdModule implements VelocityModule {
 
     void onProxyPing(ProxyPingEvent event) {
         Component motd = this.maintenanceActive ? this.config.maintenanceMotd() : this.config.normalMotd();
-        event.setPing(applyPing(event.getPing(), motd, this.plugin.proxy().getPlayerCount(),
+        int proxyOnlinePlayers = this.plugin.proxy().getPlayerCount();
+        int onlinePlayers = onlinePlayersForPing(
+            proxyOnlinePlayers,
+            this.plugin.proxy().getAllServers().stream()
+                .map(server -> server.getPlayersConnected().size())
+                .toList());
+        event.setPing(applyPing(event.getPing(), motd, onlinePlayers,
             this.config.maximumPlayers(), this.favicon));
+    }
+
+    static int onlinePlayersForPing(int proxyOnlinePlayers, Collection<Integer> backendOnlinePlayers) {
+        if (proxyOnlinePlayers < 0) {
+            throw new IllegalArgumentException("Proxy online player count must not be negative");
+        }
+        Objects.requireNonNull(backendOnlinePlayers, "backendOnlinePlayers");
+        if (backendOnlinePlayers.isEmpty()) {
+            return proxyOnlinePlayers;
+        }
+
+        int total = 0;
+        for (Integer count : backendOnlinePlayers) {
+            if (count == null || count < 0) {
+                throw new IllegalArgumentException("Backend online player counts must not be negative");
+            }
+            total = Math.addExact(total, count);
+        }
+        return total;
     }
 
     static ServerPing applyPing(ServerPing incoming, Component motd, int online, int configuredMaximum,

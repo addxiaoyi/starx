@@ -14,6 +14,7 @@ final class ServerCapabilitiesTest {
 
     assertTrue(capabilities.contains("bridge.v1"));
     assertTrue(capabilities.contains("bridge.http-exchange"));
+    assertTrue(capabilities.contains("public.player-count"));
     assertTrue(capabilities.contains("server.status"));
     assertTrue(capabilities.contains("scheduler.main"));
     assertFalse(capabilities.contains("scheduler.region"));

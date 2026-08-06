@@ -55,6 +55,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
         textureSource(plugin, config, Objects.requireNonNull(userRepository, "userRepository")),
         List.of(
             NodeCapabilities.NETWORK_STATUS,
+            NodeCapabilities.PUBLIC_PLAYER_COUNT,
             NodeCapabilities.PLAYERS_SNAPSHOT,
             NodeCapabilities.SERVER_STATUS,
             NodeCapabilities.SKIN_REFRESH),
@@ -220,7 +221,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
         offline ? null : boundedDouble(node.status().get("tps"), 0, 100),
         offline ? null : boundedDouble(node.status().get("mspt"), 0, 60_000),
         maintenance,
-        List.copyOf(node.capabilities()));
+        NodeCapabilities.filterSupported(node.capabilities()));
   }
 
   private static String implementationVersion(StarxVelocityPlugin plugin) {

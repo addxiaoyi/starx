@@ -274,6 +274,36 @@ public final class AuthService {
         this.webLoginApprovals = gateway;
     }
 
+    public AuthResult requestWebLoginApproval(AuthLease lease, UUID uuid, String username) {
+        Objects.requireNonNull(lease, "lease");
+        Objects.requireNonNull(uuid, "uuid");
+        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        if (optional.isEmpty()) {
+            return AuthResult.failure("请先注册游戏账号，再使用网站登录");
+        }
+        if (!this.sessionManager.isState(uuid, lease, AuthSession.State.GUEST)) {
+            return AuthResult.failure("认证会话已过期，请重新连接。");
+        }
+        if (!this.sessionManager.transition(
+                uuid, lease, AuthSession.State.GUEST, AuthSession.State.WEB_APPROVAL_PENDING)) {
+            return AuthResult.failure("认证会话已过期，请重新连接。");
+        }
+
+        try {
+            String approvalUrl = Objects.requireNonNull(this.webLoginApprovals, "webLoginApprovals")
+                .request(uuid, optional.get().username(), lease);
+            if (approvalUrl.isBlank()) {
+                throw new IllegalStateException("Web login approval URL is blank");
+            }
+            return AuthResult.webApproval(approvalUrl);
+        } catch (RuntimeException error) {
+            this.sessionManager.transition(
+                uuid, lease, AuthSession.State.WEB_APPROVAL_PENDING, AuthSession.State.GUEST);
+            logger.log(Level.WARNING, "Unable to create web login approval", error);
+            return AuthResult.failure("网页登录确认当前不可用，请稍后重试");
+        }
+    }
+
     public AuthResult autoLogin(AuthLease lease, UUID uuid, String username, InetAddress address) {
         return this.autoLoginTrusted(lease, uuid, username, address, "premium", true);
     }

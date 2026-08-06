@@ -6,6 +6,7 @@ import java.util.TreeSet;
 
 public final class NodeCapabilities {
   public static final String NETWORK_STATUS = "network.status";
+  public static final String PUBLIC_PLAYER_COUNT = "public.player-count";
   public static final String PLAYERS_SNAPSHOT = "players.snapshot";
   public static final String SERVER_STATUS = "server.status";
   public static final String SERVER_COMMANDS = "server.commands";
@@ -14,6 +15,7 @@ public final class NodeCapabilities {
 
   private static final Set<String> ALLOWED = Set.of(
       NETWORK_STATUS,
+      PUBLIC_PLAYER_COUNT,
       PLAYERS_SNAPSHOT,
       SERVER_STATUS,
       SERVER_COMMANDS,
@@ -37,5 +39,18 @@ public final class NodeCapabilities {
       }
     }
     return List.copyOf(normalized);
+  }
+
+  public static List<String> filterSupported(Iterable<String> values) {
+    TreeSet<String> supported = new TreeSet<>();
+    if (values != null) {
+      for (String value : values) {
+        String capability = value == null ? "" : value.trim();
+        if (ALLOWED.contains(capability)) {
+          supported.add(capability);
+        }
+      }
+    }
+    return List.copyOf(supported);
   }
 }

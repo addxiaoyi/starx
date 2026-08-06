@@ -64,6 +64,16 @@ class MotdPingPolicyTest {
   }
 
   @Test
+  void ignoresStaleProxyConnectionsWhenBackendServersAreEmpty() {
+    assertEquals(0, MotdModule.onlinePlayersForPing(326, List.of(0, 0, 0)));
+  }
+
+  @Test
+  void reportsPlayersConnectedToBackendServers() {
+    assertEquals(3, MotdModule.onlinePlayersForPing(326, List.of(2, 1)));
+  }
+
+  @Test
   void loadsOnlySafeConfiguredFaviconFromDataDirectory() throws Exception {
     Path favicon = temp.resolve("server-icon.png");
     Files.write(favicon, png());

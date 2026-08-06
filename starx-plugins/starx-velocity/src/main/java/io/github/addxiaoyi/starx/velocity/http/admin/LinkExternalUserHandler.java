@@ -6,6 +6,8 @@ package io.github.addxiaoyi.starx.velocity.http.admin;
 import io.github.addxiaoyi.starx.api.dto.UserDto;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.api.repository.UserRepository;
+import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
+import java.util.UUID;
 import io.github.addxiaoyi.starx.velocity.http.JsonHttpExchange;
 import io.github.addxiaoyi.starx.velocity.http.RouteRegistrar;
 import io.github.addxiaoyi.starx.velocity.http.admin.AdminHandler;
@@ -16,10 +18,10 @@ public final class LinkExternalUserHandler
 implements AdminHandler {
     private static final int MAX_USERNAME_LENGTH = 16;
     private static final int MAX_EXTERNAL_ID_LENGTH = 100;
-    private final UserRepository users;
+    private final JdbcUserRepository users;
     private final EventBus eventBus;
 
-    public LinkExternalUserHandler(UserRepository users, EventBus eventBus) {
+    public LinkExternalUserHandler(JdbcUserRepository users, EventBus eventBus) {
         this.users = Objects.requireNonNull(users, "users");
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
     }
@@ -62,8 +64,14 @@ implements AdminHandler {
             ctx.status(404).json(Map.of("error", "User not found"));
             return;
         }
+        boolean trusted = isTrustedBinding(existing.uuid(), existing.username(), req.playerUuid, req.username, req.verified);
+        if (externalUserId != null && req.verified && !trusted) {
+            ctx.status(409).json(Map.of("error", "verified identity does not match player"));
+            return;
+        }
         UserDto updated = UserDto.builder().uuid(existing.uuid()).username(existing.username()).email(existing.email()).premium(existing.premium()).createdAt(existing.createdAt()).lastLoginAt(existing.lastLoginAt()).externalUserId(externalUserId).build();
         this.users.save(updated);
+        this.users.saveWebsiteBinding(existing.uuid(), existing.username(), externalUserId, trusted);
         this.eventBus.publish("link:external-user", Map.of(
             "username", req.username,
             "externalUserId", externalUserId == null ? "" : externalUserId,
@@ -79,9 +87,21 @@ implements AdminHandler {
         return normalized.isEmpty() ? null : normalized;
     }
 
+    static boolean isTrustedBinding(UUID existingUuid, String existingUsername, String requestedUuid, String requestedUsername, boolean verified) {
+        if (!verified || requestedUuid == null || requestedUsername == null) return false;
+        try {
+            return existingUuid.equals(UUID.fromString(requestedUuid.trim()))
+                && existingUsername.equalsIgnoreCase(requestedUsername.trim());
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
     static final class LinkExternalUserRequest {
         public String username;
         public String externalUserId;
+        public String playerUuid;
+        public boolean verified;
 
         LinkExternalUserRequest() {
         }

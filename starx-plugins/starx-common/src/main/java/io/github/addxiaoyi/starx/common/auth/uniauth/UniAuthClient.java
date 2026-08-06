@@ -159,24 +159,30 @@ public final class UniAuthClient {
       JsonObject json = request("login", Map.of(
           "username", Objects.requireNonNullElse(username, ""),
           "password", Objects.requireNonNullElse(password, "")));
-      int code = integer(json, "code", 500);
-      if (code == 200) {
-        PlayerProfileResponse profile = parseProfileResponse(json);
-        return CompletableFuture.completedFuture(new LoginResponse(
-            true, "登录成功", profile.externalUserId(), profile.email()));
-      }
-      String message = switch (code) {
-        case 401 -> "密码错误";
-        case 402 -> "用户未注册";
-        case 403 -> "邮箱未验证";
-        default -> "认证失败: " + code;
-      };
-      return CompletableFuture.completedFuture(new LoginResponse(false, message, null, null));
+      return CompletableFuture.completedFuture(parseLoginResponse(json));
     } catch (Exception exception) {
       LOGGER.log(Level.WARNING, "UniAuth login failed: {0}", safeMessage(exception));
       return CompletableFuture.completedFuture(
-          new LoginResponse(false, safeMessage(exception), null, null));
+          new LoginResponse(false, safeMessage(exception), null, null, false));
     }
+  }
+
+  static LoginResponse parseLoginResponse(JsonObject json) {
+    int code = integer(json, "code", 500);
+    if (code == 200) {
+      PlayerProfileResponse profile = parseProfileResponse(json);
+      return new LoginResponse(
+          true, "登录成功", profile.externalUserId(), profile.email(), false);
+    }
+    if (code == 403) {
+      return new LoginResponse(true, "邮箱未验证，已转为本地认证", null, null, true);
+    }
+    String message = switch (code) {
+      case 401 -> "密码错误";
+      case 402 -> "用户未注册";
+      default -> "认证失败: " + code;
+    };
+    return new LoginResponse(false, message, null, null, false);
   }
 
   public CompletableFuture<PlayerProfileResponse> fetchProfile(String username) {
@@ -322,7 +328,12 @@ public final class UniAuthClient {
     }
   }
 
-  public record LoginResponse(boolean success, String message, String userId, String email) {}
+  public record LoginResponse(
+      boolean success,
+      String message,
+      String userId,
+      String email,
+      boolean requiresLocalMigration) {}
 
   public record StatusResponse(boolean exists, boolean imported, String status) {}
 

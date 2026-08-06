@@ -9,6 +9,7 @@ public final class ServerCapabilities {
       "bridge.http-exchange",
       "bridge.v1",
       "player.carrier",
+      "public.player-count",
       "players.snapshot",
       "server.commands",
       "server.status");

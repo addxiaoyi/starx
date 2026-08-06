@@ -53,6 +53,7 @@ implements AutoCloseable {
              Statement stmt = conn.createStatement();){
             stmt.execute("CREATE TABLE IF NOT EXISTS starx_schema_migrations (version VARCHAR(96) PRIMARY KEY, applied_at BIGINT NOT NULL)");
             stmt.execute("CREATE TABLE IF NOT EXISTS starx_users (uuid VARCHAR(36) PRIMARY KEY, username VARCHAR(255) NOT NULL, email VARCHAR(255), password_hash VARCHAR(255), totp_secret VARCHAR(255), premium BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL, last_login_at TIMESTAMP, external_user_id VARCHAR(255), trusted_devices TEXT, recovery_codes VARCHAR(512) DEFAULT NULL, source_system VARCHAR(50), migration_state VARCHAR(20), password_migrated_at TIMESTAMP, last_login_ip VARCHAR(255), last_login_isp VARCHAR(255), last_login_location VARCHAR(255), total_playtime BIGINT DEFAULT 0, last_logout_at TIMESTAMP, welcome_message_shown BOOLEAN DEFAULT FALSE)");
+            stmt.execute("CREATE TABLE IF NOT EXISTS starx_website_bindings (player_uuid VARCHAR(36) PRIMARY KEY, username VARCHAR(16) NOT NULL, external_user_id VARCHAR(100) NOT NULL, verified BOOLEAN NOT NULL DEFAULT FALSE, updated_at BIGINT NOT NULL)");
             stmt.execute(JdbcAccountIdentityRepository.CREATE_ACCOUNTS_SQL);
             stmt.execute(JdbcAccountIdentityRepository.CREATE_IDENTITIES_SQL);
             stmt.execute(JdbcPlayerSessionRepository.CREATE_SESSIONS_SQL);

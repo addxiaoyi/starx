@@ -23,6 +23,8 @@ import java.util.regex.Pattern;
 public final class EmailChallengeService {
   private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
   private static final SecureRandom RANDOM = new SecureRandom();
+  private static final int EMAIL_CODE_BOUND = 1_000_000;
+  private static final String EMAIL_CODE_FORMAT = "%06d";
   private static final int MAX_ATTEMPTS = 6;
 
   private final EmailSender sender;
@@ -57,7 +59,7 @@ public final class EmailChallengeService {
     if (email.length() > 254 || !EMAIL.matcher(email).matches()) {
       throw new IllegalArgumentException("请输入有效的邮箱地址");
     }
-    String code = "%06d".formatted(RANDOM.nextInt(1_000_000));
+    String code = EMAIL_CODE_FORMAT.formatted(RANDOM.nextInt(EMAIL_CODE_BOUND));
     if (this.persistentChallenges != null) {
       String accountId = this.accountByPlayer.apply(playerId);
       if (accountId == null || accountId.isBlank()) {

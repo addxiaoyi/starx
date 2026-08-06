@@ -11,6 +11,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 class WebsiteSyncRuntimeTest {
@@ -35,6 +36,29 @@ class WebsiteSyncRuntimeTest {
   }
 
   @Test
+  void publishesHeartbeatsAfterInitialSuccess() throws Exception {
+    FakeClient client = new FakeClient();
+    WebsiteSyncRuntime runtime = runtime(
+        config(SecretValue.empty(), SecretValue.of("stx_node_test"), false),
+        client,
+        ignored -> { });
+    try {
+      runtime.start();
+      await(() -> client.heartbeats.get() >= 1);
+
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
+      while (client.heartbeats.get() < 2 && System.nanoTime() < deadline) {
+        Thread.sleep(25);
+      }
+      assertTrue(
+          client.heartbeats.get() >= 2,
+          "a successful runtime must continue publishing periodic heartbeats");
+    } finally {
+      runtime.close();
+    }
+  }
+
+  @Test
   void unauthorizedCredentialStopsFurtherHeartbeats() throws Exception {
     FakeClient client = new FakeClient();
     client.heartbeatFailure = new WebsiteSyncApiException(
@@ -51,6 +75,27 @@ class WebsiteSyncRuntimeTest {
       Thread.sleep(1_200);
       assertEquals(attempts, client.heartbeats.get());
       assertEquals("credential_invalid", runtime.snapshot().lastErrorCode());
+    } finally {
+      runtime.close();
+    }
+  }
+
+  @Test
+  void logsNonAuthHeartbeatFailuresWithNodeAndCode() throws Exception {
+    FakeClient client = new FakeClient();
+    client.heartbeatFailure = new WebsiteSyncApiException(
+        400, "snapshot_invalid", "bad snapshot");
+    List<String> logs = new java.util.concurrent.CopyOnWriteArrayList<>();
+    WebsiteSyncRuntime runtime = runtime(
+        config(SecretValue.empty(), SecretValue.of("stx_node_test"), false),
+        client,
+        ignored -> { },
+        logs::add);
+    try {
+      runtime.start();
+      await(() -> runtime.snapshot().state() == WebsiteSyncRuntime.State.BACKOFF);
+      assertTrue(logs.stream().anyMatch(message -> message.contains(
+          "node=proxy-1 code=snapshot_invalid")));
     } finally {
       runtime.close();
     }
@@ -108,6 +153,15 @@ class WebsiteSyncRuntimeTest {
       FakeClient client,
       WebsiteSyncCredentialStore credentials
   ) {
+    return runtime(config, client, credentials, ignored -> { });
+  }
+
+  private static WebsiteSyncRuntime runtime(
+      WebsiteSyncConfig config,
+      FakeClient client,
+      WebsiteSyncCredentialStore credentials,
+      Consumer<String> logger
+  ) {
     return new WebsiteSyncRuntime(
         config,
         client,
@@ -115,7 +169,7 @@ class WebsiteSyncRuntimeTest {
         () -> new NodeSnapshot("0.2.0", null, 0, 100, null, null, false, List.of()),
         TextureSource.empty(),
         List.of(NodeCapabilities.NETWORK_STATUS),
-        ignored -> { });
+        logger);
   }
 
   private static WebsiteSyncConfig config(

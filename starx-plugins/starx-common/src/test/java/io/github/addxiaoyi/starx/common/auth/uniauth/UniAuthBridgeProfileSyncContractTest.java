@@ -18,6 +18,14 @@ class UniAuthBridgeProfileSyncContractTest {
     assertTrue(source.contains("return new BridgeResult(true, \"Login successful (local)\", user)"));
   }
 
+  @Test
+  void emailUnverifiedMigrationCannotProvisionAnUnknownUsername() throws Exception {
+    String source = Files.readString(locateSource(), StandardCharsets.UTF_8);
+
+    assertTrue(source.contains("login.requiresLocalMigration() && existing.isEmpty()"));
+    assertTrue(source.contains("邮箱未验证账号只能迁移已有本地档案"));
+  }
+
   private static Path locateSource() {
     Path current = Path.of("").toAbsolutePath();
     for (int depth = 0; depth < 8 && current != null; depth++) {

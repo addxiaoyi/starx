@@ -59,6 +59,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   private final ThreadPoolExecutor workers;
   private final AtomicReference<SecretValue> nodeToken;
   private final AtomicReference<State> state;
+  private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean heartbeatInFlight = new AtomicBoolean();
   private final AtomicBoolean texturesInFlight = new AtomicBoolean();
   private final ExponentialBackoff heartbeatBackoff;
@@ -120,13 +121,13 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   }
 
   public void start() {
-    if (!this.config.enabled()) {
+    if (!this.config.enabled() || !this.started.compareAndSet(false, true)) {
       return;
     }
     long now = this.clock.millis();
     this.nextHeartbeatMillis = now;
     this.nextTextureMillis = now;
-    this.scheduler.scheduleWithFixedDelay(this::heartbeatTick, 0, 1, TimeUnit.SECONDS);
+    scheduleHeartbeat(Duration.ZERO);
     this.scheduler.scheduleWithFixedDelay(this::textureTick, 2, 2, TimeUnit.SECONDS);
   }
 
@@ -157,6 +158,33 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         this.heartbeatInFlight.set(false);
       }
     }, this.heartbeatInFlight);
+  }
+
+  private void scheduleHeartbeat(Duration delay) {
+    try {
+      this.scheduler.schedule(this::runHeartbeatSchedule, delay.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (RejectedExecutionException error) {
+      if (this.state.get() != State.STOPPED) {
+        this.logger.accept(
+            "StarX website heartbeat scheduler rejected node=" + this.config.nodeId());
+      }
+    }
+  }
+
+  private void runHeartbeatSchedule() {
+    try {
+      heartbeatTick();
+    } catch (RuntimeException error) {
+      this.heartbeatInFlight.set(false);
+      handleFailure("heartbeat_scheduler_failed", this.heartbeatBackoff.next(), true);
+      this.logger.accept(
+          "StarX website heartbeat scheduler recovered after runtime failure: node="
+              + this.config.nodeId() + " error=" + error.getClass().getSimpleName());
+    } finally {
+      if (this.state.get() != State.STOPPED) {
+        scheduleHeartbeat(Duration.ofSeconds(1));
+      }
+    }
   }
 
   private void publishHeartbeat() {
@@ -198,8 +226,10 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     } catch (WebsiteSyncApiException error) {
       handleApiFailure(error, this.heartbeatBackoff, true);
     } catch (IOException error) {
+      logHeartbeatFailure("credential_persist_failed", error);
       handleFailure("credential_persist_failed", this.heartbeatBackoff.next(), true);
     } catch (RuntimeException error) {
+      logHeartbeatFailure("snapshot_failed", error);
       handleFailure("snapshot_failed", this.heartbeatBackoff.next(), true);
     }
   }
@@ -295,7 +325,16 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
       authFailed(error.errorCode());
       return;
     }
+    if (heartbeat) {
+      logHeartbeatFailure(error.errorCode(), error);
+    }
     handleFailure(error.errorCode(), backoff.next(), heartbeat);
+  }
+
+  private void logHeartbeatFailure(String code, Exception error) {
+    this.logger.accept(
+        "StarX website heartbeat failed: node=" + this.config.nodeId()
+            + " code=" + code + " error=" + error.getClass().getSimpleName());
   }
 
   private void authFailed(String code) {

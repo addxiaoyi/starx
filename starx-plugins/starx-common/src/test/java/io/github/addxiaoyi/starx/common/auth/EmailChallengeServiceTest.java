@@ -99,6 +99,7 @@ final class EmailChallengeServiceTest {
     UUID playerId = UUID.randomUUID();
 
     service.begin(playerId, " Player@Example.com ");
+    assertTrue(delivered.get().matches("\\d{6}"));
     assertEquals("player@example.com", service.confirm(playerId, delivered.get()));
     assertThrows(IllegalStateException.class,
         () -> service.confirm(playerId, delivered.get()));

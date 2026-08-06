@@ -25,6 +25,13 @@ public final class AuthCommandHandler {
       InetAddress address,
       String deviceId
   ) {
+    if (isWebsiteLoginCommand(rawInput)) {
+      if (!this.auth.isUserRegistered(playerId)) {
+        return AuthResult.failure("请先注册游戏账号，再使用网站登录");
+      }
+      return this.auth.requestWebLoginApproval(lease, playerId, username);
+    }
+
     String credential = normalizeCredential(rawInput);
     if (credential == null) {
       return AuthResult.failure("密码不能为空");
@@ -84,6 +91,14 @@ public final class AuthCommandHandler {
     return input;
   }
 
+  private static boolean isWebsiteLoginCommand(String rawInput) {
+    if (rawInput == null) {
+      return false;
+    }
+    String command = rawInput.trim().toLowerCase(Locale.ROOT);
+    return command.equals("/login web") || command.equals("/l web");
+  }
+
   interface AuthOperations {
     boolean isUserRegistered(UUID playerId);
 
@@ -97,6 +112,14 @@ public final class AuthCommandHandler {
     );
 
     AuthResult register(AuthLease lease, UUID playerId, String username, String password);
+
+    default AuthResult requestWebLoginApproval(
+        AuthLease lease,
+        UUID playerId,
+        String username
+    ) {
+      return AuthResult.failure("网页登录确认当前不可用，请稍后重试");
+    }
 
     AuthResult verifyTotp(AuthLease lease, UUID playerId, String code);
 
@@ -129,6 +152,15 @@ public final class AuthCommandHandler {
         String password
     ) {
       return this.service.register(lease, playerId, username, password, null);
+    }
+
+    @Override
+    public AuthResult requestWebLoginApproval(
+        AuthLease lease,
+        UUID playerId,
+        String username
+    ) {
+      return this.service.requestWebLoginApproval(lease, playerId, username);
     }
 
     @Override

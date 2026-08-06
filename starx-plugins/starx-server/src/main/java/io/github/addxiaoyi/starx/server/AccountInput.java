@@ -37,4 +37,12 @@ final class AccountInput {
     }
     return code;
   }
+
+  static String emailCode(String input) {
+    String code = input == null ? "" : input.trim();
+    if (!code.matches("\\d{6}")) {
+      throw new IllegalArgumentException("请输入 6 位邮箱验证码");
+    }
+    return code;
+  }
 }

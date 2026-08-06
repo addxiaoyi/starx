@@ -11,12 +11,12 @@ class PremiumResolverTest {
   private static final UUID OFFLINE_UUID = UUID.nameUUIDFromBytes("OfflinePlayer:add".getBytes());
 
   @Test
-  void acceptsOnlyOnlineModeVersionFourIdentity() {
+  void acceptsProtocolVerifiedHistoricalOfflineUuid() {
     PremiumResolver resolver = new PremiumResolver();
 
     assertTrue(resolver.isPremium(ONLINE_UUID, true));
     assertFalse(resolver.isPremium(ONLINE_UUID, false));
-    assertFalse(resolver.isPremium(OFFLINE_UUID, true));
+    assertTrue(resolver.isPremium(OFFLINE_UUID, true));
   }
 
   @Test

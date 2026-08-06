@@ -103,6 +103,53 @@ class VelocityWebsiteSyncTest {
   }
 
   @Test
+  void filtersBridgeCapabilitiesBeforePublishingWebsiteSnapshot() {
+    Instant now = Instant.parse("2026-07-27T00:00:00Z");
+    BackendNodeRegistry registry = new BackendNodeRegistry();
+    registry.update(
+        "lobby",
+        BridgeMessage.statusResponse(
+            "lobby",
+            PlatformKind.PAPER,
+            "request-4",
+            Map.of(
+                "online", "3",
+                "max", "100",
+                "capabilities",
+                    "bridge.http-exchange,bridge.v1,players.snapshot,server.status,world.paper")),
+        now);
+
+    NodeSnapshot snapshot = VelocityWebsiteSync.buildSnapshot(
+        "0.2.0", 3, 100, false, List.of("lobby"), registry, now);
+
+    assertEquals(List.of("players.snapshot", "server.status"),
+        snapshot.servers().getFirst().capabilities());
+  }
+
+  @Test
+  void preservesTheExplicitPublicPlayerCountCapability() {
+    Instant now = Instant.parse("2026-07-27T00:00:00Z");
+    BackendNodeRegistry registry = new BackendNodeRegistry();
+    registry.update(
+        "lobby",
+        BridgeMessage.statusResponse(
+            "lobby",
+            PlatformKind.PAPER,
+            "request-5",
+            Map.of(
+                "online", "0",
+                "max", "100",
+                "capabilities", "players.snapshot,public.player-count,server.status")),
+        now);
+
+    NodeSnapshot snapshot = VelocityWebsiteSync.buildSnapshot(
+        "0.2.0", 0, 100, false, List.of("lobby"), registry, now);
+
+    assertEquals(List.of("players.snapshot", "public.player-count", "server.status"),
+        snapshot.servers().getFirst().capabilities());
+  }
+
+  @Test
   void refusesPartialSnapshotsWhenVelocityExposesMoreThanProtocolLimit() {
     List<String> names = new ArrayList<>();
     for (int index = 0; index < 129; index++) {

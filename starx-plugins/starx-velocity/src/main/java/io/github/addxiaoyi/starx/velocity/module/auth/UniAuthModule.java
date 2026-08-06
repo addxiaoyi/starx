@@ -53,7 +53,8 @@ implements VelocityModule {
 
     public CompletableFuture<UniAuthClient.LoginResponse> login(String username, String password) {
         if (this.client == null) {
-            return CompletableFuture.completedFuture(new UniAuthClient.LoginResponse(false, "UniAuth \u6a21\u5757\u672a\u542f\u7528", null, null));
+            return CompletableFuture.completedFuture(new UniAuthClient.LoginResponse(
+                    false, "UniAuth \u6a21\u5757\u672a\u542f\u7528", null, null, false));
         }
         return this.client.login(username, password);
     }

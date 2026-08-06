@@ -209,7 +209,7 @@ final class AccountAnvilController implements CommandExecutor, Listener {
     try {
       value = switch (session.mode()) {
         case EMAIL -> AccountInput.email(raw);
-        case EMAIL_CONFIRM -> AccountInput.totpCode(raw);
+        case EMAIL_CONFIRM -> AccountInput.emailCode(raw);
         case TOTP, TOTP_DISABLE -> AccountInput.password(raw);
         case TOTP_CONFIRM, TOTP_RESET -> AccountInput.totpCode(raw);
       };
