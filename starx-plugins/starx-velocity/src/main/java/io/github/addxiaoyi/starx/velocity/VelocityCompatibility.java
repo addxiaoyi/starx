@@ -5,16 +5,14 @@ import io.github.addxiaoyi.starx.api.compat.CompatibilityCheck;
 import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
 import io.github.addxiaoyi.starx.api.compat.CompatibilityRules;
 import io.github.addxiaoyi.starx.api.compat.CompatibilityStatus;
+import io.github.addxiaoyi.starx.velocity.config.ConfigLayout;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import org.yaml.snakeyaml.Yaml;
 
 final class VelocityCompatibility {
   private static final List<Integration> INTEGRATIONS = List.of(
@@ -84,23 +82,15 @@ final class VelocityCompatibility {
 
   record Settings(boolean strictPlatform, String reportFile) {
     static Settings load(Path configFile) throws IOException {
-      if (Files.notExists(configFile)) {
+      Map<String, Object> loaded = ConfigLayout.readEffectiveRoot(configFile);
+      Object node = loaded.get("compatibility");
+      if (!(node instanceof Map<?, ?> compatibility)) {
         return defaults();
       }
-      try (InputStream input = Files.newInputStream(configFile)) {
-        Object loaded = new Yaml().load(input);
-        if (!(loaded instanceof Map<?, ?> root)) {
-          return defaults();
-        }
-        Object node = root.get("compatibility");
-        if (!(node instanceof Map<?, ?> compatibility)) {
-          return defaults();
-        }
-        boolean strict = booleanValue(compatibility.get("strict-platform"), true);
-        String report = stringValue(
-            compatibility.get("report-file"), "compatibility-report.json");
-        return new Settings(strict, report);
-      }
+      boolean strict = booleanValue(compatibility.get("strict-platform"), true);
+      String report = stringValue(
+          compatibility.get("report-file"), "compatibility-report.json");
+      return new Settings(strict, report);
     }
 
     static Settings defaults() {

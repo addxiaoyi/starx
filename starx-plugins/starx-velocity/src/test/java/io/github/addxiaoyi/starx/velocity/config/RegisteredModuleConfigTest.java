@@ -12,7 +12,6 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.yaml.snakeyaml.Yaml;
 
 final class RegisteredModuleConfigTest {
 
@@ -29,7 +28,7 @@ final class RegisteredModuleConfigTest {
   @Test
   void everyVelocityModuleHasAnExplicitDefaultSwitch() throws Exception {
     Set<String> sourceModuleIds = discoverModuleIds();
-    Map<String, Object> root = mapping(new Yaml().load(Files.readString(defaultConfig())));
+    Map<String, Object> root = ConfigLayout.readDefaultRoot();
     Map<String, Object> modules = mapping(root.get("modules"));
 
     Set<String> missing = new HashSet<>(sourceModuleIds);
@@ -44,7 +43,7 @@ final class RegisteredModuleConfigTest {
 
   @Test
   void defaultTransferTimeoutCoversModernBackendConfiguration() throws Exception {
-    Map<String, Object> root = mapping(new Yaml().load(Files.readString(defaultConfig())));
+    Map<String, Object> root = ConfigLayout.readDefaultRoot();
     Map<String, Object> uworld = mapping(root.get("uworld"));
     Number timeout = assertInstanceOf(
         Number.class, uworld.get("transfer-timeout-seconds"));
@@ -89,10 +88,6 @@ final class RegisteredModuleConfigTest {
     }
     assertTrue(ids.size() >= 25, () -> "模块发现数量异常: " + ids);
     return ids;
-  }
-
-  private Path defaultConfig() {
-    return ProjectPaths.velocityProject().resolve("src/main/resources/default-config.yml");
   }
 
   @SuppressWarnings("unchecked")

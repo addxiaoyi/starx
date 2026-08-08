@@ -135,8 +135,9 @@ final class ConfigLoaderUworldTest {
         () -> assertEquals(121, uworld.diagnostics().timeoutSeconds()),
         () -> assertEquals(8, uworld.diagnostics().platformRadius()),
         () -> assertTrue(config.isModuleEnabled("starx.uworld")),
-        () -> assertEquals(1, warnings.size()),
-        () -> assertTrue(warnings.getFirst().startsWith(SCHEMA_WARNING_PREFIX)));
+        () -> assertEquals(2, warnings.size()),
+        () -> assertTrue(warnings.getFirst().startsWith(SCHEMA_WARNING_PREFIX)),
+        () -> assertTrue(warnings.get(1).startsWith("StarX monolithic configuration migrated")));
   }
 
   @Test
@@ -171,9 +172,10 @@ final class ConfigLoaderUworldTest {
         () -> assertEquals(120, uworld.diagnostics().timeoutSeconds()),
         () -> assertEquals(5, uworld.diagnostics().platformRadius()),
         () -> assertTrue(config.isModuleEnabled("starx.uworld")),
-        () -> assertEquals(2, warnings.size()),
+        () -> assertEquals(3, warnings.size()),
         () -> assertTrue(warnings.getFirst().startsWith(SCHEMA_WARNING_PREFIX)),
-        () -> assertEquals(LEGACY_WARNING, warnings.get(1)));
+        () -> assertTrue(warnings.get(1).startsWith("StarX monolithic configuration migrated")),
+        () -> assertEquals(LEGACY_WARNING, warnings.get(2)));
   }
 
   @Test
@@ -183,8 +185,7 @@ final class ConfigLoaderUworldTest {
 
     List<String> firstWarnings = new ArrayList<>();
     StarxConfig first = ConfigLoader.load(file, firstWarnings::add);
-    Map<String, Object> migratedRoot =
-        mapping(new Yaml().load(Files.readString(file, StandardCharsets.UTF_8)));
+    Map<String, Object> migratedRoot = ConfigLayout.readEffectiveRoot(file);
     Map<String, Object> migratedModules = mapping(migratedRoot.get("modules"));
 
     assertAll(
@@ -225,9 +226,10 @@ final class ConfigLoaderUworldTest {
     StarxConfig config = load(BOTH_CONFIG, warnings);
 
     assertEquals("new-hub", config.uworld().auth().targetServer());
-    assertEquals(2, warnings.size());
+    assertEquals(3, warnings.size());
     assertTrue(warnings.getFirst().startsWith(SCHEMA_WARNING_PREFIX));
-    assertEquals(BOTH_ROOTS_WARNING, warnings.get(1));
+    assertTrue(warnings.get(1).startsWith("StarX monolithic configuration migrated"));
+    assertEquals(BOTH_ROOTS_WARNING, warnings.get(2));
   }
 
   @Test
@@ -323,9 +325,9 @@ final class ConfigLoaderUworldTest {
     Path file = this.tempDir.resolve("nested").resolve("config.yml");
 
     StarxConfig config = ConfigLoader.load(file);
-    String generated = Files.readString(file, StandardCharsets.UTF_8);
+    Map<String, Object> effectiveRoot = ConfigLayout.readEffectiveRoot(file);
     UworldConfig defaults = config.uworld();
-    Map<String, Object> root = mapping(new Yaml().load(generated));
+    Map<String, Object> root = effectiveRoot;
     Map<String, Object> modules = mapping(root.get("modules"));
     Map<String, Object> uworld = mapping(root.get("uworld"));
     Map<String, Object> auth = mapping(uworld.get("auth"));
@@ -340,7 +342,9 @@ final class ConfigLoaderUworldTest {
         () -> assertEquals("OVERWORLD", defaults.auth().world().dimension()),
         () -> assertEquals("ADVENTURE", defaults.auth().world().gameMode()),
         () -> assertEquals("AUTO", defaults.auth().world().loaderType()),
-        () -> assertEquals("auth_world.schem", defaults.auth().world().fileName()),
+        () -> assertEquals(
+            "assets/uworld/auth_world.schem",
+            defaults.auth().world().fileName()),
         () -> assertEquals(4, defaults.auth().world().viewDistance()),
         () -> assertEquals(4, defaults.auth().world().simulationDistance()),
         () -> assertEquals(5, defaults.auth().world().platformRadius()),
@@ -384,10 +388,10 @@ final class ConfigLoaderUworldTest {
             world.keySet()),
         () -> assertEquals(Set.of("enabled", "timeout-seconds", "platform-radius"),
             diagnostics.keySet()),
-        () -> assertEquals(1, count(generated, "(?m)^uworld:$")),
-        () -> assertEquals(1, count(generated, "(?m)^  starx\\.uworld:$")),
-        () -> assertEquals(0, count(generated, "(?m)^limbo:$")),
-        () -> assertEquals(0, count(generated, "(?m)^  starx\\.limbo:$")));
+        () -> assertTrue(root.containsKey("uworld")),
+        () -> assertTrue(modules.containsKey("starx.uworld")),
+        () -> assertFalse(root.containsKey("limbo")),
+        () -> assertFalse(modules.containsKey("starx.limbo")));
   }
 
   private StarxConfig load(String yaml, List<String> warnings) throws IOException {

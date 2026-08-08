@@ -66,6 +66,29 @@ final class AuthUworldDefinitionTest {
   }
 
   @Test
+  void assetDirectoryWorldFileUsesTheConfiguredLoader() throws Exception {
+    List<String> info = new ArrayList<>();
+    Path assetDirectory = Files.createDirectories(this.dataDirectory.resolve("assets/uworld"));
+    Path worldFile = Files.createFile(assetDirectory.resolve("auth.schem"));
+    UworldConfig.World world = world("WORLDEDIT_SCHEM", "assets/uworld/auth.schem", 7);
+    AuthUworldDefinition definition = new AuthUworldDefinition(
+        this.dataDirectory,
+        new UworldConfig.Auth(60, "lobby", world),
+        message -> { },
+        info::add);
+    EditorProbe editor = new EditorProbe();
+
+    definition.generator().generate(editor);
+
+    assertEquals(List.of(BuiltInWorldFileType.WORLDEDIT_SCHEM), editor.loads);
+    assertTrue(editor.blocks.isEmpty());
+    assertTrue(Files.isRegularFile(worldFile));
+    assertEquals(
+        List.of("Loaded Uworld authentication world from WORLDEDIT_SCHEM: assets/uworld/auth.schem"),
+        info);
+  }
+
+  @Test
   void missingWorldFileFailsBeforePublishingAPlatform() {
     List<String> warnings = new ArrayList<>();
     List<String> info = new ArrayList<>();

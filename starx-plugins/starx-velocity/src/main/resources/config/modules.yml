@@ -1,0 +1,135 @@
+# StarX 模块开关和玩家列表。
+#
+# 这里几乎所有 enabled 都遵循同一规则：true=启用，false=关闭。
+# 不确定某个模块用途时先不要改；模块缺少依赖时，插件可能会在启动日志中给出提示。
+#
+# 特别注意：starx.queue 和 starx.proxytools.smart-queue 不能同时为 true。
+# 可选集成（LuckPerms、Floodgate、TAB、Plan、RakNet 等）通常由 core.yml 的自动配置自动匹配。
+player-list:
+  # 玩家列表刷新间隔，单位秒，建议保持 1-60 之间。
+  refresh-seconds: 5
+  # 支持 MiniMessage 标签和 StarX 占位符；| 表示多行文本，缩进不要改乱。
+  header: |-
+      <gradient:#38bdf8:#a855f7><bold>StarMC NETWORK</bold></gradient>
+      <gray>欢迎，<white>{starx_player}</white> <dark_gray>|</dark_gray> <aqua>{starx_login_source}</aqua></gray>
+  footer: |-
+      <gray>当前子服 <white>{starx_server}</white> <dark_gray>|</dark_gray> <green>{starx_server_online}</green> 人</gray>
+      <gray>全网在线 <aqua>{starx_network_online}</aqua><dark_gray>/</dark_gray><white>{starx_network_max}</white></gray>
+
+modules:
+  # 认证主模块；关闭后玩家不会进入 StarX 认证流程。
+  starx.auth:
+    enabled: true
+  # Yggdrasil/正版身份识别模块。
+  starx.auth.yggdrasil:
+    enabled: true
+  # UniAuth 集成，只有 auth.yml 的 uniauth.enabled 也配置好时才有意义。
+  starx.auth.uniauth:
+    enabled: false
+  starx.player-list:
+    enabled: true
+  starx.player-sessions:
+    enabled: true
+  starx.auth.migration:
+    enabled: false
+  starx.auth.migration.commands:
+    enabled: false
+  # 皮肤、聊天、维护、MOTD 等常用模块。
+  starx.skin-bridge:
+    enabled: true
+  starx.chat:
+    enabled: true
+  starx.maintenance:
+    enabled: true
+  starx.motd:
+    enabled: true
+    # 正常和维护状态下显示的 MOTD。
+    normal: "欢迎来到 StarX！"
+    maintenance: "StarX 正在维护中。"
+    maximum-players: 100
+    # 留空使用默认图标；填写图标文件名时按 Velocity 工作目录规则放置。
+    icon-path: ""
+  # 重定向、排队、教程、Hub 和认证世界。
+  starx.redirect:
+    enabled: true
+  starx.queue:
+    enabled: true
+  starx.tutorial:
+    enabled: true
+  starx.hub:
+    enabled: true
+  starx.uworld:
+    enabled: true
+  starx.reconnect:
+    enabled: true
+  starx.info:
+    enabled: true
+  starx.forge:
+    enabled: true
+    # 调试日志；只在排查 Forge/NeoForge/Fabric 兼容问题时临时开启。
+    debug: false
+    # 是否拦截不符合规则的客户端。
+    guard-enabled: false
+    # 未知动作：WARN 只告警，其他值按模块实现处理。
+    unknown-action: "WARN"
+    # 允许通过的服务端/客户端模组列表；空列表表示不额外放行。
+    vanilla-servers: []
+    allowed-client-only-mods: []
+    denied-mods: []
+  starx.proxytools.raknet:
+    enabled: true
+    # RakNet 监听端口；只有安装可用的 Geyser/RakNetify provider 时才会生效。
+    port: 19132
+    debug: false
+    require-provider: false
+  starx.online:
+    enabled: true
+  starx.backend-bridge:
+    enabled: true
+  starx.messaging:
+    enabled: true
+  starx.welcome:
+    enabled: true
+  starx.admin:
+    enabled: true
+  starx.enhanced:
+    enabled: true
+  starx.proxytools.filecleaner:
+    enabled: false
+  starx.security.bot:
+    enabled: true
+  starx.security.crash:
+    enabled: true
+  starx.security.risk:
+    enabled: true
+  starx.security.anticheat:
+    enabled: true
+  # 下列实验性安全模块默认关闭，确认兼容性后再逐个开启。
+  starx.security.blossom:
+    enabled: false
+  starx.security.smart-rate:
+    enabled: false
+  starx.security.smart-alert:
+    enabled: false
+  starx.proxytools.smart-queue:
+    enabled: false
+  starx.integrations.qq:
+    enabled: false
+  starx.integrations.plan:
+    enabled: false
+  starx.integrations.mapmod:
+    enabled: true
+    # 地图模组兼容检查的调试和玩家提示。
+    debug: false
+    notify-player: false
+  starx.integrations.napcat:
+    # NapCat 具体地址仍在 network.yml 配置。
+    enabled: false
+  starx.integrations.luckperms:
+    enabled: true
+  starx.integrations.floodgate:
+    enabled: true
+  starx.integrations.tab:
+    enabled: true
+  starx.vote:
+    enabled: true

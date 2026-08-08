@@ -138,12 +138,22 @@ VELOCITY_HOME/
     starx-velocity.jar
     starx/
       config.yml
+      config/
+        core.yml
+        auth.yml
+        network.yml
+        modules.yml
+        uworld.yml
+      assets/
+        uworld/
+          *.schem|*.schematic|*.nbt|*.litematic
       data.db
       data.db-wal            # SQLite 运行时可能存在
       data.db-shm            # SQLite 运行时可能存在
       uworld/core.yml
-      *.schem|*.schematic|*.nbt
 ```
+
+`config.yml` 是分片索引；顶层配置分别位于 `config/*.yml`。Uworld 投影文件放在 `assets/uworld/`，并由 `config/uworld.yml` 中相对于 `plugins/starx/` 的 `uworld.auth.world.file-name` 选择。不要把生产投影放进 JAR 的 `src/main/resources/`，详见 [StarX 配置与运行时资源目录](STARX_CONFIGURATION_LAYOUT.md)。
 
 运行 Velocity 的服务账户必须：
 
@@ -221,7 +231,7 @@ ACL 变更后用 `icacls` 复查，任何不在上述允许列表中的显式授
 
 1. 停止 Velocity，并确认进程已经退出。
 2. 把存在的 `.db`、`-wal` 和 `-shm` 作为同一批次复制到同一个备份目录。
-3. 同时备份 `config.yml`、Uworld core 配置和所有 loader 文件。
+3. 同时备份 `config.yml`、整个 `config/` 分片目录、Uworld core 配置和 `assets/uworld/` 下所有 loader 文件。
 4. 记录备份时间、候选 SHA-256、安装 SHA-256 和 Velocity build。
 
 不要在 Velocity 运行时用普通 `Copy-Item` 或 `cp` 单独复制 `data.db`。需要在线备份时必须另行采用 SQLite online backup API；该流程不在本部署基线内。恢复时也必须在服务停止状态下把数据库文件组作为一个整体恢复，不能混用不同备份批次的 WAL/SHM。
@@ -310,7 +320,7 @@ Uworld 当前没有可移植到所有服务器的固定并发或内存承诺。�
 
 ## Windows 部署与回滚
 
-先完成 [自动门禁](UWORLD_ACCEPTANCE.md#自动门禁)，再在维护窗口执行。升级命令要求当前安装已经包含 JAR、`config.yml`、Uworld core 和 `data.db`；首次安装应在全新目录中完成，不能伪造一个可回滚备份。
+先完成 [自动门禁](UWORLD_ACCEPTANCE.md#自动门禁)，再在维护窗口执行。升级命令要求当前安装已经包含 JAR、`config.yml`、`config/`、Uworld core、引用的 `assets/uworld/` 文件和 `data.db`；首次安装应在全新目录中完成，不能伪造一个可回滚备份。
 
 固定备份根为 `VELOCITY_HOME\backups\starx`，服务账户不得写入该目录。每个备份包含只读 `payload/`、逐文件 SHA-256 的 `manifest.json`，以及带 manifest SHA-256 的原子指针。先在同一个提升权限的 PowerShell 会话载入验证器；部署和回滚代码都会调用它：
 
@@ -427,6 +437,16 @@ function Assert-UworldBackup([string] $BackupRoot, [string] $PointerPath) {
     throw 'Backup JAR or StarX config is missing from the manifest'
   }
 
+  $ActualConfig = @($ActualPaths | Where-Object {
+    $_ -ceq 'starx/config.yml' -or $_ -match '^starx/config/[^/]+\.(?:yml|yaml)$'
+  } | Sort-Object)
+  $ManifestConfig = @($Manifest.configFiles | ForEach-Object { [string] $_ } |
+    Sort-Object)
+  if ($ActualConfig.Count -lt 2 -or
+      ($ManifestConfig -join "`n") -cne ($ActualConfig -join "`n")) {
+    throw 'StarX configuration fragment set is incomplete'
+  }
+
   $ActualCore = @($ActualPaths | Where-Object {
     $_ -cin @('starx/uworld/core.yml', 'starx/limbo/core.yml')
   } | Sort-Object)
@@ -439,7 +459,7 @@ function Assert-UworldBackup([string] $BackupRoot, [string] $PointerPath) {
 
   $ActualLoaders = @($ActualPaths | Where-Object {
     [System.IO.Path]::GetExtension($_).ToLowerInvariant() -in
-      @('.schem', '.schematic', '.nbt')
+      @('.schem', '.schematic', '.nbt', '.litematic')
   } | Sort-Object)
   $ManifestLoaders = @($Manifest.loaderFiles | ForEach-Object { [string] $_ } |
     Sort-Object)
@@ -580,6 +600,12 @@ $CurrentCore = @(
     Test-Path -LiteralPath $_ -PathType Leaf
   }
 if ($CurrentCore.Count -eq 0) { throw 'No Uworld core file is available to back up' }
+$CurrentConfig = @(
+  Get-ChildItem -LiteralPath (Join-Path $StarxHome 'config') -File -Force `
+    -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension.ToLowerInvariant() -in @('.yml', '.yaml') }
+)
+if ($CurrentConfig.Count -eq 0) { throw 'No StarX configuration fragments are available to back up' }
 
 Assert-UworldJarIdentity $CurrentJar
 
@@ -622,17 +648,23 @@ $Paths = @($Entries | ForEach-Object { $_.path })
 $CoreFiles = @($Paths | Where-Object {
   $_ -cin @('starx/uworld/core.yml', 'starx/limbo/core.yml')
 } | Sort-Object)
+$ConfigFiles = @($Paths | Where-Object {
+  $_ -ceq 'starx/config.yml' -or $_ -match '^starx/config/[^/]+\.(?:yml|yaml)$'
+} | Sort-Object)
 $LoaderFiles = @($Paths | Where-Object {
   [System.IO.Path]::GetExtension($_).ToLowerInvariant() -in
-    @('.schem', '.schematic', '.nbt')
+    @('.schem', '.schematic', '.nbt', '.litematic')
 } | Sort-Object)
 $SqliteFiles = @(
   @('starx/data.db', 'starx/data.db-wal', 'starx/data.db-shm') |
     Where-Object { $Paths -ccontains $_ }
 )
-$UsesFileLoader = Select-String -LiteralPath (Join-Path $Payload 'starx\config.yml') `
-  -Pattern '(?i)^\s*(?:world-)?loader-type:\s*.*(?:SCHEMATIC|WORLDEDIT_SCHEM|STRUCTURE)' `
-  -Quiet
+$UsesFileLoader = @(
+  Select-String -Path ($ConfigFiles | ForEach-Object {
+    Join-Path $Payload $_.Replace('/', '\')
+  }) -Pattern '(?i)^\s*loader-type:\s*.*(?:AUTO|SCHEMATIC|WORLDEDIT_SCHEM|STRUCTURE|LITEMATIC)' `
+    -Quiet -ErrorAction SilentlyContinue
+) -contains $true
 if ($UsesFileLoader -and $LoaderFiles.Count -eq 0) {
   throw 'Configured file loader has no backed-up loader file'
 }
@@ -640,6 +672,7 @@ $PreviousJarEntry = @($Entries | Where-Object {
   $_.path -ceq 'plugins/starx-velocity.jar'
 })
 if ($PreviousJarEntry.Count -ne 1 -or $CoreFiles.Count -eq 0 -or
+    $ConfigFiles.Count -lt 2 -or
     $SqliteFiles -cnotcontains 'starx/data.db') {
   throw 'Backup prerequisites are incomplete'
 }
@@ -651,6 +684,7 @@ $Manifest = [ordered]@{
   previousJar = 'plugins/starx-velocity.jar'
   previousJarSha256 = $PreviousJarEntry[0].sha256
   config = 'starx/config.yml'
+  configFiles = $ConfigFiles
   coreFiles = $CoreFiles
   loaderFiles = $LoaderFiles
   sqliteFiles = $SqliteFiles
@@ -836,7 +870,7 @@ verify_uworld_backup() {
     ' "$manifest"
   }
   local format created_utc candidate_sha previous_jar previous_sha
-  local config core_count loader_count
+  local config config_count core_count loader_count
   local wal_present shm_present actual_core actual_loader actual_wal actual_shm
   format="$(meta_value format)" || return 1
   created_utc="$(meta_value created_utc)" || return 1
@@ -844,6 +878,7 @@ verify_uworld_backup() {
   previous_jar="$(meta_value previous_jar)" || return 1
   previous_sha="$(meta_value previous_jar_sha256)" || return 1
   config="$(meta_value config)" || return 1
+  config_count="$(meta_value config_count)" || return 1
   core_count="$(meta_value core_count)" || return 1
   loader_count="$(meta_value loader_count)" || return 1
   wal_present="$(meta_value sqlite_wal_present)" || return 1
@@ -854,6 +889,7 @@ verify_uworld_backup() {
     [ "$previous_jar" = plugins/starx-velocity.jar ] &&
     [ "$config" = starx/config.yml ] &&
     [[ "$previous_sha" =~ ^[0-9a-f]{64}$ ]] &&
+    [[ "$config_count" =~ ^[2-9][0-9]*$ ]] &&
     [[ "$core_count" =~ ^[1-9][0-9]*$ ]] &&
     [[ "$loader_count" =~ ^[0-9]+$ ]] &&
     [[ "$wal_present" =~ ^[01]$ ]] &&
@@ -864,6 +900,8 @@ verify_uworld_backup() {
 
   [ -f "$payload/$previous_jar" ] &&
     [ -f "$payload/$config" ] &&
+    [ "$config_count" -eq "$(find "$payload/starx/config" -maxdepth 1 -type f \
+      \( -iname '*.yml' -o -iname '*.yaml' \) | wc -l)" ] &&
     [ -f "$payload/starx/data.db" ] || {
       echo 'Backup JAR, config, or SQLite database is missing' >&2
       return 1
@@ -878,7 +916,7 @@ verify_uworld_backup() {
     \( -path '*/uworld/core.yml' -o -path '*/limbo/core.yml' \) |
     wc -l)"
   actual_loader="$(find "$payload/starx" -type f \
-    \( -iname '*.schem' -o -iname '*.schematic' -o -iname '*.nbt' \) |
+    \( -iname '*.schem' -o -iname '*.schematic' -o -iname '*.nbt' -o -iname '*.litematic' \) |
     wc -l)"
   [ "$actual_core" -eq "$core_count" ] &&
     [ "$actual_loader" -eq "$loader_count" ] || {
@@ -1025,11 +1063,13 @@ cp -a "$current_jar" "$payload/plugins/starx-velocity.jar"
 core_count="$(find "$payload/starx" -type f \
   \( -path '*/uworld/core.yml' -o -path '*/limbo/core.yml' \) |
   wc -l)"
+config_count="$(find "$payload/starx/config" -maxdepth 1 -type f \
+  \( -iname '*.yml' -o -iname '*.yaml' \) | wc -l)"
 loader_count="$(find "$payload/starx" -type f \
-  \( -iname '*.schem' -o -iname '*.schematic' -o -iname '*.nbt' \) |
+  \( -iname '*.schem' -o -iname '*.schematic' -o -iname '*.nbt' -o -iname '*.litematic' \) |
   wc -l)"
-if grep -Eiq '^[[:space:]]*(world-)?loader-type:[[:space:]]*.*(SCHEMATIC|WORLDEDIT_SCHEM|STRUCTURE)' \
-    "$payload/starx/config.yml" && [ "$loader_count" -eq 0 ]; then
+if grep -REiq '^[[:space:]]*loader-type:[[:space:]]*.*(AUTO|SCHEMATIC|WORLDEDIT_SCHEM|STRUCTURE|LITEMATIC)' \
+    "$payload/starx/config" && [ "$loader_count" -eq 0 ]; then
   echo 'Configured file loader has no backed-up loader file' >&2
   exit 1
 fi
@@ -1053,6 +1093,7 @@ manifest="$backup/manifest.meta"
   printf 'previous_jar=plugins/starx-velocity.jar\n'
   printf 'previous_jar_sha256=%s\n' "$previous_sha"
   printf 'config=starx/config.yml\n'
+  printf 'config_count=%s\n' "$config_count"
   printf 'core_count=%s\n' "$core_count"
   printf 'loader_count=%s\n' "$loader_count"
   printf 'sqlite_wal_present=%s\n' "$wal_present"

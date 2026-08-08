@@ -74,6 +74,7 @@ import io.github.addxiaoyi.starx.velocity.module.ModuleManager;
 import io.github.addxiaoyi.starx.velocity.module.admin.AdminCommandsModule;
 import io.github.addxiaoyi.starx.velocity.module.auth.AuthModule;
 import io.github.addxiaoyi.starx.velocity.module.auth.CredentialChangeDisconnectService;
+import io.github.addxiaoyi.starx.velocity.module.auth.ExternalHandshake;
 import io.github.addxiaoyi.starx.velocity.module.auth.MigrationCommands;
 import io.github.addxiaoyi.starx.velocity.module.auth.MigrationModule;
 import io.github.addxiaoyi.starx.velocity.module.auth.UniAuthModule;
@@ -282,6 +283,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.eventBus.subscribeAll(incidentTimeline::append);
         this.databaseManager = new DatabaseManager(this.config.database());
         this.lifecycle.own("database", this.databaseManager::close);
+        ExternalHandshake externalHandshake = ExternalHandshake.open(this.dataDirectory);
         this.lifecycle.own("Uworld reference", () -> this.uworld = null);
         DataSource defaultDataSource = this.databaseManager.commonManager().getDataSource();
         JdbcPlayerSessionRepository playerSessions = new JdbcPlayerSessionRepository(defaultDataSource);
@@ -350,7 +352,8 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             userRepository,
             bindingVerification,
             trustedDeviceRepository,
-            ipSessionStore
+            ipSessionStore,
+            externalHandshake
         );
         try {
             authModule.authService().bindWebLoginApprovalGateway(

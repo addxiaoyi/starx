@@ -58,7 +58,8 @@ public final class VelocityWebsiteSync implements AutoCloseable {
             NodeCapabilities.PUBLIC_PLAYER_COUNT,
             NodeCapabilities.PLAYERS_SNAPSHOT,
             NodeCapabilities.SERVER_STATUS,
-            NodeCapabilities.SKIN_REFRESH),
+            NodeCapabilities.SKIN_REFRESH,
+            NodeCapabilities.CAPE_REFRESH),
         plugin.logger()::info);
   }
 

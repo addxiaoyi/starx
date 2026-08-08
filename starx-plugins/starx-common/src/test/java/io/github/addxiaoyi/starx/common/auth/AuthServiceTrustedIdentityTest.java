@@ -65,6 +65,11 @@ final class AuthServiceTrustedIdentityTest {
     }
 
     @Override
+    public Optional<StarxUser> findFullByUsername(String username) {
+      return Optional.empty();
+    }
+
+    @Override
     public void create(StarxUser user) {
       this.created = user;
     }

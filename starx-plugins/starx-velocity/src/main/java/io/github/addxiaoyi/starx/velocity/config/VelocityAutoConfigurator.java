@@ -20,18 +20,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import org.yaml.snakeyaml.Yaml;
 
 /**
  * Detects the local Velocity topology and safely fills managed configuration values.
  * Explicit values are preserved unless the corresponding auto-config switch is enabled.
  */
 public final class VelocityAutoConfigurator {
-  private static final Pattern YAML_KEY =
-      Pattern.compile("^(\\s*)([^#][^:]*):(?:\\s*(.*))?$");
   private static final SecureRandom RANDOM = new SecureRandom();
 
   private VelocityAutoConfigurator() {
@@ -63,14 +58,13 @@ public final class VelocityAutoConfigurator {
   ) throws IOException {
     Objects.requireNonNull(configFile, "configFile");
     Consumer<String> sink = logger == null ? ignored -> { } : logger;
-    String source = Files.readString(configFile, StandardCharsets.UTF_8);
-    Map<String, Object> root = rootMap(new Yaml().load(source));
+    Map<String, Object> root = ConfigLayout.readEffectiveRoot(configFile);
     Map<String, Object> auto = child(root, "auto-config");
     if (!bool(auto, "enabled", true)) {
       return writeReport(configFile, auto, pluginIds, serverNames, null, List.of(), firstBoot, sink);
     }
 
-    YamlTextEditor editor = new YamlTextEditor(source);
+    ConfigLayout.TextEditor editor = ConfigLayout.openEditor(configFile);
     List<String> changed = new ArrayList<>();
 
     if (bool(auto, "generate-api-key", true)
@@ -143,7 +137,7 @@ public final class VelocityAutoConfigurator {
     }
 
     if (!changed.isEmpty()) {
-      editor.writeAtomically(configFile);
+      editor.writeAtomically();
       sink.accept("StarX auto-config updated: " + String.join(", ", changed));
     }
     return writeReport(
@@ -190,12 +184,12 @@ public final class VelocityAutoConfigurator {
   }
 
   private static void manageBoolean(
-      YamlTextEditor editor,
+      ConfigLayout.TextEditor editor,
       List<String> changed,
       List<String> path,
       String displayPath,
       boolean value
-  ) {
+  ) throws IOException {
     if (editor.setScalar(path, Boolean.toString(value))) {
       changed.add(displayPath);
     }
@@ -250,13 +244,6 @@ public final class VelocityAutoConfigurator {
     } catch (Exception ignored) {
       return "1";
     }
-  }
-
-  private static Map<String, Object> rootMap(Object loaded) {
-    if (!(loaded instanceof Map<?, ?> map)) {
-      return Map.of();
-    }
-    return stringMap(map);
   }
 
   private static Map<String, Object> child(Map<String, Object> root, String key) {
@@ -331,51 +318,4 @@ public final class VelocityAutoConfigurator {
   public record Result(boolean changed, List<String> changedPaths, Path reportFile) {
   }
 
-  private static final class YamlTextEditor {
-    private final List<String> lines;
-    private final String newline;
-
-    private YamlTextEditor(String source) {
-      this.newline = source.contains("\r\n") ? "\r\n" : "\n";
-      this.lines = new ArrayList<>(List.of(source.split("\\R", -1)));
-    }
-
-    private boolean setScalar(List<String> expectedPath, String renderedValue) {
-      List<String> stack = new ArrayList<>();
-      for (int index = 0; index < this.lines.size(); index++) {
-        String line = this.lines.get(index);
-        Matcher matcher = YAML_KEY.matcher(line);
-        if (!matcher.matches()) {
-          continue;
-        }
-        int indent = matcher.group(1).length();
-        if (indent % 2 != 0) {
-          continue;
-        }
-        int depth = indent / 2;
-        while (stack.size() > depth) {
-          stack.removeLast();
-        }
-        String key = matcher.group(2).trim();
-        if (stack.size() != depth) {
-          continue;
-        }
-        stack.add(key);
-        if (!stack.equals(expectedPath)) {
-          continue;
-        }
-        String replacement = " ".repeat(indent) + key + ": " + renderedValue;
-        if (replacement.equals(line)) {
-          return false;
-        }
-        this.lines.set(index, replacement);
-        return true;
-      }
-      return false;
-    }
-
-    private void writeAtomically(Path target) throws IOException {
-      VelocityAutoConfigurator.writeAtomically(target, String.join(this.newline, this.lines));
-    }
-  }
 }

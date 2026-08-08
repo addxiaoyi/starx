@@ -1,0 +1,105 @@
+# StarX 网络配置：网站节点同步、公共地址探测、FRP/证书辅助和 NapCat。
+#
+# 新手建议：
+# - 不接网站就保持 website-sync.enabled=false；不要只填写 token 却忘记打开开关。
+# - network-automation 默认只检测并生成报告，真正会修改 FRP 或申请证书的开关默认关闭。
+# - 所有 token、secret 都是敏感信息，不要提交到仓库或贴到公共日志。
+network-automation:
+  # 网络自动化总开关。false 时不会做公网地址、FRP 和证书相关工作。
+  enabled: true
+  # 网络检测报告文件名，路径相对于 plugins/starx/。
+  report-file: "network-automation.json"
+  public-address:
+    # 是否通过多个公网接口检测本机公网 IP。
+    enabled: true
+    # 至少多少个独立接口返回相同结果才接受；默认 2，避免单个接口异常污染结果。
+    minimum-agreement: 2
+    # 每个接口的请求超时时间，单位毫秒。
+    timeout-ms: 2500
+    # 公网地址检测接口列表。除非某接口不可用，否则不要频繁修改。
+    endpoints:
+      - "https://api64.ipify.org"
+      - "https://checkip.amazonaws.com"
+      - "https://icanhazip.com"
+  frp:
+    # off=不处理，detect=只检测，managed=允许 StarX 管理配置并按 auto-apply 执行。
+    mode: "detect"
+    # FRP 对外暴露的主机名；detect 模式可留空，managed 模式通常需要填写。
+    public-host: ""
+    # 对外地址协议，一般是 http 或 https。
+    public-scheme: "http"
+    # 已知完整公网地址；填写后通常优先使用它。
+    public-url: ""
+    # FRP 代理名称，必须和 frpc 配置中的代理段名称对应。
+    proxy-name: "starx-api"
+    # StarX 管理接口在本机监听的地址和端口。
+    local-address: "127.0.0.1"
+    local-port: 8788
+    # FRP 服务端 remotePort；0 表示由现有配置或探测流程决定。
+    remote-port: 0
+    # frpc 可执行文件名或完整路径。
+    frpc-command: "frpc"
+    # 已有主配置文件路径；留空让插件自动探测常见位置。
+    main-config-file: ""
+    # managed 模式生成/维护的配置文件名，通常放在 plugins/starx/frp/ 下。
+    managed-config-file: "frp/starx-api.toml"
+    # true 才允许自动应用 FRP 配置；建议先保持 false，确认报告后再开启。
+    auto-apply: false
+  certificate:
+    # 是否启用证书辅助流程；没有域名和公网路由时必须保持 false。
+    enabled: false
+    # 申请证书的域名和通知邮箱。
+    domain: ""
+    email: ""
+    # auto 自动选择客户端，或明确填写 certbot。
+    client: "auto"
+    # HTTP-01 需要公网 HTTP 路由；DNS-01 需要额外 DNS 凭据和实现支持。
+    challenge: "http-01"
+    # true：先用测试环境验证，避免第一次操作触发正式证书限额。
+    staging-first: true
+    # true 才会自动运行证书申请/续期。
+    auto-run: false
+    # HTTP-01 本机监听端口，不能和管理接口端口冲突。
+    http01-local-port: 8789
+    # 只有确认公网请求确实能转发到此端口后才改为 true。
+    http01-public-route-confirmed: false
+    # 证书距离过期多少天开始续期。
+    renew-before-days: 30
+
+website-sync:
+  # 是否把本代理节点注册并同步到 StarMC 网站；不接网站时保持 false。
+  enabled: false
+  # 网站 API 根地址。
+  site-url: "https://star-web.top"
+  # 当前代理节点的唯一名称，同一网站下不能重复。
+  node-id: "proxy-1"
+  # 节点类型，Velocity 不要改成 Paper 等其他平台。
+  platform: "velocity"
+  # 首次注册用的一次性 bootstrap token；注册成功后使用 node-token。
+  bootstrap-token: ""
+  # 网站下发的长期节点 token。不要和 api-key 混用。
+  node-token: ""
+  heartbeat:
+    # 心跳间隔和两个网络超时，单位分别为秒、毫秒。
+    interval-seconds: 15
+    connect-timeout-ms: 3000
+    request-timeout-ms: 8000
+  textures:
+    # 是否同步皮肤资源清单；需要对应皮肤插件时才保持 true。
+    enabled: true
+    # 皮肤来源，例如 skinsrestorer；自动配置可能根据已安装插件调整。
+    source: "skinsrestorer"
+    # 资源清单同步间隔和每批数量。
+    manifest-interval-seconds: 300
+    batch-size: 500
+
+napcat:
+  # 是否启用 NapCat QQ 群消息桥接；没有 NapCat 服务时必须保持 false。
+  enabled: false
+  # NapCat 的 WebSocket 和 HTTP 地址。
+  ws-url: "ws://127.0.0.1:6700"
+  http-url: "http://127.0.0.1:3000"
+  # QQ 群号；0 表示未配置。
+  qq-group-id: 0
+  # 转发到群里的消息格式，可用 {player} 和 {message} 占位符。
+  forward-format: "[MC] {player}: {message}"

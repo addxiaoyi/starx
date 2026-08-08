@@ -7,7 +7,9 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
+import com.velocitypowered.api.util.GameProfile;
 import org.junit.jupiter.api.Test;
 
 final class WebsiteSkinProfileTest {
@@ -51,5 +53,23 @@ final class WebsiteSkinProfileTest {
   @Test
   void rejectsProfileWithoutSkinOrCape() {
     assertTrue(WebsiteSkinProfile.parse("{\"id\":\"empty\",\"textures\":{}}", GSON).isEmpty());
+  }
+
+  @Test
+  void preservesCurrentSkinWhenWebsiteProfileOnlySuppliesCape() {
+    WebsiteSkinProfile profile = WebsiteSkinProfile.parse("""
+        { "textures": { "CAPE": { "url": "https://star-web.top/uploads/cape/star.png" } } }
+        """, new Gson()).orElseThrow();
+    UUID uuid = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+    String currentValue = Base64.getEncoder().encodeToString("""
+        { "textures": { "SKIN": { "url": "https://textures.minecraft.net/texture/current-skin" } } }
+        """.getBytes(StandardCharsets.UTF_8));
+
+    List<GameProfile.Property> merged = profile.merge(uuid, "Alex", List.of(
+        new GameProfile.Property("textures", currentValue, "")));
+    String decoded = new String(Base64.getDecoder().decode(merged.getFirst().getValue()), StandardCharsets.UTF_8);
+
+    assertTrue(decoded.contains("current-skin"));
+    assertTrue(decoded.contains("star.png"));
   }
 }

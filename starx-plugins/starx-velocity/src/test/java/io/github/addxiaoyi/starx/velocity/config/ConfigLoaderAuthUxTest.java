@@ -117,7 +117,7 @@ final class ConfigLoaderAuthUxTest {
     Path file = this.tempDir.resolve("generated.yml");
 
     ConfigLoader.load(file);
-    Map<String, Object> root = mapping(new Yaml().load(Files.readString(file)));
+    Map<String, Object> root = ConfigLayout.readEffectiveRoot(file);
     Map<String, Object> auth = mapping(root.get("auth"));
     Map<String, Object> ux = mapping(auth.get("ux"));
     Map<String, Object> messages = mapping(ux.get("messages"));

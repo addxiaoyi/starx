@@ -1,6 +1,6 @@
 # Uworld 配置
 
-Uworld 是 `starx-velocity.jar` 内部模块。配置文件位于 `plugins/starx/config.yml`，core 配置默认位于 `plugins/starx/uworld/core.yml`。不要安装外置 LimboAPI。
+Uworld 是 StarX Velocity 内部模块。配置入口是 `plugins/starx/config.yml`，Uworld 配置位于 `plugins/starx/config/uworld.yml`，core 配置默认位于 `plugins/starx/uworld/core.yml`。配置分片和投影文件的完整目录说明见 [StarX 配置与运行时资源目录](STARX_CONFIGURATION_LAYOUT.md)。不要安装外置 LimboAPI。
 
 ## 默认配置
 
@@ -28,7 +28,7 @@ uworld:
       spawn-pitch: 0.0
       game-mode: "SURVIVAL"
       loader-type: "VOID"
-      file-name: "auth_world.schem"
+      file-name: "assets/uworld/auth_world.schem"
       offset-x: 0
       offset-y: 0
       offset-z: 0
@@ -88,7 +88,7 @@ Diagnostics 模块由 `modules.starx.uworld.enabled` 派生；关闭 Uworld 模�
 | `uworld.auth.world.spawn-pitch` | `0.0` | 有限数值，运行时范围 `-90..90` | 出生垂直朝向。 |
 | `uworld.auth.world.game-mode` | `SURVIVAL` | `SURVIVAL`、`CREATIVE`、`ADVENTURE`、`SPECTATOR` | Uworld 内游戏模式。 |
 | `uworld.auth.world.loader-type` | `VOID` | 见下节 | 世界来源。名称忽略大小写并规范化为大写。 |
-| `uworld.auth.world.file-name` | `auth_world.schem` | 非空相对路径 | 相对于 `plugins/starx/` 的世界文件。`VOID` 不读取该文件。 |
+| `uworld.auth.world.file-name` | `assets/uworld/auth_world.schem` | 非空相对路径 | 相对于 `plugins/starx/` 的世界文件，推荐放在 `assets/uworld/`。`VOID` 不读取该文件。 |
 | `uworld.auth.world.offset-x/y/z` | `0` | 整数 | 文件 loader 写入虚拟世界时的偏移。 |
 | `uworld.auth.world.view-distance` | `4` | `1..32` | 发送给客户端的视距。 |
 | `uworld.auth.world.simulation-distance` | `4` | `1..32` | 虚拟世界模拟距离。 |
@@ -107,10 +107,13 @@ Diagnostics 模块由 `modules.starx.uworld.enabled` 派生；关闭 Uworld 模�
 | `SCHEMATIC` | `.schematic` | 读取 MCEdit schematic。 |
 | `WORLDEDIT_SCHEM` | `.schem` | 读取 WorldEdit schem。 |
 | `STRUCTURE` | `.nbt` | 读取 Minecraft structure NBT。 |
+| `LITEMATIC` | `.litematic` | 读取 Litematica 文件。 |
 
 文件必须在世界发布前完成解析。解析失败时不发布半成品世界，也不切换到未声明的 fallback 世界。
 
 ## 旧配置迁移
+
+没有 `config-files` 的旧单文件 `plugins/starx/config.yml` 会在完整启动时自动拆分为 `config/core.yml`、`auth.yml`、`network.yml`、`modules.yml` 和 `uworld.yml`，并保留 `config.yml.split-backup`（若已存在则使用数字后缀）。后续启动继续读取分片，不会重新写成单文件。迁移和回滚步骤见 [StarX 配置与运行时资源目录](STARX_CONFIGURATION_LAYOUT.md)。
 
 新配置优先。文件同时包含 `uworld:` 和旧 `limbo:` 根时，只读取 `uworld:` 并记录一次：
 

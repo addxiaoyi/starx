@@ -14,6 +14,7 @@ import java.util.Map;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.yaml.snakeyaml.Yaml;
 
 class MiniMotdMigrationTest {
 
@@ -127,7 +128,7 @@ class MiniMotdMigrationTest {
 
     ConfigLoader.load(config);
 
-    String persisted = Files.readString(config);
+    String persisted = new Yaml().dump(ConfigLayout.readEffectiveRoot(config));
     assertTrue(persisted.contains("<green>One") && persisted.contains("<white>Two"));
     assertTrue(Files.isRegularFile(starx.resolve("config.yml.minimotd-backup")));
     assertTrue(Files.isRegularFile(starx.resolve(".minimotd-migrated")));

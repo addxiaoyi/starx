@@ -11,6 +11,8 @@
 - 默认数据库为 SQLite `plugins/starx/data.db`，连接池上限为 2；当前发行物不把其他数据库驱动作为受支持部署。
 - 不支持热重载。升级、回滚或重新启用 Uworld 时必须完整重启 Velocity。
 
+配置入口、分片归属和 Uworld 投影文件的放置规则见[StarX 配置与运行时资源目录](../../docs/STARX_CONFIGURATION_LAYOUT.md)。
+
 不要把外置 LimboAPI JAR 放进 `plugins/`。内置 Uworld 与外置 LimboAPI 同时加载会争用进程级协议和事件状态，属于不支持的部署方式。
 
 ## 自动探测与配置生成
@@ -81,8 +83,9 @@ Windows 与 Linux 的完整部署、SQLite 一致性备份、候选/安装 SHA-2
 2. 将 `plugins/` 中任何外置 LimboAPI JAR 和旧的 StarX 重复 JAR 移动到时间戳备份，不要直接删除。
 3. 将 `starx-universal.jar` 放入 Velocity 的 `plugins/`。
 4. 使用 Java 21 启动 Velocity。
-5. 检查 `plugins/starx/config.yml`。新安装会写出完整 `modules.starx.uworld` 和 `uworld` 配置。
-6. 检查 `plugins/starx/uworld/core.yml`。如果只存在旧的 `plugins/starx/limbo/core.yml`，运行时会继续读取旧路径并记录迁移警告，不会自动移动或覆盖文件。
+5. 检查 `plugins/starx/config.yml` 及 `plugins/starx/config/`。新安装会写出入口索引和按职责拆分的五个配置文件。
+6. 检查 `plugins/starx/config/uworld.yml` 中的 `uworld.auth.world.file-name`，并将投影放到 `plugins/starx/assets/uworld/`。该路径相对于 `plugins/starx/`。
+7. 检查 `plugins/starx/uworld/core.yml`。如果只存在旧的 `plugins/starx/limbo/core.yml`，运行时会继续读取旧路径并记录迁移警告，不会自动移动或覆盖文件。
 7. 核对候选和安装 JAR 的 SHA-256，运行环境 doctor；在允许玩家进入前完成冷启动和 25 项真实客户端验收。
 
 启动必须 fail closed：Uworld core、世界生成、loader 文件或认证目标无效时，不得静默把待认证玩家送入任意后端。
@@ -118,9 +121,9 @@ Diagnostics 世界由 `/uworld test` 惰性创建，因此仅启动代理时不�
 升级前备份以下内容：
 
 - 当前 `starx-universal.jar`。
-- `plugins/starx/config.yml`。
+- `plugins/starx/config.yml` 和整个 `plugins/starx/config/` 配置分片目录。
+- `plugins/starx/assets/uworld/` 下由 Uworld 引用的 `.schem`、`.schematic`、`.nbt` 或 `.litematic` 文件。
 - `plugins/starx/uworld/core.yml`；仍使用兼容路径时同时备份 `plugins/starx/limbo/core.yml`。
-- Uworld loader 引用的 `.schem`、`.schematic` 或 `.nbt` 文件。
 - SQLite `data.db`、`data.db-wal` 和 `data.db-shm`；必须停止 Velocity 后作为同一批次备份。
 
 停止代理后替换 JAR，确认服务账户拥有 `plugins/starx/` 写权限，再执行完整冷启动和环境 doctor。不要使用 Velocity 插件重载器。配置同时包含 `uworld` 和旧 `limbo` 根时，新根优先并产生一次警告；确认迁移结果后再删除旧键。
@@ -142,6 +145,7 @@ Diagnostics 世界由 `/uworld test` 惰性创建，因此仅启动代理时不�
 - [Velocity/Paper/Folia 多平台部署](../../docs/STARX_PLATFORMS.md)
 - [生产环境、部署与回滚](../../docs/UWORLD_ENVIRONMENT.md)
 - [Uworld 配置](../../docs/UWORLD_CONFIGURATION.md)
+- [配置与运行时资源目录](../../docs/STARX_CONFIGURATION_LAYOUT.md)
 - [Uworld 开发接口](../../docs/UWORLD_DEVELOPMENT.md)
 - [Uworld 验收](../../docs/UWORLD_ACCEPTANCE.md)
 - [内嵌 Limbo 运行时](../starx-standalone-limbo/README.md)

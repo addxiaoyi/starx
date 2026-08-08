@@ -21,7 +21,6 @@ import io.github.addxiaoyi.starx.common.auth.uniauth.UniAuthConfig;
 import io.github.addxiaoyi.starx.common.config.DatabaseConfig;
 import io.github.addxiaoyi.starx.website.WebsiteSyncConfig;
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -38,7 +37,6 @@ import org.yaml.snakeyaml.Yaml;
 
 public final class ConfigLoader {
 
-  private static final String DEFAULT_CONFIG_RESOURCE = "/default-config.yml";
   private static final String BOTH_ROOTS_WARNING =
       "Both uworld and legacy limbo configuration are present; uworld takes precedence";
   private static final String LEGACY_WARNING =
@@ -54,16 +52,19 @@ public final class ConfigLoader {
   public static StarxConfig load(Path path, Consumer<String> warningSink) throws IOException {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(warningSink, "warningSink");
-    ensureConfigExists(path);
+    ConfigLayout.ensure(path);
 
-    Map<String, Object> currentRoot = readRoot(path);
-    MiniMotdMigration.Result migration = MiniMotdMigration.migrate(
-        path.getParent() == null ? Path.of(".") : path.getParent(),
-        currentRoot,
-        warningSink);
-    if (migration.migrated()) {
-      persistMiniMotdMigration(path, currentRoot);
-      MiniMotdMigration.markComplete(migration);
+    ConfigLayout.Loaded loaded = ConfigLayout.load(path, ignored -> { });
+    Map<String, Object> currentRoot = loaded.root();
+    if (!loaded.split()) {
+      MiniMotdMigration.Result migration = MiniMotdMigration.migrate(
+          path.getParent() == null ? Path.of(".") : path.getParent(),
+          currentRoot,
+          warningSink);
+      if (migration.migrated()) {
+        persistMiniMotdMigration(path, currentRoot);
+        MiniMotdMigration.markComplete(migration);
+      }
     }
     Map<String, Object> sourceModules = child(currentRoot, "modules");
     boolean sourceHasUworldRoot = currentRoot.containsKey("uworld");
@@ -71,8 +72,21 @@ public final class ConfigLoader {
     boolean sourceHasLegacyModule = sourceModules.containsKey("starx.limbo");
 
     Map<String, Object> defaultRoot = readDefaultRoot();
-    Map<String, Object> root = ConfigSchemaUpgrader.upgrade(
-        path, currentRoot, defaultRoot, warningSink).root();
+    Map<String, Object> root;
+    if (loaded.split()) {
+      root = ConfigSchemaUpgrader.normalize(
+          path,
+          ConfigLayout.merge(defaultRoot, currentRoot),
+          defaultRoot,
+          warningSink).root();
+    } else {
+      root = ConfigSchemaUpgrader.upgrade(path, currentRoot, defaultRoot, warningSink).root();
+      ConfigLayout.migrateLegacy(path, root, warningSink);
+      ConfigLayout.Loaded migrated = ConfigLayout.load(path, ignored -> { });
+      if (migrated.split()) {
+        root = ConfigLayout.merge(defaultRoot, migrated.root());
+      }
+    }
     Map<String, Object> modulesNode = child(root, "modules");
     Map<String, StarxConfig.ModuleConfig> modules = parseModules(modulesNode);
     validateExclusiveModules(modules);
@@ -150,49 +164,8 @@ public final class ConfigLoader {
       Files.deleteIfExists(temporary);
     }
   }
-  private static void ensureConfigExists(Path path) throws IOException {
-    if (Files.exists(path)) {
-      return;
-    }
-    Path parent = path.getParent();
-    if (parent != null) {
-      Files.createDirectories(parent);
-    }
-    try (InputStream input = ConfigLoader.class.getResourceAsStream(DEFAULT_CONFIG_RESOURCE)) {
-      if (input == null) {
-        throw new IOException("Missing classpath resource " + DEFAULT_CONFIG_RESOURCE);
-      }
-      Files.writeString(
-          path,
-          new String(input.readAllBytes(), StandardCharsets.UTF_8),
-          StandardCharsets.UTF_8);
-    }
-  }
-
-  private static Map<String, Object> readRoot(Path path) throws IOException {
-    try (InputStream input = Files.newInputStream(path)) {
-      return readRoot(input, path.toString());
-    }
-  }
-
   private static Map<String, Object> readDefaultRoot() throws IOException {
-    try (InputStream input = ConfigLoader.class.getResourceAsStream(DEFAULT_CONFIG_RESOURCE)) {
-      if (input == null) {
-        throw new IOException("Missing classpath resource " + DEFAULT_CONFIG_RESOURCE);
-      }
-      return readRoot(input, DEFAULT_CONFIG_RESOURCE);
-    }
-  }
-
-  private static Map<String, Object> readRoot(InputStream input, String label) {
-    Object loaded = new Yaml().load(input);
-    if (loaded == null) {
-      return Map.of();
-    }
-    if (!(loaded instanceof Map<?, ?> map)) {
-      throw new IllegalArgumentException("Configuration root must be a mapping: " + label);
-    }
-    return stringKeyMap(map, "configuration root");
+    return ConfigLayout.readDefaultRoot();
   }
 
   private static Map<String, StarxConfig.ModuleConfig> parseModules(

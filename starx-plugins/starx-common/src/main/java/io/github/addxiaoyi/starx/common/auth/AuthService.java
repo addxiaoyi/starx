@@ -322,7 +322,19 @@ public final class AuthService {
             return AuthResult.failure("可信身份来源无效");
         }
         Instant now = Instant.now();
-        if (!this.userRepository.existsByUuid(uuid)) {
+        Optional<StarxUser> account = this.userRepository.findFullByUuid(uuid);
+        if (account.isEmpty()) {
+            Optional<StarxUser> sameName = this.userRepository.findFullByUsername(username);
+            if (sameName.isPresent()) {
+                if (!premium) {
+                    return AuthResult.failure("该用户名已注册，请使用原账号登录");
+                }
+                // FastLogin may expose the official UUID while StarX still owns the old offline UUID.
+                // Keep the stored identity stable so UUID-bound data and device hashes survive.
+                account = sameName;
+            }
+        }
+        if (account.isEmpty()) {
             this.userRepository.create(new StarxUser(
                     uuid,
                     username,
@@ -345,9 +357,10 @@ public final class AuthService {
                     null,
                     false));
         } else {
-            this.userRepository.updateLastLogin(uuid, now);
+            UUID accountUuid = account.get().uuid();
+            this.userRepository.updateLastLogin(accountUuid, now);
             if (premium) {
-                this.userRepository.updatePremium(uuid, true);
+                this.userRepository.updatePremium(accountUuid, true);
             }
         }
         if (!this.sessionManager.transition(

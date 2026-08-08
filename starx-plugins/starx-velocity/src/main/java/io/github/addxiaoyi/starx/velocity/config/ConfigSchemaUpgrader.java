@@ -45,7 +45,16 @@ final class ConfigSchemaUpgrader {
       Map<String, Object> defaults,
       Consumer<String> warningSink
   ) throws IOException {
-    return upgrade(path, current, defaults, warningSink, Clock.systemUTC());
+    return upgrade(path, current, defaults, warningSink, Clock.systemUTC(), true);
+  }
+
+  static UpgradeResult normalize(
+      Path path,
+      Map<String, Object> current,
+      Map<String, Object> defaults,
+      Consumer<String> warningSink
+  ) throws IOException {
+    return upgrade(path, current, defaults, warningSink, Clock.systemUTC(), false);
   }
 
   static UpgradeResult upgrade(
@@ -54,6 +63,17 @@ final class ConfigSchemaUpgrader {
       Map<String, Object> defaults,
       Consumer<String> warningSink,
       Clock clock
+  ) throws IOException {
+    return upgrade(path, current, defaults, warningSink, clock, true);
+  }
+
+  private static UpgradeResult upgrade(
+      Path path,
+      Map<String, Object> current,
+      Map<String, Object> defaults,
+      Consumer<String> warningSink,
+      Clock clock,
+      boolean persist
   ) throws IOException {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(current, "current");
@@ -82,6 +102,17 @@ final class ConfigSchemaUpgrader {
     if (!changed) {
       return new UpgradeResult(sourceVersion, CURRENT_SCHEMA_VERSION, false, null, null,
           List.of(), Map.copyOf(normalized));
+    }
+
+    if (!persist) {
+      return new UpgradeResult(
+          sourceVersion,
+          CURRENT_SCHEMA_VERSION,
+          true,
+          null,
+          null,
+          List.copyOf(addedPaths),
+          Map.copyOf(normalized));
     }
 
     String stamp = STAMP.format(Instant.now(clock));

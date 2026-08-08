@@ -1,0 +1,106 @@
+# StarX 认证配置：UniAuth、登录免密规则、认证界面文字和二步验证。
+#
+# 新手建议：
+# - 不接 UniAuth 就保持 uniauth.enabled=false，不要只改 api-url 却忘记 api-key。
+# - allow-offline-default 默认 false，先让插件区分可信身份和普通密码账号，避免误判。
+# - 只想改提示语时，只改 auth.ux 下面的文字，不要改认证开关。
+#
+# 外部握手密钥不写在这个 YAML 里。插件会在 plugins/starx/external-handshake.key 生成并复用密钥。
+# 需要对接的外部连接端应把初始 Handshake 的 Server Address 原样设为：
+# <服务器地址>\0starx-handshake\0<密钥>
+# 其中 \0 是真实 NUL 字节，不是四个可见字符；不要把密钥写进 api-key 或聊天消息。
+uniauth:
+  # 是否启用 UniAuth 外部身份服务；没有对应服务时必须保持 false。
+  enabled: false
+  # UniAuth API 地址，启用后必须是真实可访问的 HTTP(S) 地址。
+  api-url: "https://api.example.com/uniauth/"
+  # UniAuth 的访问密钥。启用后填写，留空会导致外部身份服务不可用。
+  api-key: ""
+  # 请求超时时间，单位毫秒；网络较慢时可适当调大。
+  timeout-ms: 5000
+  # 是否让 UniAuth 参与代理端身份桥接；不了解用途时保持 false。
+  bridge-mode: false
+  profile-sync:
+    # 是否同步外部资料到本地用户资料；不需要资料同步就保持 false。
+    enabled: false
+    # true：玩家登录时同步；false：只在其他业务主动触发时同步。
+    on-login: true
+    # 是否同步邮箱。
+    sync-email: true
+    # 是否同步外部用户 ID。
+    sync-external-user-id: true
+    # true 可能覆盖本地资料，生产环境建议保持 false。
+    overwrite-local-values: false
+    # 写入资料时标记来源系统的名称。
+    source-system: "uniauth"
+
+auth:
+  # 账号绑定网页地址，用于登录卡片中的绑定和网站免密入口。
+  binding-website-url: https://star-web.top
+  # 同一 IP 成功用密码登录后，允许该账号在多少分钟内复用登录状态；0 表示关闭。
+  password-bypass-minutes: 30
+  # 未被可信身份来源识别时，是否默认按离线账号处理。为避免正版/离线误判，建议保持 false。
+  allow-offline-default: false
+  offline-identity:
+    # 离线账号在内部身份名中的前缀；修改后会影响新账号识别，已有账号不要随意改。
+    prefix: "."
+    # 登录卡片显示的账号类型名称。
+    display-name: "前缀离线账号"
+  ux:
+    # 三个 UI 开关只影响提示形式，不影响认证结果：true 开启，false 关闭。
+    titles-enabled: true
+    action-bar-enabled: true
+    sounds-enabled: true
+    # 下列声音必须是客户端能识别的 Minecraft Sound ID；不需要声音可将 sounds-enabled 设为 false。
+    prompt-sound: "minecraft:block.note_block.chime"
+    success-sound: "minecraft:entity.player.levelup"
+    error-sound: "minecraft:block.note_block.bass"
+    messages:
+      # 登录、注册、二步验证和成功提示。可直接改中文，但保留 YAML 引号和缩进。
+      login-title: "欢迎回来"
+      login-subtitle: "请在聊天栏输入密码登录"
+      register-title: "欢迎来到 StarMC"
+      register-subtitle: "在聊天栏输入密码即可注册"
+      totp-title: "二步验证"
+      totp-subtitle: "请输入 6 位验证码"
+      success-title: "认证成功"
+      success-subtitle: "正在进入服务器"
+      login-prompt: "请输入密码完成登录。"
+      login-action-bar: "直接输入密码即可，聊天内容不会公开"
+      register-prompt: "请直接在聊天栏输入你的密码完成注册。"
+      register-action-bar: "密码仅用于认证，不会显示在聊天中"
+      totp-prompt: "请输入验证器的 6 位验证码，或 10 位恢复码。"
+      totp-action-bar: "验证码提交后将自动验证"
+    card:
+      # 认证卡片中的字段名称和链接文字。这里只改显示文字，不会改变认证逻辑。
+      title: "✦ StarMC 安全登录中心 ✦"
+      player-prefix: "玩家："
+      uuid-prefix: "玩家 UUID："
+      account-type-prefix: "账号类型："
+      current-ip-prefix: "当前 IP："
+      last-ip-prefix: "上次 IP："
+      last-login-prefix: "上次登录："
+      playtime-prefix: "累计游玩："
+      registered-at-prefix: "注册时间："
+      target-prefix: "认证目标："
+      premium-account: "正版账号"
+      offline-account: "离线账号"
+      first-login-account: "首次登录"
+      new-player-name: "新玩家"
+      no-history: "无历史记录"
+      registration-premium-account: "正版账号（待注册）"
+      registration-offline-account: "离线账号（待注册）"
+      registration-history: "首次注册，无历史记录"
+      registration-pending-time: "完成注册后生成"
+      unknown-value: "未知"
+      target-unavailable: "暂不可用"
+      login-link-text: "[点击打开 StarX 账号绑定 · 绑定后免密登录]"
+      login-link-hover: "打开安全绑定页面（5 分钟内有效）"
+      registration-link-text: "[打开 StarX 账号中心 · 注册后可绑定免密登录]"
+      registration-link-hover: "先完成游戏内注册，再进行账号绑定"
+      hour-unit: "小时"
+      minute-unit: "分钟"
+
+totp:
+  # 是否启用 TOTP 二步验证。关闭后只影响二步验证，不会关闭普通密码认证。
+  enabled: true

@@ -11,6 +11,7 @@ public final class NodeCapabilities {
   public static final String SERVER_STATUS = "server.status";
   public static final String SERVER_COMMANDS = "server.commands";
   public static final String SKIN_REFRESH = "skin.refresh";
+  public static final String CAPE_REFRESH = "cape.refresh";
   public static final String AUTH_EVENTS = "auth.events";
 
   private static final Set<String> ALLOWED = Set.of(
@@ -20,6 +21,7 @@ public final class NodeCapabilities {
       SERVER_STATUS,
       SERVER_COMMANDS,
       SKIN_REFRESH,
+      CAPE_REFRESH,
       AUTH_EVENTS);
 
   private NodeCapabilities() {

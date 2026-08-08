@@ -92,6 +92,7 @@ public final class AuthModule implements VelocityModule {
   private final BindingVerificationService bindingVerification;
   private final JdbcTrustedDeviceRepository trustedDeviceRepository;
   private final IpSessionStore ipSessionStore;
+  private final ExternalHandshake externalHandshake;
   private final UworldConfig uworldConfig;
   private final AuthFlowIndex<Player, RegisteredServer, Component> flows =
       new AuthFlowIndex<>();
@@ -165,6 +166,24 @@ public final class AuthModule implements VelocityModule {
       JdbcTrustedDeviceRepository trustedDeviceRepository,
       IpSessionStore ipSessionStore
   ) {
+    this(plugin, eventBus, uniauthConfig, totpConfig, authConfig, uworldConfig,
+        userRepository, bindingVerification, trustedDeviceRepository, ipSessionStore,
+        ExternalHandshake.disabled());
+  }
+
+  public AuthModule(
+      StarxVelocityPlugin plugin,
+      EventBus eventBus,
+      UniAuthConfig uniauthConfig,
+      StarxConfig.TotpConfig totpConfig,
+      StarxConfig.AuthConfig authConfig,
+      UworldConfig uworldConfig,
+      JdbcUserRepository userRepository,
+      BindingVerificationService bindingVerification,
+      JdbcTrustedDeviceRepository trustedDeviceRepository,
+      IpSessionStore ipSessionStore,
+      ExternalHandshake externalHandshake
+  ) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
     this.uniauthConfig = Objects.requireNonNull(uniauthConfig, "uniauthConfig");
@@ -174,6 +193,7 @@ public final class AuthModule implements VelocityModule {
     this.bindingVerification = Objects.requireNonNull(bindingVerification, "bindingVerification");
     this.trustedDeviceRepository = trustedDeviceRepository;
     this.ipSessionStore = ipSessionStore;
+    this.externalHandshake = Objects.requireNonNull(externalHandshake, "externalHandshake");
     this.logger = plugin.logger();
     StarxConfig.AuthConfig resolvedAuth = Objects.requireNonNull(authConfig, "authConfig");
     this.authUx = resolvedAuth.ux();
@@ -416,6 +436,11 @@ public final class AuthModule implements VelocityModule {
     UUID playerId = player.getUniqueId();
     String username = player.getUsername();
     InetAddress address = this.playerAddress(player);
+    if (this.externalHandshake.matches(player.getRawVirtualHost().orElse(null))) {
+      AuthResult result = this.authService.autoLoginTrusted(
+          lease, playerId, username, address, "external-handshake", false);
+      return this.finishTrustedLogin(player, result);
+    }
     boolean premium = this.premiumResolver.isPremium(playerId, player.isOnlineMode());
     boolean trustedExternalIdentity = this.trustedIdentity.isTrusted(playerId);
     boolean trustedWebsiteBinding = this.userRepository.hasTrustedWebsiteBinding(playerId, username);
@@ -434,18 +459,7 @@ public final class AuthModule implements VelocityModule {
               address,
               trustedWebsiteBinding ? "website-binding" : "floodgate",
               false);
-      if (!result.success()) {
-        return Optional.of(Component.text(result.message()));
-      }
-      RegisteredServer target = this.targetServer;
-      if (target == null) {
-        this.logMissingTarget();
-        return Optional.of(TARGET_UNAVAILABLE);
-      }
-      if (!this.flows.route(player, target)) {
-        return Optional.of(AUTH_ERROR);
-      }
-      return Optional.empty();
+      return this.finishTrustedLogin(player, result);
     }
 
     if (!this.checkRateLimit(playerId)) {
@@ -459,6 +473,21 @@ public final class AuthModule implements VelocityModule {
     }
     this.eventBus.publish("player:login:start", Map.of("uuid", playerId, "username", username));
     this.logger.log(Level.INFO, "Player {0} is waiting for Uworld authentication", username);
+    return Optional.empty();
+  }
+
+  private Optional<Component> finishTrustedLogin(Player player, AuthResult result) {
+    if (!result.success()) {
+      return Optional.of(Component.text(result.message()));
+    }
+    RegisteredServer target = this.targetServer;
+    if (target == null) {
+      this.logMissingTarget();
+      return Optional.of(TARGET_UNAVAILABLE);
+    }
+    if (!this.flows.route(player, target)) {
+      return Optional.of(AUTH_ERROR);
+    }
     return Optional.empty();
   }
 
