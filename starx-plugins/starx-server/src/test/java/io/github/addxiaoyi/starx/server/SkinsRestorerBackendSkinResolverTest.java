@@ -41,6 +41,20 @@ final class SkinsRestorerBackendSkinResolverTest {
   }
 
   @Test
+  void storesWebsiteTextureThroughCurrentSkinsRestorerApi() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    CurrentWritableApi api = new CurrentWritableApi();
+    SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(api);
+
+    assertTrue(resolver.store(uuid, "Alex", "website-value", "website-signature"));
+    BackendSkinProfile stored = resolver.find(uuid, "Alex").orElseThrow();
+
+    assertEquals("website-value", stored.value());
+    assertEquals("website-signature", stored.signature());
+    assertEquals("starx-4f06bce032d74d4dbb179f7e92ae8701", api.players.skinId.identifier);
+  }
+
+  @Test
   void logsReflectedApiFailureOnceWithoutBreakingBridge() {
     Logger logger = Logger.getLogger("skin-resolver-test-" + UUID.randomUUID());
     CapturingHandler logs = new CapturingHandler();
@@ -128,6 +142,85 @@ final class SkinsRestorerBackendSkinResolverTest {
       return this.skinId != null && this.skinId.equals(skinId)
           ? Optional.of(new WritableSkinData(this.value, this.signature))
           : Optional.empty();
+    }
+  }
+
+  private static final class CurrentWritableApi {
+    private final CurrentWritablePlayerStorage players = new CurrentWritablePlayerStorage();
+    private final CurrentWritableSkinStorage skins = new CurrentWritableSkinStorage();
+
+    public CurrentWritablePlayerStorage getPlayerStorage() {
+      return this.players;
+    }
+
+    public CurrentWritableSkinStorage getSkinStorage() {
+      return this.skins;
+    }
+  }
+
+  private static final class CurrentWritablePlayerStorage {
+    private CurrentSkinIdentifier skinId;
+
+    public Optional<CurrentSkinIdentifier> getSkinIdOfPlayer(UUID uuid) {
+      return Optional.ofNullable(this.skinId);
+    }
+
+    public void setSkinIdOfPlayer(UUID uuid, CurrentSkinIdentifier skinId) {
+      this.skinId = skinId;
+    }
+  }
+
+  private static final class CurrentWritableSkinStorage {
+    private String skinId;
+    private CurrentSkinProperty property;
+
+    public void setCustomSkinData(String skinId, CurrentSkinProperty property) {
+      this.skinId = skinId;
+      this.property = property;
+    }
+
+    public Optional<CurrentSkinProperty> getSkinDataByIdentifier(CurrentSkinIdentifier identifier) {
+      return this.skinId != null && this.skinId.equals(identifier.getIdentifier())
+          ? Optional.of(this.property)
+          : Optional.empty();
+    }
+  }
+
+  private static final class CurrentSkinIdentifier {
+    private final String identifier;
+
+    private CurrentSkinIdentifier(String identifier) {
+      this.identifier = identifier;
+    }
+
+    public String getIdentifier() {
+      return this.identifier;
+    }
+
+    public static CurrentSkinIdentifier ofCustom(String identifier) {
+      return new CurrentSkinIdentifier(identifier);
+    }
+  }
+
+  private static final class CurrentSkinProperty {
+    private final String value;
+    private final String signature;
+
+    private CurrentSkinProperty(String value, String signature) {
+      this.value = value;
+      this.signature = signature;
+    }
+
+    public static CurrentSkinProperty of(String value, String signature) {
+      return new CurrentSkinProperty(value, signature);
+    }
+
+    public String getValue() {
+      return this.value;
+    }
+
+    public String getSignature() {
+      return this.signature;
     }
   }
 

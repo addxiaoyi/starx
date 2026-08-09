@@ -89,10 +89,10 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     }
     try {
       Optional<?> existing = invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
-      String skinId = existing.map(Object::toString)
+      String skinId = existing.map(SkinsRestorerBackendSkinResolver::identifierOfUnchecked)
           .orElseGet(() -> "starx-" + uuid.toString().replace("-", ""));
-      invoke(this.skinStorage, "setSkinData", skinId, value, signature == null ? "" : signature);
-      invoke(this.playerStorage, "setSkinIdOfPlayer", uuid, skinId);
+      writeSkinData(this.skinStorage, skinId, value, signature == null ? "" : signature);
+      setSkinIdentifier(this.playerStorage, uuid, skinId);
       return true;
     } catch (ReflectiveOperationException | ClassCastException | IllegalStateException error) {
       if (this.failureLogged.compareAndSet(false, true)) {
@@ -133,6 +133,82 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
       value = optional.isPresent() ? optional.get() : "";
     }
     return value == null ? "" : value.toString();
+  }
+
+  private static String identifierOfUnchecked(Object value) {
+    try {
+      if (value instanceof String identifier) {
+        return identifier;
+      }
+      Object identifier = invoke(value, "getIdentifier");
+      if (identifier instanceof String text && !text.isBlank()) {
+        return text;
+      }
+      throw new IllegalStateException("SkinsRestorer returned an invalid skin identifier");
+    } catch (ReflectiveOperationException error) {
+      throw new IllegalStateException("Failed to read SkinsRestorer skin identifier", error);
+    }
+  }
+
+  private static void writeSkinData(Object storage, String skinId, String value, String signature)
+      throws ReflectiveOperationException {
+    try {
+      invoke(storage, "setSkinData", skinId, value, signature);
+      return;
+    } catch (NoSuchMethodException ignored) {
+      // SkinsRestorer 15.12 stores custom textures through SkinProperty.
+    }
+    for (Method method : storage.getClass().getMethods()) {
+      Class<?>[] parameters = method.getParameterTypes();
+      if (!method.getName().equals("setCustomSkinData")
+          || parameters.length != 2
+          || !parameters[0].isInstance(skinId)) {
+        continue;
+      }
+      method.trySetAccessible();
+      method.invoke(storage, skinId, skinPropertyFor(parameters[1], value, signature));
+      return;
+    }
+    throw new NoSuchMethodException("setSkinData or setCustomSkinData in " + storage.getClass());
+  }
+
+  private static void setSkinIdentifier(Object storage, UUID uuid, String skinId)
+      throws ReflectiveOperationException {
+    for (Method method : storage.getClass().getMethods()) {
+      Class<?>[] parameters = method.getParameterTypes();
+      if (!method.getName().equals("setSkinIdOfPlayer")
+          || parameters.length != 2
+          || !parameters[0].isInstance(uuid)) {
+        continue;
+      }
+      method.trySetAccessible();
+      method.invoke(storage, uuid, skinIdentifierFor(parameters[1], skinId));
+      return;
+    }
+    throw new NoSuchMethodException("setSkinIdOfPlayer in " + storage.getClass());
+  }
+
+  private static Object skinIdentifierFor(Class<?> targetType, String skinId)
+      throws ReflectiveOperationException {
+    if (targetType.isAssignableFrom(String.class)) {
+      return skinId;
+    }
+    Method factory = targetType.getMethod("ofCustom", String.class);
+    Object identifier = factory.invoke(null, skinId);
+    if (targetType.isInstance(identifier)) {
+      return identifier;
+    }
+    throw new IllegalStateException("SkinsRestorer returned an invalid skin identifier type");
+  }
+
+  private static Object skinPropertyFor(Class<?> targetType, String value, String signature)
+      throws ReflectiveOperationException {
+    Method factory = targetType.getMethod("of", String.class, String.class);
+    Object property = factory.invoke(null, value, signature);
+    if (targetType.isInstance(property)) {
+      return property;
+    }
+    throw new IllegalStateException("SkinsRestorer returned an invalid skin property type");
   }
 
   private static Object read(Object target, String name) {

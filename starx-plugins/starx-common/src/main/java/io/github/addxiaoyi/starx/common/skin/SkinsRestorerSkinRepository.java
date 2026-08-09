@@ -89,7 +89,7 @@ implements SkinRepository {
         try {
             Optional<Object> existing = SkinsRestorerSkinRepository.invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
             String skinId = existing.map(SkinsRestorerSkinRepository::identifierOfUnchecked).orElseGet(() -> "starx-" + uuid.toString().replace("-", ""));
-            SkinsRestorerSkinRepository.invokeVoid(this.skinStorage, "setSkinData", skinId, value, signature);
+            SkinsRestorerSkinRepository.writeSkinData(this.skinStorage, skinId, value, signature);
             SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
         }
         catch (ReflectiveOperationException e) {
@@ -118,6 +118,26 @@ implements SkinRepository {
     private static void invokeVoid(Object target, String methodName, Object ... args) throws ReflectiveOperationException {
         Method method = SkinsRestorerSkinRepository.findMethod(target.getClass(), methodName, args);
         method.invoke(target, args);
+    }
+
+    private static void writeSkinData(Object storage, String skinId, String value, String signature) throws ReflectiveOperationException {
+        try {
+            SkinsRestorerSkinRepository.invokeVoid(storage, "setSkinData", skinId, value, signature);
+            return;
+        }
+        catch (NoSuchMethodException ignored) {
+            // SkinsRestorer 15.12 stores custom textures through SkinProperty.
+        }
+        for (Method method : storage.getClass().getMethods()) {
+            Class<?>[] parameters = method.getParameterTypes();
+            if (!method.getName().equals("setCustomSkinData")
+                || parameters.length != 2
+                || !SkinsRestorerSkinRepository.wrap(parameters[0]).isInstance(skinId)) continue;
+            Object property = SkinsRestorerSkinRepository.skinPropertyFor(parameters[1], value, signature);
+            method.invoke(storage, skinId, property);
+            return;
+        }
+        throw new NoSuchMethodException("setSkinData or setCustomSkinData in " + storage.getClass());
     }
 
     private static <T> Optional<T> invokeOptional(Object target, String methodName, Object ... args) throws ReflectiveOperationException {
@@ -165,6 +185,15 @@ implements SkinRepository {
             return identifier;
         }
         throw new IllegalStateException("SkinsRestorer returned an invalid skin identifier type");
+    }
+
+    private static Object skinPropertyFor(Class<?> targetType, String value, String signature) throws ReflectiveOperationException {
+        Method factory = targetType.getMethod("of", String.class, String.class);
+        Object property = factory.invoke(null, value, signature);
+        if (targetType.isInstance(property)) {
+            return property;
+        }
+        throw new IllegalStateException("SkinsRestorer returned an invalid skin property type");
     }
 
     private static Method findMethod(Class<?> clazz, String name, Object ... args) throws NoSuchMethodException {
