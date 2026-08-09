@@ -12,6 +12,9 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import net.skinsrestorer.api.SkinsRestorerProvider;
 import org.junit.jupiter.api.Test;
 
@@ -243,6 +246,27 @@ class SkinsRestorerSkinRepositoryTest {
 
     assertDoesNotThrow(() -> repository.setSkinData(uuid, "value", "signature"));
     assertNull(playerStorage.saved);
+  }
+
+  @Test
+  void logsAReflectedWriteFailureOnlyOnce() throws Exception {
+    Logger logger = Logger.getLogger("skin-repository-test-" + UUID.randomUUID());
+    CapturingHandler logs = new CapturingHandler();
+    logger.setUseParentHandlers(false);
+    logger.addHandler(logs);
+    try {
+      SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository(logger);
+      set(repository, "available", true);
+      set(repository, "playerStorage", new LegacyPlayerStorage());
+      set(repository, "skinStorage", new BrokenSkinStorage());
+
+      repository.setSkinData(UUID.randomUUID(), "value", "signature");
+      repository.setSkinData(UUID.randomUUID(), "value", "signature");
+
+      assertEquals(1, logs.count);
+    } finally {
+      logger.removeHandler(logs);
+    }
   }
 
   @Test
@@ -506,6 +530,9 @@ class SkinsRestorerSkinRepositoryTest {
     }
   }
 
+  public static final class BrokenSkinStorage {
+  }
+
   public static final class SkinIdentifier {
     private final String identifier;
 
@@ -606,5 +633,22 @@ class SkinsRestorerSkinRepositoryTest {
   }
 
   public record ConstructorSkinProperty(String value, String signature) {
+  }
+
+  private static final class CapturingHandler extends Handler {
+    private int count;
+
+    @Override
+    public void publish(LogRecord record) {
+      this.count++;
+    }
+
+    @Override
+    public void flush() {
+    }
+
+    @Override
+    public void close() {
+    }
   }
 }

@@ -10,18 +10,27 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class SkinsRestorerSkinRepository
 implements SkinRepository {
-    private static final Logger LOGGER = Logger.getLogger(SkinsRestorerSkinRepository.class.getName());
+    private static final Logger DEFAULT_LOGGER = Logger.getLogger(SkinsRestorerSkinRepository.class.getName());
     private static final String PROVIDER_CLASS = "net.skinsrestorer.api.SkinsRestorerProvider";
     private final boolean available;
     private final Object playerStorage;
     private final Object skinStorage;
+    private final Logger logger;
+    private final AtomicBoolean failureLogged = new AtomicBoolean();
 
     public SkinsRestorerSkinRepository() {
+        this(DEFAULT_LOGGER);
+    }
+
+    SkinsRestorerSkinRepository(Logger logger) {
+        this.logger = Objects.requireNonNull(logger, "logger");
         Object api = null;
         Object playerStorageTmp = null;
         Object skinStorageTmp = null;
@@ -42,13 +51,13 @@ implements SkinRepository {
             }
         }
         catch (ClassNotFoundException e) {
-            LOGGER.fine("SkinsRestorer not available, skin bridge will degrade gracefully.");
+            this.logger.fine("SkinsRestorer not available, skin bridge will degrade gracefully.");
         }
         catch (ReflectiveOperationException e) {
-            LOGGER.log(Level.WARNING, "Failed to initialize SkinsRestorer API", e);
+            this.logger.log(Level.WARNING, "Failed to initialize SkinsRestorer API", e);
         }
         catch (LinkageError e) {
-            LOGGER.log(Level.WARNING, "SkinsRestorer API is incompatible with this server, skin bridge will degrade gracefully.", e);
+            this.logger.log(Level.WARNING, "SkinsRestorer API is incompatible with this server, skin bridge will degrade gracefully.", e);
         }
         this.available = ok;
         this.playerStorage = playerStorageTmp;
@@ -86,7 +95,7 @@ implements SkinRepository {
             return Optional.of(new SkinDto(uuid, name, SkinsRestorerSkinRepository.identifierOf(skinId.get()), value, signature, null));
         }
         catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
-            LOGGER.log(Level.WARNING, "Failed to read skin for " + String.valueOf(uuid), e);
+            this.logFailure("Failed to read skin for " + String.valueOf(uuid), e);
             return Optional.empty();
         }
     }
@@ -99,8 +108,8 @@ implements SkinRepository {
         try {
             SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
         }
-        catch (ReflectiveOperationException | LinkageError e) {
-            LOGGER.log(Level.WARNING, "Failed to set skin id for " + String.valueOf(uuid), e);
+        catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
+            this.logFailure("Failed to set skin id for " + String.valueOf(uuid), e);
         }
     }
 
@@ -116,7 +125,7 @@ implements SkinRepository {
             SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
         }
         catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
-            LOGGER.log(Level.WARNING, "Failed to set skin data for " + String.valueOf(uuid), e);
+            this.logFailure("Failed to set skin data for " + String.valueOf(uuid), e);
         }
     }
 
@@ -128,8 +137,14 @@ implements SkinRepository {
         try {
             SkinsRestorerSkinRepository.invokeVoid(this.playerStorage, "removeSkinIdOfPlayer", uuid);
         }
-        catch (ReflectiveOperationException | LinkageError e) {
-            LOGGER.log(Level.WARNING, "Failed to clear skin for " + String.valueOf(uuid), e);
+        catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
+            this.logFailure("Failed to clear skin for " + String.valueOf(uuid), e);
+        }
+    }
+
+    private void logFailure(String message, Throwable error) {
+        if (this.failureLogged.compareAndSet(false, true)) {
+            this.logger.log(Level.WARNING, message, error);
         }
     }
 
