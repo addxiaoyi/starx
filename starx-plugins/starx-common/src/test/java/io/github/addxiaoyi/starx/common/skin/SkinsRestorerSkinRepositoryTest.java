@@ -3,11 +3,16 @@ package io.github.addxiaoyi.starx.common.skin;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.addxiaoyi.starx.api.dto.SkinDto;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Optional;
 import java.util.UUID;
+import net.skinsrestorer.api.SkinsRestorerProvider;
 import org.junit.jupiter.api.Test;
 
 class SkinsRestorerSkinRepositoryTest {
@@ -35,6 +40,64 @@ class SkinsRestorerSkinRepositoryTest {
 
     assertEquals("direct-value", skin.value());
     assertEquals("direct-signature", skin.signature());
+  }
+
+  @Test
+  void prefersStoredSkinLookupBeforeNetworkBackedPlayerLookup() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", new StoredSkinPlayerStorage(uuid));
+    set(repository, "skinStorage", null);
+
+    SkinDto skin = repository.findByPlayer(uuid, "offline-player").orElseThrow();
+
+    assertEquals("stored-value", skin.value());
+    assertEquals("stored-signature", skin.signature());
+  }
+
+  @Test
+  void keepsCurrentApiWhenLegacySkinStorageIsUnavailable() {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+
+    SkinDto skin = repository.findByPlayer(UUID.randomUUID(), "player").orElseThrow();
+
+    assertEquals("provider-value", skin.value());
+    assertEquals("provider-signature", skin.signature());
+  }
+
+  @Test
+  void keepsCurrentApiWhenOptionalSkinStorageGetterFails() {
+    SkinsRestorerProvider.setFailSkinStorage(true);
+    try {
+      SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+
+      SkinDto skin = repository.findByPlayer(UUID.randomUUID(), "player").orElseThrow();
+
+      assertEquals("provider-value", skin.value());
+      assertEquals("provider-signature", skin.signature());
+    } finally {
+      SkinsRestorerProvider.setFailSkinStorage(false);
+    }
+  }
+
+  @Test
+  void degradesWhenOptionalStorageMethodCannotLink() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    set(repository, "available", true);
+    try (URLClassLoader loader = linkageFailingLoader()) {
+      Class<?> storageType = Class.forName(
+          LinkageErrorStorage.class.getName(), true, loader);
+      Constructor<?> constructor = storageType.getDeclaredConstructor();
+      constructor.trySetAccessible();
+      set(repository, "playerStorage", constructor.newInstance());
+      set(repository, "skinStorage", null);
+
+      Optional<SkinDto> skin = assertDoesNotThrow(
+          () -> repository.findByPlayer(UUID.randomUUID(), "player"));
+
+      assertTrue(skin.isEmpty());
+    }
   }
 
   @Test
@@ -85,6 +148,91 @@ class SkinsRestorerSkinRepositoryTest {
   }
 
   @Test
+  void writesTextureUsingConstructorOnlyCurrentApi() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    ConstructorPlayerStorage playerStorage = new ConstructorPlayerStorage();
+    ConstructorSkinStorage skinStorage = new ConstructorSkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    repository.setSkinData(uuid, "constructor-value", "constructor-signature");
+
+    String expected = "starx-" + uuid.toString().replace("-", "");
+    assertEquals(expected, skinStorage.savedIdentifier);
+    assertEquals("constructor-value", skinStorage.savedProperty.value());
+    assertEquals("constructor-signature", skinStorage.savedProperty.signature());
+    assertEquals(expected, playerStorage.saved.identifier());
+  }
+
+  @Test
+  void skipsPrimitiveOverloadWhenWritingNullSignature() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    OverloadedPlayerStorage playerStorage = new OverloadedPlayerStorage();
+    OverloadedSkinStorage skinStorage = new OverloadedSkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    repository.setSkinData(uuid, "value", null);
+
+    String expected = "starx-" + uuid.toString().replace("-", "");
+    assertEquals(expected, skinStorage.savedIdentifier);
+    assertEquals("value", skinStorage.savedValue);
+    assertNull(skinStorage.savedPrimitiveSignature);
+    assertEquals(expected, playerStorage.saved);
+  }
+
+  @Test
+  void prefersSpecificReferenceOverloadWhenWritingNullSignature() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    LegacyPlayerStorage playerStorage = new LegacyPlayerStorage();
+    ReferenceOverloadedSkinStorage skinStorage = new ReferenceOverloadedSkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    repository.setSkinData(uuid, "value", null);
+
+    String expected = "starx-" + uuid.toString().replace("-", "");
+    assertEquals(expected, skinStorage.savedIdentifier);
+    assertEquals("value", skinStorage.savedValue);
+    assertNull(skinStorage.savedObjectSignature);
+  }
+
+  @Test
+  void continuesAfterSkinIdentifierConstructorFailure() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    ConstructorFallbackPlayerStorage playerStorage = new ConstructorFallbackPlayerStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+
+    repository.setSkinId(uuid, "skin");
+
+    assertEquals("skin", playerStorage.saved.identifier());
+  }
+
+  @Test
+  void continuesAfterSkinPropertyConstructorFailure() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    LegacyPlayerStorage playerStorage = new LegacyPlayerStorage();
+    ConstructorFallbackSkinStorage skinStorage = new ConstructorFallbackSkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    repository.setSkinData(uuid, "value", "signature");
+
+    assertEquals("value", skinStorage.savedProperty.value());
+    assertEquals("signature", skinStorage.savedProperty.signature());
+  }
+
+  @Test
   void ignoresTextureWriteWhenSkinStorageIsUnavailable() throws Exception {
     SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
     LegacyPlayerStorage playerStorage = new LegacyPlayerStorage();
@@ -95,6 +243,19 @@ class SkinsRestorerSkinRepositoryTest {
 
     assertDoesNotThrow(() -> repository.setSkinData(uuid, "value", "signature"));
     assertNull(playerStorage.saved);
+  }
+
+  @Test
+  void degradesWhenPlayerStorageIsUnavailable() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    set(repository, "available", true);
+    set(repository, "playerStorage", null);
+    set(repository, "skinStorage", new SkinStorage());
+
+    assertTrue(repository.findByPlayer(UUID.randomUUID(), "player").isEmpty());
+    assertDoesNotThrow(() -> repository.setSkinId(UUID.randomUUID(), "skin"));
+    assertDoesNotThrow(() -> repository.setSkinData(UUID.randomUUID(), "value", "signature"));
+    assertDoesNotThrow(() -> repository.clearSkin(UUID.randomUUID()));
   }
 
   @Test
@@ -121,6 +282,43 @@ class SkinsRestorerSkinRepositoryTest {
     field.set(target, value);
   }
 
+  private static URLClassLoader linkageFailingLoader() {
+    URL location = SkinsRestorerSkinRepositoryTest.class
+        .getProtectionDomain().getCodeSource().getLocation();
+    String storageName = LinkageErrorStorage.class.getName();
+    String missingTypeName = MissingSkinProperty.class.getName();
+    ClassLoader parent = SkinsRestorerSkinRepositoryTest.class.getClassLoader();
+    return new URLClassLoader(new URL[] {location}, parent) {
+      @Override
+      protected Class<?> loadClass(String name, boolean resolve)
+          throws ClassNotFoundException {
+        if (name.equals(missingTypeName)) {
+          throw new ClassNotFoundException(name);
+        }
+        if (!name.equals(storageName)) {
+          return super.loadClass(name, resolve);
+        }
+        Class<?> loaded = findLoadedClass(name);
+        if (loaded == null) {
+          loaded = findClass(name);
+        }
+        if (resolve) {
+          resolveClass(loaded);
+        }
+        return loaded;
+      }
+    };
+  }
+
+  public static final class LinkageErrorStorage {
+    public MissingSkinProperty getSkinOfPlayer(UUID uuid) {
+      return null;
+    }
+  }
+
+  public static final class MissingSkinProperty {
+  }
+
   public static final class PlayerStorage {
     private SkinIdentifier saved;
 
@@ -144,6 +342,24 @@ class SkinsRestorerSkinRepositoryTest {
       return this.expected.equals(uuid)
           ? Optional.of(new SkinProperty("direct-value", "direct-signature"))
           : Optional.empty();
+    }
+  }
+
+  public static final class StoredSkinPlayerStorage {
+    private final UUID expected;
+
+    StoredSkinPlayerStorage(UUID expected) {
+      this.expected = expected;
+    }
+
+    public Optional<SkinProperty> getSkinOfPlayer(UUID uuid) {
+      return this.expected.equals(uuid)
+          ? Optional.of(new SkinProperty("stored-value", "stored-signature"))
+          : Optional.empty();
+    }
+
+    public Optional<SkinProperty> getSkinForPlayer(UUID uuid, String name) {
+      throw new AssertionError("network-backed lookup must not run when stored skin data exists");
     }
   }
 
@@ -194,6 +410,99 @@ class SkinsRestorerSkinRepositoryTest {
       this.savedIdentifier = identifier;
       this.savedValue = value;
       this.savedSignature = signature;
+    }
+  }
+
+  public static final class ConstructorPlayerStorage {
+    private ConstructorSkinIdentifier saved;
+
+    public Optional<ConstructorSkinIdentifier> getSkinIdOfPlayer(UUID uuid) {
+      return Optional.empty();
+    }
+
+    public void setSkinIdOfPlayer(UUID uuid, ConstructorSkinIdentifier identifier) {
+      this.saved = identifier;
+    }
+  }
+
+  public static final class ConstructorSkinStorage {
+    private String savedIdentifier;
+    private ConstructorSkinProperty savedProperty;
+
+    public void setCustomSkinData(String identifier, ConstructorSkinProperty property) {
+      this.savedIdentifier = identifier;
+      this.savedProperty = property;
+    }
+  }
+
+  public static final class ConstructorFallbackPlayerStorage {
+    private ConstructorFallbackSkinIdentifier saved;
+
+    public Optional<ConstructorFallbackSkinIdentifier> getSkinIdOfPlayer(UUID uuid) {
+      return Optional.empty();
+    }
+
+    public void setSkinIdOfPlayer(UUID uuid, ThrowingSkinIdentifier identifier) {
+      throw new AssertionError("throwing identifier must not be invoked");
+    }
+
+    public void setSkinIdOfPlayer(UUID uuid, ConstructorFallbackSkinIdentifier identifier) {
+      this.saved = identifier;
+    }
+  }
+
+  public static final class ConstructorFallbackSkinStorage {
+    private ConstructorFallbackSkinProperty savedProperty;
+
+    public void setCustomSkinData(String identifier, ThrowingSkinProperty property) {
+      throw new AssertionError("throwing property must not be invoked");
+    }
+
+    public void setCustomSkinData(String identifier, ConstructorFallbackSkinProperty property) {
+      this.savedProperty = property;
+    }
+  }
+
+  public static final class OverloadedPlayerStorage {
+    private String saved;
+
+    public Optional<String> getSkinIdOfPlayer(UUID uuid) {
+      return Optional.empty();
+    }
+
+    public void setSkinIdOfPlayer(UUID uuid, String identifier) {
+      this.saved = identifier;
+    }
+  }
+
+  public static final class OverloadedSkinStorage {
+    private String savedIdentifier;
+    private String savedValue;
+    private String savedPrimitiveSignature;
+
+    public void setSkinData(String identifier, String value, int signature) {
+      this.savedPrimitiveSignature = String.valueOf(signature);
+    }
+
+    public void setSkinData(String identifier, String value, String signature) {
+      this.savedIdentifier = identifier;
+      this.savedValue = value;
+    }
+  }
+
+  public static final class ReferenceOverloadedSkinStorage {
+    private String savedIdentifier;
+    private String savedValue;
+    private Object savedObjectSignature;
+
+    public void setSkinData(String identifier, String value, Object signature) {
+      this.savedObjectSignature = signature;
+      throw new AssertionError("broader reference overload must not be selected");
+    }
+
+    public void setSkinData(String identifier, String value, String signature) {
+      this.savedIdentifier = identifier;
+      this.savedValue = value;
     }
   }
 
@@ -255,5 +564,47 @@ class SkinsRestorerSkinRepositoryTest {
     public String getSignature() {
       return this.signature;
     }
+  }
+
+  public static final class ConstructorSkinIdentifier {
+    private final String identifier;
+
+    private ConstructorSkinIdentifier(String identifier) {
+      this.identifier = identifier;
+    }
+
+    public String identifier() {
+      return this.identifier;
+    }
+  }
+
+  public static final class ConstructorFallbackSkinIdentifier {
+    private final String identifier;
+
+    private ConstructorFallbackSkinIdentifier(String identifier) {
+      this.identifier = identifier;
+    }
+
+    public String identifier() {
+      return this.identifier;
+    }
+  }
+
+  public static final class ThrowingSkinIdentifier {
+    private ThrowingSkinIdentifier(String identifier) {
+      throw new IllegalArgumentException("unsupported identifier");
+    }
+  }
+
+  public record ConstructorFallbackSkinProperty(String value, String signature) {
+  }
+
+  public static final class ThrowingSkinProperty {
+    private ThrowingSkinProperty(String value, String signature) {
+      throw new IllegalArgumentException("unsupported property");
+    }
+  }
+
+  public record ConstructorSkinProperty(String value, String signature) {
   }
 }
