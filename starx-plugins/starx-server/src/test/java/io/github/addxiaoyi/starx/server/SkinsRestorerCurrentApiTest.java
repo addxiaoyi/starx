@@ -21,9 +21,28 @@ final class SkinsRestorerCurrentApiTest {
     assertEquals("current-signature", profile.signature());
   }
 
+  @Test
+  void readsUuidOnlyPlayerApiWhenNamedLookupIsUnavailable() {
+    UUID uuid = UUID.randomUUID();
+    SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(
+        new UuidOnlyApi(uuid));
+
+    BackendSkinProfile profile = resolver.find(uuid, "Alex").orElseThrow();
+
+    assertEquals("uuid-only-value", profile.value());
+    assertEquals("uuid-only-signature", profile.signature());
+  }
+
   private record CurrentApi(UUID expected) {
     public CurrentPlayerStorage getPlayerStorage() {
       return new CurrentPlayerStorage(this.expected);
+    }
+    public Object getSkinStorage() { return null; }
+  }
+
+  private record UuidOnlyApi(UUID expected) {
+    public UuidOnlyPlayerStorage getPlayerStorage() {
+      return new UuidOnlyPlayerStorage(this.expected);
     }
     public Object getSkinStorage() { return null; }
   }
@@ -36,8 +55,28 @@ final class SkinsRestorerCurrentApiTest {
     }
   }
 
+  private record UuidOnlyPlayerStorage(UUID expected) {
+    public Optional<CurrentSkinProperty> getSkinOfPlayer(UUID uuid) {
+      return expected.equals(uuid)
+          ? Optional.of(new CurrentSkinProperty("uuid-only-value", "uuid-only-signature"))
+          : Optional.empty();
+    }
+  }
+
   private static final class CurrentSkinProperty {
-    public String getValue() { return "current-value"; }
-    public String getSignature() { return "current-signature"; }
+    private final String value;
+    private final String signature;
+
+    private CurrentSkinProperty() {
+      this("current-value", "current-signature");
+    }
+
+    private CurrentSkinProperty(String value, String signature) {
+      this.value = value;
+      this.signature = signature;
+    }
+
+    public String getValue() { return this.value; }
+    public String getSignature() { return this.signature; }
   }
 }

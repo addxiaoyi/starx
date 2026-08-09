@@ -49,6 +49,17 @@ implements SkinRepository {
             return Optional.empty();
         }
         try {
+            Optional<?> current = SkinsRestorerSkinRepository.tryCurrentApi(this.playerStorage, uuid, name);
+            if (current != null && current.isPresent()) {
+                Object data = current.get();
+                String skinId = SkinsRestorerSkinRepository.optionalSkinIdentifier(this.playerStorage, uuid);
+                return Optional.of(new SkinDto(uuid, name, skinId,
+                    SkinsRestorerSkinRepository.readString(data, "getValue", "value"),
+                    SkinsRestorerSkinRepository.readString(data, "getSignature", "signature"), null));
+            }
+            if (this.skinStorage == null) {
+                return Optional.empty();
+            }
             Optional skinId = SkinsRestorerSkinRepository.invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
             if (skinId.isEmpty()) {
                 return Optional.empty();
@@ -58,11 +69,11 @@ implements SkinRepository {
                 return Optional.of(new SkinDto(uuid, name, SkinsRestorerSkinRepository.identifierOf(skinId.get()), null, null, null));
             }
             Object data = skinData.get();
-            String value = (String)SkinsRestorerSkinRepository.invoke(data, "getValue", new Object[0]);
-            String signature = (String)SkinsRestorerSkinRepository.invoke(data, "getSignature", new Object[0]);
+            String value = SkinsRestorerSkinRepository.readString(data, "getValue", "value");
+            String signature = SkinsRestorerSkinRepository.readString(data, "getSignature", "signature");
             return Optional.of(new SkinDto(uuid, name, SkinsRestorerSkinRepository.identifierOf(skinId.get()), value, signature, null));
         }
-        catch (ReflectiveOperationException e) {
+        catch (ReflectiveOperationException | ClassCastException | IllegalStateException e) {
             LOGGER.log(Level.WARNING, "Failed to read skin for " + String.valueOf(uuid), e);
             return Optional.empty();
         }
@@ -83,16 +94,16 @@ implements SkinRepository {
 
     @Override
     public void setSkinData(UUID uuid, String value, String signature) {
-        if (!this.available) {
+        if (!this.available || this.skinStorage == null) {
             return;
         }
         try {
             Optional<Object> existing = SkinsRestorerSkinRepository.invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
-            String skinId = existing.map(SkinsRestorerSkinRepository::identifierOfUnchecked).orElseGet(() -> "starx-" + uuid.toString().replace("-", ""));
+            String skinId = SkinsRestorerSkinRepository.skinIdForWrite(existing, uuid);
             SkinsRestorerSkinRepository.writeSkinData(this.skinStorage, skinId, value, signature);
             SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
         }
-        catch (ReflectiveOperationException e) {
+        catch (ReflectiveOperationException | ClassCastException | IllegalStateException e) {
             LOGGER.log(Level.WARNING, "Failed to set skin data for " + String.valueOf(uuid), e);
         }
     }
@@ -140,9 +151,78 @@ implements SkinRepository {
         throw new NoSuchMethodException("setSkinData or setCustomSkinData in " + storage.getClass());
     }
 
+    @SuppressWarnings("unchecked")
     private static <T> Optional<T> invokeOptional(Object target, String methodName, Object ... args) throws ReflectiveOperationException {
-        Method method = SkinsRestorerSkinRepository.findMethod(target.getClass(), methodName, args);
-        return (Optional)method.invoke(target, args);
+        Object value = SkinsRestorerSkinRepository.invoke(target, methodName, args);
+        if (value == null) {
+            return Optional.empty();
+        }
+        if (value instanceof Optional<?> optional) {
+            return (Optional<T>)optional;
+        }
+        return Optional.of((T)value);
+    }
+
+    private static Optional<?> tryCurrentApi(Object storage, UUID uuid, String name) throws ReflectiveOperationException {
+        try {
+            return SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinForPlayer", uuid, name);
+        }
+        catch (NoSuchMethodException ignored) {
+            try {
+                return SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinOfPlayer", uuid);
+            }
+            catch (NoSuchMethodException ignoredAgain) {
+                return null;
+            }
+        }
+    }
+
+    private static String optionalSkinIdentifier(Object storage, UUID uuid) throws ReflectiveOperationException {
+        try {
+            Optional<?> value = SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinIdOfPlayer", uuid);
+            return value.isPresent() ? SkinsRestorerSkinRepository.identifierOf(value.get()) : null;
+        }
+        catch (NoSuchMethodException ignored) {
+            return null;
+        }
+    }
+
+    private static String readString(Object target, String getter, String accessor) throws ReflectiveOperationException {
+        Object value;
+        try {
+            value = SkinsRestorerSkinRepository.invoke(target, getter);
+        }
+        catch (NoSuchMethodException ignored) {
+            value = SkinsRestorerSkinRepository.invoke(target, accessor);
+        }
+        if (value instanceof Optional<?> optional) {
+            value = optional.isPresent() ? optional.get() : "";
+        }
+        return value == null ? "" : value.toString();
+    }
+
+    private static String skinIdForWrite(Optional<?> existing, UUID uuid) throws ReflectiveOperationException {
+        if (existing.isPresent() && SkinsRestorerSkinRepository.isCustomIdentifier(existing.get())) {
+            return SkinsRestorerSkinRepository.identifierOf(existing.get());
+        }
+        return "starx-" + uuid.toString().replace("-", "");
+    }
+
+    private static boolean isCustomIdentifier(Object value) throws ReflectiveOperationException {
+        if (value instanceof String) {
+            return true;
+        }
+        try {
+            Object type = SkinsRestorerSkinRepository.invoke(value, "getSkinType");
+            if (type == null) {
+                return false;
+            }
+            String name = type instanceof Enum<?> enumValue ? enumValue.name() : type.toString();
+            return "CUSTOM".equalsIgnoreCase(name);
+        }
+        catch (NoSuchMethodException ignored) {
+            return true;
+        }
     }
 
     private static String identifierOf(Object value) throws ReflectiveOperationException {
@@ -154,15 +234,6 @@ implements SkinRepository {
             return text;
         }
         throw new IllegalStateException("SkinsRestorer returned an invalid skin identifier");
-    }
-
-    private static String identifierOfUnchecked(Object value) {
-        try {
-            return SkinsRestorerSkinRepository.identifierOf(value);
-        }
-        catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("Failed to read SkinsRestorer skin identifier", exception);
-        }
     }
 
     private static void setSkinIdentifier(Object storage, UUID uuid, String skinId) throws ReflectiveOperationException {

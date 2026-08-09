@@ -55,6 +55,20 @@ final class SkinsRestorerBackendSkinResolverTest {
   }
 
   @Test
+  void rekeysExistingNonCustomIdentifierBeforeWritingWebsiteTexture() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    NonCustomWritableApi api = new NonCustomWritableApi();
+    SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(api);
+
+    assertTrue(resolver.store(uuid, "Alex", "website-value", "website-signature"));
+
+    String expected = "starx-4f06bce032d74d4dbb179f7e92ae8701";
+    assertEquals(expected, api.players.skinId.identifier);
+    assertEquals("CUSTOM", api.players.skinId.type);
+    assertEquals(expected, api.skins.skinId);
+  }
+
+  @Test
   void logsReflectedApiFailureOnceWithoutBreakingBridge() {
     Logger logger = Logger.getLogger("skin-resolver-test-" + UUID.randomUUID());
     CapturingHandler logs = new CapturingHandler();
@@ -158,6 +172,31 @@ final class SkinsRestorerBackendSkinResolverTest {
     }
   }
 
+  private static final class NonCustomWritableApi {
+    private final NonCustomWritablePlayerStorage players = new NonCustomWritablePlayerStorage();
+    private final CurrentWritableSkinStorage skins = new CurrentWritableSkinStorage();
+
+    public NonCustomWritablePlayerStorage getPlayerStorage() {
+      return this.players;
+    }
+
+    public CurrentWritableSkinStorage getSkinStorage() {
+      return this.skins;
+    }
+  }
+
+  private static final class NonCustomWritablePlayerStorage {
+    private NonCustomSkinIdentifier skinId = new NonCustomSkinIdentifier("alex", "PLAYER");
+
+    public Optional<NonCustomSkinIdentifier> getSkinIdOfPlayer(UUID uuid) {
+      return Optional.of(this.skinId);
+    }
+
+    public void setSkinIdOfPlayer(UUID uuid, NonCustomSkinIdentifier skinId) {
+      this.skinId = skinId;
+    }
+  }
+
   private static final class CurrentWritablePlayerStorage {
     private CurrentSkinIdentifier skinId;
 
@@ -199,6 +238,28 @@ final class SkinsRestorerBackendSkinResolverTest {
 
     public static CurrentSkinIdentifier ofCustom(String identifier) {
       return new CurrentSkinIdentifier(identifier);
+    }
+  }
+
+  private static final class NonCustomSkinIdentifier {
+    private final String identifier;
+    private final String type;
+
+    private NonCustomSkinIdentifier(String identifier, String type) {
+      this.identifier = identifier;
+      this.type = type;
+    }
+
+    public String getIdentifier() {
+      return this.identifier;
+    }
+
+    public String getSkinType() {
+      return this.type;
+    }
+
+    public static NonCustomSkinIdentifier ofCustom(String identifier) {
+      return new NonCustomSkinIdentifier(identifier, "CUSTOM");
     }
   }
 

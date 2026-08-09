@@ -57,7 +57,7 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     }
     try {
       Optional<?> current = tryCurrentApi(uuid, name);
-      if (current != null) {
+      if (current != null && current.isPresent()) {
         return current.map(data -> profile(uuid, name, data));
       }
       if (this.skinStorage == null) {
@@ -89,8 +89,7 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     }
     try {
       Optional<?> existing = invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
-      String skinId = existing.map(SkinsRestorerBackendSkinResolver::identifierOfUnchecked)
-          .orElseGet(() -> "starx-" + uuid.toString().replace("-", ""));
+      String skinId = skinIdForWrite(existing, uuid);
       writeSkinData(this.skinStorage, skinId, value, signature == null ? "" : signature);
       setSkinIdentifier(this.playerStorage, uuid, skinId);
       return true;
@@ -107,7 +106,11 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     try {
       return invokeOptional(this.playerStorage, "getSkinForPlayer", uuid, name);
     } catch (NoSuchMethodException ignored) {
-      return null;
+      try {
+        return invokeOptional(this.playerStorage, "getSkinOfPlayer", uuid);
+      } catch (NoSuchMethodException ignoredAgain) {
+        return null;
+      }
     }
   }
 
@@ -147,6 +150,30 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
       throw new IllegalStateException("SkinsRestorer returned an invalid skin identifier");
     } catch (ReflectiveOperationException error) {
       throw new IllegalStateException("Failed to read SkinsRestorer skin identifier", error);
+    }
+  }
+
+  private static String skinIdForWrite(Optional<?> existing, UUID uuid)
+      throws ReflectiveOperationException {
+    if (existing.isPresent() && isCustomIdentifier(existing.get())) {
+      return identifierOfUnchecked(existing.get());
+    }
+    return "starx-" + uuid.toString().replace("-", "");
+  }
+
+  private static boolean isCustomIdentifier(Object value) throws ReflectiveOperationException {
+    if (value instanceof String) {
+      return true;
+    }
+    try {
+      Object type = invoke(value, "getSkinType");
+      if (type == null) {
+        return false;
+      }
+      String name = type instanceof Enum<?> enumValue ? enumValue.name() : type.toString();
+      return "CUSTOM".equalsIgnoreCase(name);
+    } catch (NoSuchMethodException ignored) {
+      return true;
     }
   }
 
@@ -225,7 +252,10 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   private static Optional<?> invokeOptional(Object target, String name, Object... arguments)
       throws ReflectiveOperationException {
     Object value = invoke(target, name, arguments);
-    return value instanceof Optional<?> optional ? optional : Optional.empty();
+    if (value == null) {
+      return Optional.empty();
+    }
+    return value instanceof Optional<?> optional ? optional : Optional.of(value);
   }
 
   private static Object invoke(Object target, String name, Object... arguments)
