@@ -11,6 +11,11 @@ import java.util.UUID;
 public final class NoopSkinRepository
 implements SkinRepository {
     @Override
+    public boolean isAvailable() {
+        return false;
+    }
+
+    @Override
     public Optional<SkinDto> findByPlayer(UUID uuid, String name) {
         return Optional.empty();
     }
@@ -25,5 +30,20 @@ implements SkinRepository {
 
     @Override
     public void clearSkin(UUID uuid) {
+    }
+
+    @Override
+    public boolean trySetSkinId(UUID uuid, String skinId) {
+        return false;
+    }
+
+    @Override
+    public boolean trySetSkinData(UUID uuid, String value, String signature) {
+        return false;
+    }
+
+    @Override
+    public boolean tryClearSkin(UUID uuid) {
+        return false;
     }
 }

@@ -15,4 +15,27 @@ public interface SkinRepository {
     public void setSkinData(UUID var1, String var2, String var3);
 
     public void clearSkin(UUID var1);
+
+    /**
+     * Reports whether this repository can participate in skin refreshes through its provider.
+     * The default keeps older third-party implementations source and binary compatible.
+     */
+    default boolean isAvailable() {
+        return true;
+    }
+
+    default boolean trySetSkinId(UUID uuid, String skinId) {
+        this.setSkinId(uuid, skinId);
+        return true;
+    }
+
+    default boolean trySetSkinData(UUID uuid, String value, String signature) {
+        this.setSkinData(uuid, value, signature);
+        return true;
+    }
+
+    default boolean tryClearSkin(UUID uuid) {
+        this.clearSkin(uuid);
+        return true;
+    }
 }

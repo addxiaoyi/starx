@@ -1,6 +1,6 @@
 # StarX 配置与运行时资源目录
 
-本文是 StarX Velocity 0.4.2 的配置和运行时资源目录说明。生产环境只读取 Velocity 工作目录下的 `plugins/starx/`；仓库里的 `src/main/resources/` 只是打包时使用的默认模板。
+本文是 StarX Velocity 0.4.3 的配置和运行时资源目录说明。生产环境只读取 Velocity 工作目录下的 `plugins/starx/`；仓库里的 `src/main/resources/` 只是打包时使用的默认模板。
 
 ## 先记住这三点
 

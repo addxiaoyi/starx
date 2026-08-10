@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.server;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Constructor;
@@ -44,6 +45,18 @@ final class SkinsRestorerBackendSkinResolverTest {
   }
 
   @Test
+  void fallsBackToThreeArgumentNamedLookupWhenUuidLookupIsEmpty() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(
+        new ThreeArgumentApi(uuid));
+
+    BackendSkinProfile profile = resolver.find(uuid, "offline-player").orElseThrow();
+
+    assertEquals("named-value", profile.value());
+    assertEquals("named-signature", profile.signature());
+  }
+
+  @Test
   void storesWebsiteTextureAndAssignsItToThePlayer() {
     UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
     WritableApi api = new WritableApi();
@@ -69,6 +82,34 @@ final class SkinsRestorerBackendSkinResolverTest {
     assertEquals("website-value", stored.value());
     assertEquals("website-signature", stored.signature());
     assertEquals("starx-4f06bce032d74d4dbb179f7e92ae8701", api.players.skinId.identifier);
+  }
+
+  @Test
+  void storesWebsiteTextureWhenSkinStorageUsesObjectIdentifier() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    ObjectIdentifierWritableApi api = new ObjectIdentifierWritableApi();
+    SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(api);
+
+    assertTrue(resolver.store(uuid, "Alex", "website-value", "website-signature"));
+
+    assertEquals("starx-4f06bce032d74d4dbb179f7e92ae8701",
+        api.skins.skinId.identifier);
+    assertEquals("website-value", api.skins.property.getValue());
+    assertEquals("website-signature", api.skins.property.getSignature());
+  }
+
+  @Test
+  void storesWebsiteTextureThroughObjectIdentifierLegacyWriter() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    ObjectIdentifierLegacyWritableApi api = new ObjectIdentifierLegacyWritableApi();
+    SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(api);
+
+    assertTrue(resolver.store(uuid, "Alex", "website-value", "website-signature"));
+
+    assertEquals("starx-4f06bce032d74d4dbb179f7e92ae8701",
+        api.skins.skinId.identifier);
+    assertEquals("website-value", api.skins.value);
+    assertEquals("website-signature", api.skins.signature);
   }
 
   @Test
@@ -143,6 +184,23 @@ final class SkinsRestorerBackendSkinResolverTest {
     assertTrue(resolver.find(UUID.randomUUID(), "Alex").isEmpty());
     assertTrue(resolver.find(UUID.randomUUID(), "Steve").isEmpty());
     assertEquals(1, logs.count);
+  }
+
+  @Test
+  void logsWhenPlayerStorageCannotBeInitialized() {
+    Logger logger = Logger.getLogger("skin-resolver-init-test-" + UUID.randomUUID());
+    CapturingHandler logs = new CapturingHandler();
+    logger.setUseParentHandlers(false);
+    logger.addHandler(logs);
+    try {
+      SkinsRestorerBackendSkinResolver resolver = new SkinsRestorerBackendSkinResolver(
+          new BrokenPlayerStorageApi(), logger);
+
+      assertFalse(resolver.available());
+      assertEquals(1, logs.count);
+    } finally {
+      logger.removeHandler(logs);
+    }
   }
 
   @Test
@@ -232,6 +290,28 @@ final class SkinsRestorerBackendSkinResolverTest {
 
     public Optional<WritableSkinData> getSkinForPlayer(UUID uuid, String name) {
       throw new AssertionError("network-backed lookup must not run when stored skin data exists");
+    }
+  }
+
+  private record ThreeArgumentApi(UUID uuid) {
+    public ThreeArgumentPlayerStorage getPlayerStorage() {
+      return new ThreeArgumentPlayerStorage(this.uuid);
+    }
+
+    public Object getSkinStorage() {
+      return null;
+    }
+  }
+
+  private record ThreeArgumentPlayerStorage(UUID expected) {
+    public Optional<WritableSkinData> getSkinOfPlayer(UUID uuid) {
+      return Optional.empty();
+    }
+
+    public Optional<WritableSkinData> getSkinForPlayer(UUID uuid, String name, boolean useMojang) {
+      return this.expected.equals(uuid) && "offline-player".equals(name)
+          ? Optional.of(new WritableSkinData("named-value", "named-signature"))
+          : Optional.empty();
     }
   }
 
@@ -359,6 +439,56 @@ final class SkinsRestorerBackendSkinResolverTest {
       return this.skinId != null && this.skinId.equals(identifier.getIdentifier())
           ? Optional.of(this.property)
           : Optional.empty();
+    }
+  }
+
+  private static final class ObjectIdentifierWritableApi {
+    private final CurrentWritablePlayerStorage players = new CurrentWritablePlayerStorage();
+    private final ObjectIdentifierWritableSkinStorage skins =
+        new ObjectIdentifierWritableSkinStorage();
+
+    public CurrentWritablePlayerStorage getPlayerStorage() {
+      return this.players;
+    }
+
+    public ObjectIdentifierWritableSkinStorage getSkinStorage() {
+      return this.skins;
+    }
+  }
+
+  private static final class ObjectIdentifierWritableSkinStorage {
+    private CurrentSkinIdentifier skinId;
+    private CurrentSkinProperty property;
+
+    public void setCustomSkinData(CurrentSkinIdentifier skinId, CurrentSkinProperty property) {
+      this.skinId = skinId;
+      this.property = property;
+    }
+  }
+
+  private static final class ObjectIdentifierLegacyWritableApi {
+    private final CurrentWritablePlayerStorage players = new CurrentWritablePlayerStorage();
+    private final ObjectIdentifierLegacyWritableSkinStorage skins =
+        new ObjectIdentifierLegacyWritableSkinStorage();
+
+    public CurrentWritablePlayerStorage getPlayerStorage() {
+      return this.players;
+    }
+
+    public ObjectIdentifierLegacyWritableSkinStorage getSkinStorage() {
+      return this.skins;
+    }
+  }
+
+  private static final class ObjectIdentifierLegacyWritableSkinStorage {
+    private CurrentSkinIdentifier skinId;
+    private String value;
+    private String signature;
+
+    public void setSkinData(CurrentSkinIdentifier skinId, String value, String signature) {
+      this.skinId = skinId;
+      this.value = value;
+      this.signature = signature;
     }
   }
 
@@ -622,6 +752,16 @@ final class SkinsRestorerBackendSkinResolverTest {
   private record BrokenApi() {
     public Object getPlayerStorage() { return new Object(); }
     public Object getSkinStorage() { return new Object(); }
+  }
+
+  private static final class BrokenPlayerStorageApi {
+    public Object getPlayerStorage() {
+      throw new IllegalStateException("player storage is not ready");
+    }
+
+    public Object getSkinStorage() {
+      return null;
+    }
   }
 
   private record LinkageErrorApi(Object playerStorage) {

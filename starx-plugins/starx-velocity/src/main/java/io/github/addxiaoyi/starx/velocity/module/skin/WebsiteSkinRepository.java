@@ -26,7 +26,7 @@ implements SkinRepository {
     private final Logger logger;
     private final HttpClient httpClient;
     private final Gson gson;
-    private final SmartCache<String, Optional<SkinDto>> cache;
+    private final SmartCache<PlayerSkinKey, Optional<SkinDto>> cache;
     private final ProfileFallbackCache fallbackCache;
 
     public WebsiteSkinRepository(String skinProfileBaseUrl, Logger logger) {
@@ -34,25 +34,32 @@ implements SkinRepository {
         this.logger = logger;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5L)).build();
         this.gson = new Gson();
-        this.cache = new SmartCache<String, Optional<SkinDto>>(500, 60000L, k -> Optional.empty());
+        this.cache = new SmartCache<PlayerSkinKey, Optional<SkinDto>>(
+            CACHE_MAX_SIZE, CACHE_TTL_MS, key -> Optional.empty());
         this.fallbackCache = new ProfileFallbackCache(Duration.ofHours(24));
     }
 
     @Override
     public Optional<SkinDto> findByPlayer(UUID uuid, String name) {
-        Optional<SkinDto> cached = this.cache.getIfPresent(name);
+        PlayerSkinKey cacheKey = new PlayerSkinKey(uuid, name);
+        Optional<SkinDto> cached = this.cache.getIfPresent(cacheKey);
         if (cached != null) {
             return cached;
         }
         Optional<SkinDto> fetched = this.fetchSkin(uuid, name);
         if (fetched.isPresent()) {
-            this.cache.put(name, fetched);
+            this.cache.put(cacheKey, fetched);
             return fetched;
         }
         Optional<SkinDto> fallback = this.fallbackCache.get(name, Instant.now())
             .map(profile -> new SkinDto(uuid, name, profile.id(), null, null, profile.textureUrl()));
-        this.cache.put(name, fallback);
+        this.cache.put(cacheKey, fallback);
         return fallback;
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return false;
     }
 
     private Optional<SkinDto> fetchSkin(UUID uuid, String name) {
@@ -86,6 +93,21 @@ implements SkinRepository {
     public void clearSkin(UUID uuid) {
     }
 
+    @Override
+    public boolean trySetSkinId(UUID uuid, String skinId) {
+        return false;
+    }
+
+    @Override
+    public boolean trySetSkinData(UUID uuid, String value, String signature) {
+        return false;
+    }
+
+    @Override
+    public boolean tryClearSkin(UUID uuid) {
+        return false;
+    }
+
     Optional<WebsiteSkinProfile> findProfile(String name) {
         String url = this.skinProfileBaseUrl + "/" + name + ".json";
         try {
@@ -103,4 +125,6 @@ implements SkinRepository {
             return this.fallbackCache.get(name, Instant.now());
         }
     }
+
+    private record PlayerSkinKey(UUID uuid, String name) { }
 }

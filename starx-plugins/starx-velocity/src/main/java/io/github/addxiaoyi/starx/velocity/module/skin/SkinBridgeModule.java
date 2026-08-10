@@ -128,15 +128,16 @@ implements VelocityModule {
     public void onEnable() {
         SkinRepository repository;
         if (this.repositoryFactory != null) {
-            repository = this.repositoryFactory.get();
-            this.skinsRestorerAvailable = this.proxy.getPluginManager().getPlugin("skinsrestorer").isPresent();
+            repository = Objects.requireNonNull(
+                this.repositoryFactory.get(), "repositoryFactory returned null");
         } else if (this.plugin == null && this.isWebsiteSkinAvailable()) {
             repository = new NoopSkinRepository();
-            this.skinsRestorerAvailable = false;
         } else {
-            this.skinsRestorerAvailable = this.proxy.getPluginManager().getPlugin("skinsrestorer").isPresent();
-            repository = this.skinsRestorerAvailable ? new SkinsRestorerSkinRepository() : new NoopSkinRepository();
+            boolean pluginInstalled = this.proxy.getPluginManager()
+                .getPlugin("skinsrestorer").isPresent();
+            repository = pluginInstalled ? new SkinsRestorerSkinRepository() : new NoopSkinRepository();
         }
+        this.skinsRestorerAvailable = repository.isAvailable();
         this.writableSkinRepository = repository;
         if (this.isWebsiteSkinAvailable()) {
             this.websiteRepository = new WebsiteSkinRepository(
@@ -326,8 +327,10 @@ implements VelocityModule {
         SkinRepository writable = this.writableSkinRepository;
         if (writable != null) {
             try {
-                writable.setSkinData(uuid, value, "");
-                locallyPersisted = true;
+                locallyPersisted = writable.trySetSkinData(uuid, value, "");
+                if (!locallyPersisted) {
+                    LOGGER.warning("Website skin repository is unavailable for " + playerName);
+                }
             } catch (RuntimeException error) {
                 LOGGER.warning("Website skin could not be persisted locally for " + playerName
                     + ": " + error.getClass().getSimpleName());
@@ -344,7 +347,8 @@ implements VelocityModule {
             }
         }
         Optional<Player> online = this.proxy.getPlayer(uuid);
-        if (online.isPresent()) {
+        boolean appliedToOnlinePlayer = online.isPresent();
+        if (appliedToOnlinePlayer) {
             Player player = online.get();
             player.setGameProfileProperties(websiteProfile.merge(
                 uuid,
@@ -352,6 +356,10 @@ implements VelocityModule {
                 player.getGameProfileProperties()));
             this.eventBus.publish("skin:applied", java.util.Map.of(
                 "uuid", uuid.toString(), "provider", "website"));
+        }
+        if (!isWebsiteSkinApplied(locallyPersisted, backendTargets, appliedToOnlinePlayer)) {
+            LOGGER.warning("Website skin was found but no delivery target accepted it for " + playerName);
+            return false;
         }
         this.eventBus.publish("skin:updated", java.util.Map.of(
             "uuid", uuid.toString(),
@@ -417,6 +425,17 @@ implements VelocityModule {
         boolean websiteProviderAvailable
     ) {
         return backendBridgeAvailable || proxyProviderAvailable || websiteProviderAvailable;
+    }
+
+    static boolean isWebsiteSkinApplied(
+        boolean locallyPersisted,
+        int backendTargets,
+        boolean appliedToOnlinePlayer
+    ) {
+        if (backendTargets < 0) {
+            throw new IllegalArgumentException("backendTargets must not be negative");
+        }
+        return locallyPersisted || backendTargets > 0 || appliedToOnlinePlayer;
     }
 
     private final class Listener {

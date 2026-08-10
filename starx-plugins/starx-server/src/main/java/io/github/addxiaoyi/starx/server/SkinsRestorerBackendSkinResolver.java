@@ -40,7 +40,7 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   }
 
   SkinsRestorerBackendSkinResolver(Object api, Logger logger) {
-    this(read(api, "getPlayerStorage"), read(api, "getSkinStorage"), logger);
+    this(read(api, "getPlayerStorage", logger), read(api, "getSkinStorage", null), logger);
   }
 
   private SkinsRestorerBackendSkinResolver(Object playerStorage, Object skinStorage, Logger logger) {
@@ -110,14 +110,23 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   }
 
   private Optional<?> tryCurrentApi(UUID uuid, String name) throws ReflectiveOperationException {
+    Optional<?> byUuid = null;
     try {
       // The name overload may call Mojang for UUIDs that are not Mojang profiles.
-      return invokeOptional(this.playerStorage, "getSkinOfPlayer", uuid);
+      byUuid = invokeOptional(this.playerStorage, "getSkinOfPlayer", uuid);
+      if (byUuid.isPresent()) {
+        return byUuid;
+      }
+    } catch (NoSuchMethodException ignored) {
+      // Fall through to the name lookup exposed by older storage implementations.
+    }
+    try {
+      return invokeOptional(this.playerStorage, "getSkinForPlayer", uuid, name);
     } catch (NoSuchMethodException ignored) {
       try {
-        return invokeOptional(this.playerStorage, "getSkinForPlayer", uuid, name);
+        return invokeOptional(this.playerStorage, "getSkinForPlayer", uuid, name, false);
       } catch (NoSuchMethodException ignoredAgain) {
-        return null;
+        return byUuid;
       }
     }
   }
@@ -187,49 +196,73 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
 
   private static void writeSkinData(Object storage, String skinId, String value, String signature)
       throws ReflectiveOperationException {
-    try {
-      invoke(storage, "setSkinData", skinId, value, signature);
+    SkinDataWriter writer = findSkinDataWriter(storage, skinId, value, signature);
+    if (writer != null) {
+      if (!writer.method().trySetAccessible()) {
+        throw new IllegalAccessException("Cannot access " + writer.method());
+      }
+      writer.method().invoke(storage, writer.arguments());
       return;
-    } catch (NoSuchMethodException ignored) {
-      // SkinsRestorer 15.12 stores custom textures through SkinProperty.
     }
-    Method selected = null;
-    Object selectedProperty = null;
-    int selectedScore = -1;
-    String selectedKey = null;
+    throw new NoSuchMethodException("setSkinData or setCustomSkinData in " + storage.getClass());
+  }
+
+  private static SkinDataWriter findSkinDataWriter(
+      Object storage, String skinId, String value, String signature) {
+    SkinDataWriter selected = null;
     for (Method method : storage.getClass().getMethods()) {
       Class<?>[] parameters = method.getParameterTypes();
-      if (!method.getName().equals("setCustomSkinData")
-          || parameters.length != 2
-          || matchScore(parameters[0], skinId) < 0) {
+      if (method.getName().equals("setSkinData") && parameters.length == 3) {
+        Object identifier;
+        try {
+          identifier = skinIdentifierFor(parameters[0], skinId);
+        } catch (ReflectiveOperationException | IllegalStateException ignored) {
+          continue;
+        }
+        int score = matchScore(parameters[0], identifier)
+            + matchScore(parameters[1], value)
+            + matchScore(parameters[2], signature);
+        if (score < 0) {
+          continue;
+        }
+        selected = selectSkinDataWriter(
+            selected, method, new Object[] {identifier, value, signature}, score);
+      }
+    }
+    if (selected != null) {
+      return selected;
+    }
+    for (Method method : storage.getClass().getMethods()) {
+      Class<?>[] parameters = method.getParameterTypes();
+      if (!method.getName().equals("setCustomSkinData") || parameters.length != 2) {
         continue;
       }
+      Object identifier;
       Object property;
       try {
+        identifier = skinIdentifierFor(parameters[0], skinId);
         property = skinPropertyFor(parameters[1], value, signature);
       } catch (ReflectiveOperationException | IllegalStateException ignored) {
         continue;
       }
-      int score = matchScore(parameters[0], skinId) + matchScore(parameters[1], property);
+      int score = matchScore(parameters[0], identifier) + matchScore(parameters[1], property);
       if (score < 0) {
         continue;
       }
-      String key = methodKey(method);
-      if (selected == null || score > selectedScore || score == selectedScore && key.compareTo(selectedKey) < 0) {
-        selected = method;
-        selectedProperty = property;
-        selectedScore = score;
-        selectedKey = key;
-      }
+      selected = selectSkinDataWriter(
+          selected, method, new Object[] {identifier, property}, score);
     }
-    if (selected != null) {
-      if (!selected.trySetAccessible()) {
-        throw new IllegalAccessException("Cannot access " + selected);
-      }
-      selected.invoke(storage, skinId, selectedProperty);
-      return;
+    return selected;
+  }
+
+  private static SkinDataWriter selectSkinDataWriter(
+      SkinDataWriter current, Method method, Object[] arguments, int score) {
+    String key = methodKey(method);
+    if (current == null || score > current.score()
+        || score == current.score() && key.compareTo(current.key()) < 0) {
+      return new SkinDataWriter(method, arguments, score, key);
     }
-    throw new NoSuchMethodException("setSkinData or setCustomSkinData in " + storage.getClass());
+    return current;
   }
 
   private static void setSkinIdentifier(Object storage, UUID uuid, String skinId)
@@ -328,13 +361,18 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     throw new IllegalStateException("SkinsRestorer returned an invalid skin property type");
   }
 
-  private static Object read(Object target, String name) {
+  private static Object read(Object target, String name, Logger logger) {
     if (target == null) {
       return null;
     }
     try {
       return invoke(target, name);
     } catch (ReflectiveOperationException | LinkageError error) {
+      if (logger != null) {
+        logger.log(Level.WARNING,
+            "SkinsRestorer " + name + " could not be initialized; skin bridge will use its fallback",
+            error);
+      }
       return null;
     }
   }
@@ -453,5 +491,8 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     if (type == Double.TYPE) return Double.class;
     if (type == Character.TYPE) return Character.class;
     return type;
+  }
+
+  private record SkinDataWriter(Method method, Object[] arguments, int score, String key) {
   }
 }

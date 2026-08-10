@@ -43,4 +43,7 @@ tasks.withType<JavaCompile> {
 
 tasks.test {
     useJUnitPlatform()
+    providers.gradleProperty("skinsRestorerJar").orNull?.let { jarPath ->
+        systemProperty("starx.skinsrestorer.jar", jarPath)
+    }
 }

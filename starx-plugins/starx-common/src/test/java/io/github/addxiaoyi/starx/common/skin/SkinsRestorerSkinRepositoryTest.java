@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.common.skin;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -57,6 +58,22 @@ class SkinsRestorerSkinRepositoryTest {
 
     assertEquals("stored-value", skin.value());
     assertEquals("stored-signature", skin.signature());
+  }
+
+  @Test
+  void fallsBackToThreeArgumentNamedLookupWhenUuidLookupIsEmpty() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    UUID uuid = UUID.randomUUID();
+    ThreeArgumentPlayerStorage playerStorage = new ThreeArgumentPlayerStorage(uuid);
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", null);
+
+    SkinDto skin = repository.findByPlayer(uuid, "offline-player").orElseThrow();
+
+    assertEquals("named-value", skin.value());
+    assertEquals("named-signature", skin.signature());
+    assertFalse(playerStorage.useMojang);
   }
 
   @Test
@@ -124,12 +141,48 @@ class SkinsRestorerSkinRepositoryTest {
     set(repository, "playerStorage", playerStorage);
     set(repository, "skinStorage", skinStorage);
 
+    assertTrue(repository.isAvailable());
     repository.setSkinData(UUID.randomUUID(), "texture-value", "texture-signature");
 
     assertEquals("custom:starx-player", skinStorage.savedIdentifier);
     assertEquals("texture-value", skinStorage.savedProperty.getValue());
     assertEquals("texture-signature", skinStorage.savedProperty.getSignature());
     assertEquals("custom:starx-player", playerStorage.saved.identifier);
+  }
+
+  @Test
+  void writesTextureWhenSkinStorageUsesObjectIdentifier() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    PlayerStorage playerStorage = new PlayerStorage();
+    ObjectIdentifierSkinStorage skinStorage = new ObjectIdentifierSkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    assertTrue(repository.isAvailable());
+    assertTrue(repository.trySetSkinData(uuid, "texture-value", "texture-signature"));
+
+    assertEquals("custom:starx-player", skinStorage.savedIdentifier.getIdentifier());
+    assertEquals("texture-value", skinStorage.savedProperty.getValue());
+    assertEquals("texture-signature", skinStorage.savedProperty.getSignature());
+  }
+
+  @Test
+  void acceptsSkinPropertyFactoriesThatRejectBlankProbeValues() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    LegacyPlayerStorage playerStorage = new LegacyPlayerStorage();
+    NonBlankSkinStorage skinStorage = new NonBlankSkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    assertTrue(repository.isAvailable());
+    assertTrue(repository.trySetSkinData(uuid, "texture-value", "texture-signature"));
+
+    assertEquals("texture-value", skinStorage.savedProperty.getValue());
+    assertEquals("texture-signature", skinStorage.savedProperty.getSignature());
   }
 
   @Test
@@ -249,6 +302,74 @@ class SkinsRestorerSkinRepositoryTest {
   }
 
   @Test
+  void removesStoredCustomSkinDataWhenClearingSkin() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    PlayerStorage playerStorage = new PlayerStorage();
+    SkinStorage skinStorage = new SkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    assertTrue(repository.tryClearSkin(uuid));
+
+    assertEquals("custom:starx-player", skinStorage.clearedIdentifier.getIdentifier());
+  }
+
+  @Test
+  void clearsLegacyBindingWhenIdentifierLookupIsUnavailable() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    BindingOnlyPlayerStorage playerStorage = new BindingOnlyPlayerStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", null);
+
+    assertTrue(repository.tryClearSkin(uuid));
+    assertTrue(playerStorage.cleared);
+  }
+
+  @Test
+  void keepsProviderAvailableWhenSkinStorageHasNoCompatibleWriter() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    set(repository, "available", true);
+    set(repository, "playerStorage", new LegacyPlayerStorage());
+    set(repository, "skinStorage", new BrokenSkinStorage());
+
+    assertTrue(repository.isAvailable());
+    assertFalse(repository.trySetSkinData(UUID.randomUUID(), "value", "signature"));
+  }
+
+  @Test
+  void keepsProviderAvailableWhenSkinPropertyRejectsCompatibilityProbe() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    LegacyPlayerStorage playerStorage = new LegacyPlayerStorage();
+    StrictProbeSkinStorage skinStorage = new StrictProbeSkinStorage();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", playerStorage);
+    set(repository, "skinStorage", skinStorage);
+
+    assertTrue(repository.isAvailable());
+    assertTrue(repository.trySetSkinData(uuid, "real-value", "real-signature"));
+
+    assertEquals("real-value", skinStorage.savedProperty.getValue());
+    assertEquals("real-signature", skinStorage.savedProperty.getSignature());
+  }
+
+  @Test
+  void keepsProviderAvailableWhenPlayerStorageHasNoIdentifierWriter() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", new DirectPlayerStorage(uuid));
+    set(repository, "skinStorage", new SkinStorage());
+
+    assertTrue(repository.isAvailable());
+    assertFalse(repository.trySetSkinData(uuid, "value", "signature"));
+  }
+
+  @Test
   void logsAReflectedWriteFailureOnlyOnce() throws Exception {
     Logger logger = Logger.getLogger("skin-repository-test-" + UUID.randomUUID());
     CapturingHandler logs = new CapturingHandler();
@@ -353,6 +474,10 @@ class SkinsRestorerSkinRepositoryTest {
     public void setSkinIdOfPlayer(UUID uuid, SkinIdentifier identifier) {
       this.saved = identifier;
     }
+
+    public void removeSkinIdOfPlayer(UUID uuid) {
+      this.saved = null;
+    }
   }
 
   public static final class DirectPlayerStorage {
@@ -387,6 +512,34 @@ class SkinsRestorerSkinRepositoryTest {
     }
   }
 
+  public static final class ThreeArgumentPlayerStorage {
+    private final UUID expected;
+    private boolean useMojang;
+
+    ThreeArgumentPlayerStorage(UUID expected) {
+      this.expected = expected;
+    }
+
+    public Optional<SkinProperty> getSkinOfPlayer(UUID uuid) {
+      return Optional.empty();
+    }
+
+    public Optional<SkinProperty> getSkinForPlayer(UUID uuid, String name, boolean useMojang) {
+      this.useMojang = useMojang;
+      return this.expected.equals(uuid) && "offline-player".equals(name)
+          ? Optional.of(new SkinProperty("named-value", "named-signature"))
+          : Optional.empty();
+    }
+  }
+
+  public static final class BindingOnlyPlayerStorage {
+    private boolean cleared;
+
+    public void removeSkinIdOfPlayer(UUID uuid) {
+      this.cleared = true;
+    }
+  }
+
   public static final class LegacyPlayerStorage {
     private String saved;
 
@@ -414,6 +567,7 @@ class SkinsRestorerSkinRepositoryTest {
   public static final class SkinStorage {
     private String savedIdentifier;
     private SkinProperty savedProperty;
+    private SkinIdentifier clearedIdentifier;
 
     public Optional<Object> getSkinDataByIdentifier(SkinIdentifier identifier) {
       return Optional.empty();
@@ -421,6 +575,36 @@ class SkinsRestorerSkinRepositoryTest {
 
     public void setCustomSkinData(String identifier, SkinProperty property) {
       this.savedIdentifier = identifier;
+      this.savedProperty = property;
+    }
+
+    public void removeSkinData(SkinIdentifier identifier) {
+      this.clearedIdentifier = identifier;
+    }
+  }
+
+  public static final class ObjectIdentifierSkinStorage {
+    private SkinIdentifier savedIdentifier;
+    private SkinProperty savedProperty;
+
+    public void setCustomSkinData(SkinIdentifier identifier, SkinProperty property) {
+      this.savedIdentifier = identifier;
+      this.savedProperty = property;
+    }
+  }
+
+  public static final class NonBlankSkinStorage {
+    private NonBlankSkinProperty savedProperty;
+
+    public void setCustomSkinData(String identifier, NonBlankSkinProperty property) {
+      this.savedProperty = property;
+    }
+  }
+
+  public static final class StrictProbeSkinStorage {
+    private StrictProbeSkinProperty savedProperty;
+
+    public void setCustomSkinData(String identifier, StrictProbeSkinProperty property) {
       this.savedProperty = property;
     }
   }
@@ -582,6 +766,57 @@ class SkinsRestorerSkinRepositoryTest {
 
     public static SkinProperty of(String value, String signature) {
       return new SkinProperty(value, signature);
+    }
+
+    public String getValue() {
+      return this.value;
+    }
+
+    public String getSignature() {
+      return this.signature;
+    }
+  }
+
+  public static final class NonBlankSkinProperty {
+    private final String value;
+    private final String signature;
+
+    private NonBlankSkinProperty(String value, String signature) {
+      if (value == null || value.isBlank() || signature == null || signature.isBlank()) {
+        throw new IllegalArgumentException("texture values must not be blank");
+      }
+      this.value = value;
+      this.signature = signature;
+    }
+
+    public static NonBlankSkinProperty of(String value, String signature) {
+      return new NonBlankSkinProperty(value, signature);
+    }
+
+    public String getValue() {
+      return this.value;
+    }
+
+    public String getSignature() {
+      return this.signature;
+    }
+  }
+
+  public static final class StrictProbeSkinProperty {
+    private final String value;
+    private final String signature;
+
+    private StrictProbeSkinProperty(String value, String signature) {
+      if ("starx-compatibility-probe-value".equals(value)
+          || "starx-compatibility-probe-signature".equals(signature)) {
+        throw new IllegalArgumentException("compatibility probe is not texture data");
+      }
+      this.value = value;
+      this.signature = signature;
+    }
+
+    public static StrictProbeSkinProperty of(String value, String signature) {
+      return new StrictProbeSkinProperty(value, signature);
     }
 
     public String getValue() {

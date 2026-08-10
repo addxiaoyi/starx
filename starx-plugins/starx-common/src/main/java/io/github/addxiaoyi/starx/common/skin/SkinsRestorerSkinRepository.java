@@ -102,43 +102,87 @@ implements SkinRepository {
 
     @Override
     public void setSkinId(UUID uuid, String skinId) {
+        this.trySetSkinId(uuid, skinId);
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return this.available && this.playerStorage != null;
+    }
+
+    @Override
+    public boolean trySetSkinId(UUID uuid, String skinId) {
         if (!this.available || this.playerStorage == null) {
-            return;
+            return false;
         }
         try {
             SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
+            return true;
         }
         catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
             this.logFailure("Failed to set skin id for " + String.valueOf(uuid), e);
+            return false;
         }
     }
 
     @Override
     public void setSkinData(UUID uuid, String value, String signature) {
+        this.trySetSkinData(uuid, value, signature);
+    }
+
+    @Override
+    public boolean trySetSkinData(UUID uuid, String value, String signature) {
         if (!this.available || this.playerStorage == null || this.skinStorage == null) {
-            return;
+            return false;
         }
         try {
             Optional<Object> existing = SkinsRestorerSkinRepository.invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
             String skinId = SkinsRestorerSkinRepository.skinIdForWrite(existing, uuid);
             SkinsRestorerSkinRepository.writeSkinData(this.skinStorage, skinId, value, signature);
             SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
+            return true;
         }
         catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
             this.logFailure("Failed to set skin data for " + String.valueOf(uuid), e);
+            return false;
         }
     }
 
     @Override
     public void clearSkin(UUID uuid) {
+        this.tryClearSkin(uuid);
+    }
+
+    @Override
+    public boolean tryClearSkin(UUID uuid) {
         if (!this.available || this.playerStorage == null) {
-            return;
+            return false;
         }
         try {
+            Optional<?> existing;
+            try {
+                existing = SkinsRestorerSkinRepository.invokeOptional(
+                    this.playerStorage, "getSkinIdOfPlayer", uuid);
+            }
+            catch (NoSuchMethodException ignored) {
+                existing = Optional.empty();
+            }
             SkinsRestorerSkinRepository.invokeVoid(this.playerStorage, "removeSkinIdOfPlayer", uuid);
+            if (this.skinStorage != null && existing.isPresent()
+                && SkinsRestorerSkinRepository.isCustomIdentifier(existing.get())) {
+                try {
+                    SkinsRestorerSkinRepository.invokeVoid(
+                        this.skinStorage, "removeSkinData", existing.get());
+                }
+                catch (NoSuchMethodException ignored) {
+                    // Older SkinsRestorer versions only remove the player binding.
+                }
+            }
+            return true;
         }
         catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
             this.logFailure("Failed to clear skin for " + String.valueOf(uuid), e);
+            return false;
         }
     }
 
@@ -164,48 +208,79 @@ implements SkinRepository {
     }
 
     private static void writeSkinData(Object storage, String skinId, String value, String signature) throws ReflectiveOperationException {
-        try {
-            SkinsRestorerSkinRepository.invokeVoid(storage, "setSkinData", skinId, value, signature);
+        SkinDataWriter writer = SkinsRestorerSkinRepository.findSkinDataWriter(
+            storage, skinId, value, signature);
+        if (writer != null) {
+            if (!writer.method().trySetAccessible()) {
+                throw new IllegalAccessException("Cannot access " + writer.method());
+            }
+            writer.method().invoke(storage, writer.arguments());
             return;
         }
-        catch (NoSuchMethodException ignored) {
-            // SkinsRestorer 15.12 stores custom textures through SkinProperty.
-        }
-        Method selected = null;
-        Object selectedProperty = null;
-        int selectedScore = -1;
-        String selectedKey = null;
+        throw new NoSuchMethodException("setSkinData or setCustomSkinData in " + storage.getClass());
+    }
+
+    private static SkinDataWriter findSkinDataWriter(
+        Object storage,
+        String skinId,
+        String value,
+        String signature
+    ) {
+        SkinDataWriter selected = null;
         for (Method method : storage.getClass().getMethods()) {
             Class<?>[] parameters = method.getParameterTypes();
-            if (!method.getName().equals("setCustomSkinData")
-                || parameters.length != 2
-                || SkinsRestorerSkinRepository.matchScore(parameters[0], skinId) < 0) continue;
+            if (method.getName().equals("setSkinData") && parameters.length == 3) {
+                Object identifier;
+                try {
+                    identifier = SkinsRestorerSkinRepository.skinIdentifierFor(skinId, parameters[0]);
+                }
+                catch (ReflectiveOperationException | IllegalStateException ignored) {
+                    continue;
+                }
+                int score = SkinsRestorerSkinRepository.matchScore(parameters[0], identifier)
+                    + SkinsRestorerSkinRepository.matchScore(parameters[1], value)
+                    + SkinsRestorerSkinRepository.matchScore(parameters[2], signature);
+                if (score < 0) continue;
+                selected = SkinsRestorerSkinRepository.selectSkinDataWriter(
+                    selected, method, new Object[]{identifier, value, signature}, score);
+            }
+        }
+        if (selected != null) {
+            return selected;
+        }
+        for (Method method : storage.getClass().getMethods()) {
+            Class<?>[] parameters = method.getParameterTypes();
+            if (!method.getName().equals("setCustomSkinData") || parameters.length != 2) continue;
+            Object identifier;
             Object property;
             try {
+                identifier = SkinsRestorerSkinRepository.skinIdentifierFor(skinId, parameters[0]);
                 property = SkinsRestorerSkinRepository.skinPropertyFor(parameters[1], value, signature);
             }
             catch (ReflectiveOperationException | IllegalStateException ignored) {
                 continue;
             }
-            int score = SkinsRestorerSkinRepository.matchScore(parameters[0], skinId)
+            int score = SkinsRestorerSkinRepository.matchScore(parameters[0], identifier)
                 + SkinsRestorerSkinRepository.matchScore(parameters[1], property);
             if (score < 0) continue;
-            String key = SkinsRestorerSkinRepository.methodKey(method);
-            if (selected == null || score > selectedScore || score == selectedScore && key.compareTo(selectedKey) < 0) {
-                selected = method;
-                selectedProperty = property;
-                selectedScore = score;
-                selectedKey = key;
-            }
+            selected = SkinsRestorerSkinRepository.selectSkinDataWriter(
+                selected, method, new Object[]{identifier, property}, score);
         }
-        if (selected != null) {
-            if (!selected.trySetAccessible()) {
-                throw new IllegalAccessException("Cannot access " + selected);
-            }
-            selected.invoke(storage, skinId, selectedProperty);
-            return;
+        return selected;
+    }
+
+    private static SkinDataWriter selectSkinDataWriter(
+        SkinDataWriter current,
+        Method method,
+        Object[] arguments,
+        int score
+    ) {
+        String key = SkinsRestorerSkinRepository.methodKey(method);
+        if (current == null || score > current.score()
+            || score == current.score() && key.compareTo(current.key()) < 0) {
+            return new SkinDataWriter(method, arguments, score, key);
         }
-        throw new NoSuchMethodException("setSkinData or setCustomSkinData in " + storage.getClass());
+        return current;
     }
 
     @SuppressWarnings("unchecked")
@@ -221,16 +296,27 @@ implements SkinRepository {
     }
 
     private static Optional<?> tryCurrentApi(Object storage, UUID uuid, String name) throws ReflectiveOperationException {
+        Optional<?> byUuid = null;
         try {
             // The name overload may call Mojang for UUIDs that are not Mojang profiles.
-            return SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinOfPlayer", uuid);
+            byUuid = SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinOfPlayer", uuid);
+            if (byUuid.isPresent()) {
+                return byUuid;
+            }
+        }
+        catch (NoSuchMethodException ignored) {
+            // Fall through to the name lookup exposed by older storage implementations.
+        }
+        try {
+            return SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinForPlayer", uuid, name);
         }
         catch (NoSuchMethodException ignored) {
             try {
-                return SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinForPlayer", uuid, name);
+                return SkinsRestorerSkinRepository.invokeOptional(
+                    storage, "getSkinForPlayer", uuid, name, false);
             }
             catch (NoSuchMethodException ignoredAgain) {
-                return null;
+                return byUuid;
             }
         }
     }
@@ -488,5 +574,8 @@ implements SkinRepository {
             return Character.class;
         }
         return type;
+    }
+
+    private record SkinDataWriter(Method method, Object[] arguments, int score, String key) {
     }
 }

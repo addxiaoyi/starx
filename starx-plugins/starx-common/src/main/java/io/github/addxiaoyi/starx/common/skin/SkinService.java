@@ -10,8 +10,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public final class SkinService {
+    private static final Logger LOGGER = Logger.getLogger(SkinService.class.getName());
     private final SkinRepository skinRepository;
     private final EventBus eventBus;
 
@@ -26,10 +29,22 @@ public final class SkinService {
         Optional<SkinDto> skin = this.skinRepository.findByPlayer(uuid, name);
         if (skin.isPresent()) {
             SkinDto data = skin.get();
-            if (data.skinId() != null) {
-                this.skinRepository.setSkinId(uuid, data.skinId());
-            } else if (data.value() != null && data.signature() != null) {
-                this.skinRepository.setSkinData(uuid, data.value(), data.signature());
+            boolean stored;
+            try {
+                if (data.skinId() != null) {
+                    stored = this.skinRepository.trySetSkinId(uuid, data.skinId());
+                } else if (data.value() != null && data.signature() != null) {
+                    stored = this.skinRepository.trySetSkinData(uuid, data.value(), data.signature());
+                } else {
+                    stored = false;
+                }
+            } catch (RuntimeException | LinkageError error) {
+                LOGGER.log(Level.WARNING, "Failed to persist skin for " + uuid, error);
+                return;
+            }
+            if (!stored) {
+                LOGGER.warning("Skin repository did not persist skin for " + uuid);
+                return;
             }
             this.applySkin(uuid);
             this.notifySkinUpdated(uuid);
