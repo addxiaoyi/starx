@@ -23,7 +23,7 @@ dependencies {
     compileOnly("com.google.code.findbugs:jsr305:3.0.2")
 
     // Runtime dependencies that were bundled
-    compileOnly("com.google.code.gson:gson:2.10.1")
+    compileOnly("com.google.code.gson:gson:2.14.0")
     compileOnly("org.yaml:snakeyaml:2.2")
     // HikariCP 和 JDBC 驱动 - 需要被 shadow 到最终 JAR
     implementation("com.zaxxer:HikariCP:5.1.0")
@@ -33,7 +33,7 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("com.google.code.gson:gson:2.10.1")
+    testImplementation("com.google.code.gson:gson:2.14.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
