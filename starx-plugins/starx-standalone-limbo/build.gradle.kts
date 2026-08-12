@@ -91,7 +91,7 @@ dependencies {
 
     compileOnly(velocityBuild606Compile)
 
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testCompileOnly(velocityBuild606Compile)
     testRuntimeOnly(velocityBuild606Runtime)
