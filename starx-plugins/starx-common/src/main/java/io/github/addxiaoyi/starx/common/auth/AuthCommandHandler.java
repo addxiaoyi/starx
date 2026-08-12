@@ -26,9 +26,6 @@ public final class AuthCommandHandler {
       String deviceId
   ) {
     if (isWebsiteLoginCommand(rawInput)) {
-      if (!this.auth.isUserRegistered(playerId)) {
-        return AuthResult.failure("请先注册游戏账号，再使用网站登录");
-      }
       return this.auth.requestWebLoginApproval(lease, playerId, username);
     }
 

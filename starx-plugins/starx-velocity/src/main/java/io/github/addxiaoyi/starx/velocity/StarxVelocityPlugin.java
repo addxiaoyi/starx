@@ -493,7 +493,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             return Map.copyOf(metrics);
         }, backendBridge.commandMailbox(), backendBridge::acceptHttpMessage, incidentTimeline, playerSessions, accountDeletions, crossDeviceApprovals, bindingChallenges, accountIdentities::accountId);
         this.lifecycle.own("HTTP API", this.httpApiServer::stop);
-        this.moduleManager.register(new AdminCommandsModule(this, userRepository, punishmentRepo, staffNoteRepo, reportRepo, announcementRepo, bindingRepo, bindingVerification));
+        this.moduleManager.register(new AdminCommandsModule(this, userRepository, punishmentRepo, staffNoteRepo, reportRepo, announcementRepo, bindingRepo, bindingVerification, authModule.authService()));
         WebhookEventPublisher webhookPublisher = new WebhookEventPublisher(this.eventBus, this.webhookClient);
         webhookPublisher.register();
         this.webhookClient.replayPending().whenComplete((ignored, error) -> {

@@ -295,12 +295,15 @@ implements UserRepository {
     }
 
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
-        this.execute("UPDATE starx_users SET password_hash = ?, password_migrated_at = ?, migration_state = ? WHERE uuid = ?", stmt -> {
+        int updated = this.executeUpdate("UPDATE starx_users SET password_hash = ?, password_migrated_at = ?, migration_state = ? WHERE uuid = ?", stmt -> {
             stmt.setString(1, passwordHash);
             stmt.setTimestamp(2, Timestamp.from(migratedAt));
             stmt.setString(3, "completed");
             stmt.setString(4, uuid.toString());
         });
+        if (updated != 1) {
+            throw new IllegalStateException("Password migration target account is missing: " + uuid);
+        }
     }
 
     public int countByMigrationState(String migrationState) {

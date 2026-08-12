@@ -1,6 +1,8 @@
 package io.github.addxiaoyi.starx.common.auth;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -106,6 +108,40 @@ class AuthServiceCredentialRevocationTest {
       String storedHash = fixture.users.findFullByUuid(fixture.playerId).orElseThrow().passwordHash();
       assertTrue(PasswordHasher.verify("ResetPassword_789", storedHash));
       assertFalse(PasswordHasher.verify(fixture.oldPassword, storedHash));
+    } finally {
+      fixture.sessions.shutdown();
+    }
+  }
+
+  @Test
+  void administrativeResetCompletesPendingLocalMigration() throws Exception {
+    Fixture fixture = this.fixture();
+    fixture.users.updateMigrationState(fixture.playerId, "pending");
+    try {
+      AuthResult result = fixture.auth.resetPassword("Alex", "ResetPassword_789");
+
+      assertTrue(result.success());
+      StarxUser user = fixture.users.findFullByUuid(fixture.playerId).orElseThrow();
+      assertEquals("completed", user.migrationState());
+      assertNotNull(user.passwordMigratedAt());
+    } finally {
+      fixture.sessions.shutdown();
+    }
+  }
+
+  @Test
+  void passwordChangeCompletesPendingLocalMigration() throws Exception {
+    Fixture fixture = this.fixture();
+    fixture.users.updateMigrationState(fixture.playerId, "pending");
+    try {
+      AuthResult result = fixture.auth.changePassword(
+          fixture.playerId, fixture.oldPassword, "ChangedPassword_789");
+
+      assertTrue(result.success());
+      StarxUser user = fixture.users.findFullByUuid(fixture.playerId).orElseThrow();
+      assertEquals("completed", user.migrationState());
+      assertNotNull(user.passwordMigratedAt());
+      assertTrue(PasswordHasher.verify("ChangedPassword_789", user.passwordHash()));
     } finally {
       fixture.sessions.shutdown();
     }

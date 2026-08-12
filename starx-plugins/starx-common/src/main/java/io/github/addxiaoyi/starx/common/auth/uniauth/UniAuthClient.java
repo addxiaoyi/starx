@@ -21,6 +21,7 @@ import java.util.logging.Logger;
 public final class UniAuthClient {
   private static final Logger LOGGER = Logger.getLogger(UniAuthClient.class.getName());
   private static final Gson GSON = new Gson();
+  private static final String SERVICE_UNAVAILABLE_MESSAGE = "认证服务暂时不可用，请稍后重试";
 
   private final UniAuthConfig config;
   private final HttpClient httpClient;
@@ -163,7 +164,8 @@ public final class UniAuthClient {
     } catch (Exception exception) {
       LOGGER.log(Level.WARNING, "UniAuth login failed: {0}", safeMessage(exception));
       return CompletableFuture.completedFuture(
-          new LoginResponse(false, safeMessage(exception), null, null, false));
+          new LoginResponse(
+              false, SERVICE_UNAVAILABLE_MESSAGE, null, null, false, true));
     }
   }
 
@@ -177,12 +179,16 @@ public final class UniAuthClient {
     if (code == 403) {
       return new LoginResponse(true, "邮箱未验证，已转为本地认证", null, null, true);
     }
+    if (code >= 500) {
+      return new LoginResponse(
+          false, SERVICE_UNAVAILABLE_MESSAGE, null, null, false, true);
+    }
     String message = switch (code) {
       case 401 -> "密码错误";
       case 402 -> "用户未注册";
       default -> "认证失败: " + code;
     };
-    return new LoginResponse(false, message, null, null, false);
+    return new LoginResponse(false, message, null, null, false, false);
   }
 
   public CompletableFuture<PlayerProfileResponse> fetchProfile(String username) {
@@ -333,7 +339,17 @@ public final class UniAuthClient {
       String message,
       String userId,
       String email,
-      boolean requiresLocalMigration) {}
+      boolean requiresLocalMigration,
+      boolean serviceUnavailable) {
+    public LoginResponse(
+        boolean success,
+        String message,
+        String userId,
+        String email,
+        boolean requiresLocalMigration) {
+      this(success, message, userId, email, requiresLocalMigration, false);
+    }
+  }
 
   public record StatusResponse(boolean exists, boolean imported, String status) {}
 

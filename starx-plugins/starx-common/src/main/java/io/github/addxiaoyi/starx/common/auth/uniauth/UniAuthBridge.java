@@ -33,10 +33,8 @@ public final class UniAuthBridge {
       UUID uuid,
       String username,
       String password) {
-    Optional<StarxUser> existing = userRepository.findFullByUsername(username);
-    if (existing.isPresent()
-        && "completed".equals(existing.get().migrationState())
-        && existing.get().passwordHash() != null) {
+    Optional<StarxUser> existing = resolveAccount(uuid, username);
+    if (existing.isPresent() && hasLocalPassword(existing.get())) {
       return authenticateLocally(existing.get(), password);
     }
 
@@ -45,7 +43,8 @@ public final class UniAuthBridge {
         return CompletableFuture.completedFuture(new BridgeResult(
             false,
             login.message() == null ? "Authentication failed" : login.message(),
-            null));
+            null,
+            login.serviceUnavailable()));
       }
       if (login.requiresLocalMigration() && existing.isEmpty()) {
         return CompletableFuture.completedFuture(new BridgeResult(
@@ -111,9 +110,8 @@ public final class UniAuthBridge {
       UniAuthClient.PlayerProfileResponse profile) {
     try {
       UUID targetUuid = existing.uuid();
-      userRepository.updatePassword(targetUuid, PasswordHasher.hash(password));
-      userRepository.updateMigrationState(targetUuid, "completed");
-      userRepository.updatePasswordMigratedAt(targetUuid, Instant.now());
+      userRepository.markPasswordMigrated(
+          targetUuid, PasswordHasher.hash(password), Instant.now());
       synchronizeProfile(targetUuid, existing, profile);
       StarxUser updated = userRepository.findFullByUuid(targetUuid).orElse(existing);
       LOGGER.log(Level.INFO, "User {0} migrated from UniAuth to local auth", username);
@@ -122,9 +120,10 @@ public final class UniAuthBridge {
       LOGGER.log(Level.WARNING,
           "Failed to migrate user " + username + " to local auth", exception);
       return new BridgeResult(
-          true,
-          "Login successful (from UniAuth, local migration failed)",
-          existing);
+          false,
+          "本地账号迁移失败，请稍后重试",
+          null,
+          false);
     }
   }
 
@@ -172,9 +171,10 @@ public final class UniAuthBridge {
       LOGGER.log(Level.WARNING,
           "Failed to create user " + username + " from UniAuth", exception);
       return new BridgeResult(
-          true,
-          "Login successful (from UniAuth, user creation failed)",
-          null);
+          false,
+          "本地账号创建失败，请稍后重试",
+          null,
+          false);
     }
   }
 
@@ -223,6 +223,22 @@ public final class UniAuthBridge {
     return normalized.isBlank() ? null : normalized;
   }
 
+  private static boolean hasLocalPassword(StarxUser user) {
+    String passwordHash = user.passwordHash();
+    return passwordHash != null && !passwordHash.isBlank();
+  }
+
+  private Optional<StarxUser> resolveAccount(UUID uuid, String username) {
+    Optional<StarxUser> byUuid = userRepository.findFullByUuid(uuid);
+    if (byUuid.isPresent()) {
+      return byUuid;
+    }
+    if (username == null || username.isBlank()) {
+      return Optional.empty();
+    }
+    return userRepository.findFullByUsername(username);
+  }
+
   private static String safeMessage(Throwable throwable) {
     Throwable current = throwable;
     while (current.getCause() != null) {
@@ -233,5 +249,13 @@ public final class UniAuthBridge {
         ? current.getClass().getSimpleName() : message;
   }
 
-  public record BridgeResult(boolean success, String message, StarxUser user) {}
+  public record BridgeResult(
+      boolean success,
+      String message,
+      StarxUser user,
+      boolean serviceUnavailable) {
+    public BridgeResult(boolean success, String message, StarxUser user) {
+      this(success, message, user, false);
+    }
+  }
 }

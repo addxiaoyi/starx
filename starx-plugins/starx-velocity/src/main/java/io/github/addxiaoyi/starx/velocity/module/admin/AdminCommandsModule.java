@@ -24,6 +24,8 @@ import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.github.addxiaoyi.starx.common.auth.BindingVerificationService;
+import io.github.addxiaoyi.starx.common.auth.AuthService;
+import io.github.addxiaoyi.starx.common.auth.AuthResult;
 import io.github.addxiaoyi.starx.common.database.JdbcAnnouncementRepository;
 import io.github.addxiaoyi.starx.common.database.JdbcBindingRepository;
 import io.github.addxiaoyi.starx.common.database.JdbcPunishmentRepository;
@@ -59,9 +61,10 @@ implements VelocityModule {
     private final JdbcAnnouncementRepository announcementRepo;
     private final JdbcBindingRepository bindingRepo;
     private final BindingVerificationService bindingVerification;
+    private final AuthService authService;
     private CommandMeta commandMeta;
 
-    public AdminCommandsModule(StarxVelocityPlugin plugin, JdbcUserRepository userRepo, JdbcPunishmentRepository punishmentRepo, JdbcStaffNoteRepository staffNoteRepo, JdbcReportRepository reportRepo, JdbcAnnouncementRepository announcementRepo, JdbcBindingRepository bindingRepo, BindingVerificationService bindingVerification) {
+    public AdminCommandsModule(StarxVelocityPlugin plugin, JdbcUserRepository userRepo, JdbcPunishmentRepository punishmentRepo, JdbcStaffNoteRepository staffNoteRepo, JdbcReportRepository reportRepo, JdbcAnnouncementRepository announcementRepo, JdbcBindingRepository bindingRepo, BindingVerificationService bindingVerification, AuthService authService) {
         this.plugin = plugin;
         this.userRepo = userRepo;
         this.punishmentRepo = punishmentRepo;
@@ -70,6 +73,7 @@ implements VelocityModule {
         this.announcementRepo = announcementRepo;
         this.bindingRepo = bindingRepo;
         this.bindingVerification = bindingVerification;
+        this.authService = authService;
     }
 
     @Override
@@ -95,18 +99,18 @@ implements VelocityModule {
     private final class AdminCommand implements SimpleCommand {
         @Override public void execute(SimpleCommand.Invocation invocation) {
             String[] args = invocation.arguments();
-            if (args.length == 0) { invocation.source().sendMessage(Component.text("用法：/sxadmin <report|history|note|notes|announce|bind> ...", NamedTextColor.YELLOW)); return; }
+            if (args.length == 0) { invocation.source().sendMessage(Component.text("用法：/sxadmin <report|history|note|notes|announce|bind|setpassword> ...", NamedTextColor.YELLOW)); return; }
             SimpleCommand delegate = switch (args[0].toLowerCase()) {
                 case "report" -> new ReportCommand(); case "history" -> new HistoryCommand();
                 case "note" -> new NoteCommand(); case "notes" -> new NotesCommand();
-                case "announce" -> new AnnounceCommand(); case "bind" -> new BindCommand(); default -> null;
+                case "announce" -> new AnnounceCommand(); case "bind" -> new BindCommand(); case "setpassword" -> new SetPasswordCommand(); default -> null;
             };
-            if (delegate == null) { invocation.source().sendMessage(Component.text("未知管理操作。可用：report/history/note/notes/announce/bind", NamedTextColor.RED)); return; }
+            if (delegate == null) { invocation.source().sendMessage(Component.text("未知管理操作。可用：report/history/note/notes/announce/bind/setpassword", NamedTextColor.RED)); return; }
             delegate.execute(new RoutedInvocation(invocation, java.util.Arrays.copyOfRange(args, 1, args.length)));
         }
         @Override public List<String> suggest(SimpleCommand.Invocation invocation) {
             String[] args = invocation.arguments();
-            List<String> actions = List.of("report", "history", "note", "notes", "announce", "bind");
+            List<String> actions = List.of("report", "history", "note", "notes", "announce", "bind", "setpassword");
             if (args.length <= 1) {
                 String prefix = args.length == 0 ? "" : args[0].toLowerCase();
                 return actions.stream().filter(action -> action.startsWith(prefix)).toList();
@@ -114,10 +118,39 @@ implements VelocityModule {
             SimpleCommand delegate = switch (args[0].toLowerCase()) {
                 case "report" -> new ReportCommand(); case "history" -> new HistoryCommand();
                 case "note" -> new NoteCommand(); case "notes" -> new NotesCommand();
-                case "announce" -> new AnnounceCommand(); case "bind" -> new BindCommand(); default -> null;
+                case "announce" -> new AnnounceCommand(); case "bind" -> new BindCommand(); case "setpassword" -> new SetPasswordCommand(); default -> null;
             };
             return delegate == null ? List.of() : delegate.suggest(
                 new RoutedInvocation(invocation, java.util.Arrays.copyOfRange(args, 1, args.length)));
+        }
+    }
+
+    private final class SetPasswordCommand implements SimpleCommand {
+        @Override public void execute(SimpleCommand.Invocation inv) {
+            if (!inv.source().hasPermission("starx.password.reset")) {
+                inv.source().sendMessage(Component.text("你没有权限执行此命令。", NamedTextColor.RED));
+                return;
+            }
+            String[] args = inv.arguments();
+            if (args.length != 2 || args[0].isBlank() || args[1].isBlank()) {
+                inv.source().sendMessage(Component.text("用法：/sxadmin setpassword <玩家> <新密码>", NamedTextColor.YELLOW));
+                return;
+            }
+            AuthResult reset = AdminCommandsModule.this.authService.resetPassword(args[0], args[1]);
+            inv.source().sendMessage(Component.text(
+                reset.success() ? "玩家密码已修改，现有认证信任已撤销。" : reset.message(),
+                reset.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+        }
+
+        @Override public List<String> suggest(SimpleCommand.Invocation inv) {
+            if (inv.arguments().length <= 1) {
+                String prefix = inv.arguments().length == 0 ? "" : inv.arguments()[0].toLowerCase();
+                return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream()
+                    .map(Player::getUsername)
+                    .filter(name -> name.toLowerCase().startsWith(prefix))
+                    .toList();
+            }
+            return List.of();
         }
     }
 

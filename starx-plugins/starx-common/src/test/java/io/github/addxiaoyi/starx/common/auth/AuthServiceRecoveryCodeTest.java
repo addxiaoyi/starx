@@ -159,6 +159,38 @@ final class AuthServiceRecoveryCodeTest {
   }
 
   @Test
+  void totpVerificationResolvesTheStoredAccountFromTheCurrentConnectionUsername() {
+    UUID connectionUuid = UUID.randomUUID();
+    AuthLease lease = AuthLease.create();
+    assertNotNull(this.sessions.open(connectionUuid, "player", null, lease));
+    assertTrue(this.sessions.transition(
+        connectionUuid, lease, AuthSession.State.GUEST, AuthSession.State.AUTHENTICATING));
+
+    AuthResult result = this.auth.verifyTotp(
+        lease, connectionUuid, TotpGenerator.generate(this.totpSecret, Instant.now()));
+
+    assertTrue(result.success());
+    assertTrue(this.sessions.isState(
+        connectionUuid, lease, AuthSession.State.AUTHENTICATED));
+  }
+
+  @Test
+  void recoveryCodeResolvesTheStoredAccountFromTheCurrentConnectionUsername() {
+    UUID connectionUuid = UUID.randomUUID();
+    AuthLease lease = AuthLease.create();
+    assertNotNull(this.sessions.open(connectionUuid, "player", null, lease));
+    assertTrue(this.sessions.transition(
+        connectionUuid, lease, AuthSession.State.GUEST, AuthSession.State.AUTHENTICATING));
+
+    AuthResult result = this.auth.verifyRecoveryCode(
+        lease, connectionUuid, this.recoveryCodes.get(0));
+
+    assertTrue(result.success());
+    assertTrue(this.sessions.isState(
+        connectionUuid, lease, AuthSession.State.AUTHENTICATED));
+  }
+
+  @Test
   void concurrentConsumersCanUseARecoveryCodeOnlyOnce() throws Exception {
     AuthLease lease = this.openAuthenticatingSession();
     String recoveryCode = this.recoveryCodes.get(0);

@@ -150,9 +150,11 @@ public final class AuthService {
         UUID uuid, String ipAddress, String deviceId,
         boolean isPremium, boolean isFloodgate, boolean isSkinSite) {
         // 如果用户未注册，不跳过
-        if (!isUserRegistered(uuid)) {
+        Optional<StarxUser> connectedUser = this.resolveConnectedUser(uuid);
+        if (connectedUser.isEmpty()) {
             return false;
         }
+        UUID accountUuid = connectedUser.get().uuid();
 
         // 正版玩家免密
         if (isPremium && premiumBypass) {
@@ -172,7 +174,7 @@ public final class AuthService {
         // Same IP password reuse is intentionally short-lived and configurable.
         if (ipBypassMinutes > 0 && ipAddress != null && ipSessionStore != null) {
             if (ipSessionStore.hasRecentSessionMinutes(
-                uuid, ipAddress, deviceId, ipBypassMinutes)) {
+                accountUuid, ipAddress, deviceId, ipBypassMinutes)) {
                 return true;
             }
         }
@@ -277,12 +279,12 @@ public final class AuthService {
     public AuthResult requestWebLoginApproval(AuthLease lease, UUID uuid, String username) {
         Objects.requireNonNull(lease, "lease");
         Objects.requireNonNull(uuid, "uuid");
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
-        if (optional.isEmpty()) {
-            return AuthResult.failure("请先注册游戏账号，再使用网站登录");
-        }
         if (!this.sessionManager.isState(uuid, lease, AuthSession.State.GUEST)) {
             return AuthResult.failure("认证会话已过期，请重新连接。");
+        }
+        Optional<StarxUser> optional = this.resolveSessionUser(uuid, lease);
+        if (optional.isEmpty()) {
+            return AuthResult.failure("请先注册游戏账号，再使用网站登录");
         }
         if (!this.sessionManager.transition(
                 uuid, lease, AuthSession.State.GUEST, AuthSession.State.WEB_APPROVAL_PENDING)) {
@@ -321,10 +323,15 @@ public final class AuthService {
         if (source == null || source.isBlank()) {
             return AuthResult.failure("可信身份来源无效");
         }
+        Optional<AuthSession> session = this.sessionManager.get(uuid, lease);
+        if (session.isEmpty()) {
+            return AuthResult.failure("认证会话已过期，请重新连接。");
+        }
+        String sessionUsername = session.get().username();
         Instant now = Instant.now();
         Optional<StarxUser> account = this.userRepository.findFullByUuid(uuid);
         if (account.isEmpty()) {
-            Optional<StarxUser> sameName = this.userRepository.findFullByUsername(username);
+            Optional<StarxUser> sameName = this.userRepository.findFullByUsername(sessionUsername);
             if (sameName.isPresent()) {
                 if (!premium) {
                     return AuthResult.failure("该用户名已注册，请使用原账号登录");
@@ -336,8 +343,8 @@ public final class AuthService {
         }
         if (account.isEmpty()) {
             this.userRepository.create(new StarxUser(
-                    uuid,
-                    username,
+                     uuid,
+                     sessionUsername,
                     null,
                     null,
                     null,
@@ -369,7 +376,7 @@ public final class AuthService {
         }
         this.eventBus.publish("player:login:success", Map.of(
                 "uuid", uuid,
-                "username", username,
+                "username", sessionUsername,
                 "source", source));
         return AuthResult.success("可信身份自动登录成功", AuthSession.State.AUTHENTICATED);
     }
@@ -418,6 +425,14 @@ public final class AuthService {
         InetAddress address,
         String deviceId
     ) {
+        if (!this.sessionManager.isState(uuid, lease, AuthSession.State.GUEST)) {
+            return AuthResult.failure("认证会话已过期，请重新连接。");
+        }
+        Optional<AuthSession> session = this.sessionManager.get(uuid, lease);
+        if (session.isEmpty()) {
+            return AuthResult.failure("认证会话已过期，请重新连接。");
+        }
+        String sessionUsername = session.get().username();
         BruteForceProtector.Check bruteForce = this.bruteForceProtector.check(uuid);
         if (bruteForce.status() == BruteForceProtector.BruteForceStatus.LOCKED) {
             long sec = bruteForce.waitMs() / 1000L;
@@ -428,24 +443,29 @@ public final class AuthService {
             return AuthResult.failure("\u8bf7\u7b49\u5f85" + sec + "\u79d2\u540e\u518d\u8bd5");
         }
         if (this.uniauthConfig.enabled() && this.uniauthConfig.bridgeMode() && this.uniauthBridge != null) {
-            logger.log(Level.FINE, "Using UniAuth bridge for user: {0}", username);
-            CompletableFuture<UniAuthBridge.BridgeResult> bridgeResultFuture = this.uniauthBridge.authenticate(uuid, username, password);
+            logger.log(Level.FINE, "Using UniAuth bridge for user: {0}", sessionUsername);
+            CompletableFuture<UniAuthBridge.BridgeResult> bridgeResultFuture = this.uniauthBridge.authenticate(uuid, sessionUsername, password);
             try {
                 UniAuthBridge.BridgeResult bridgeResult = bridgeResultFuture.get();
                 if (bridgeResult.success() && bridgeResult.user() != null) {
                     this.bruteForceProtector.clear(uuid);
-                    return this.authenticate(
-                        bridgeResult.user(), lease, AuthSession.State.GUEST);
+                    return this.completePasswordAuthentication(
+                        lease, uuid, bridgeResult.user(), totpCode, address, deviceId);
+                }
+                if (bridgeResult.serviceUnavailable()) {
+                    this.publishLoginFailed(uuid, sessionUsername, bridgeResult.message());
+                    return AuthResult.failure(bridgeResult.message());
                 }
                 this.bruteForceProtector.recordFailure(uuid);
-                this.publishLoginFailed(uuid, username, bridgeResult.message());
+                this.publishLoginFailed(uuid, sessionUsername, bridgeResult.message());
                 return AuthResult.failure(bridgeResult.message());
             }
             catch (Exception e) {
-                logger.log(Level.WARNING, "UniAuth bridge failed, falling back to local auth", e);
+                logger.log(Level.WARNING, "UniAuth bridge failed", e);
+                return AuthResult.failure("认证服务暂时不可用，请稍后重试");
             }
         }
-        return this.loginLocal(lease, uuid, username, password, totpCode, address, deviceId);
+        return this.loginLocal(lease, uuid, sessionUsername, password, totpCode, address, deviceId);
     }
 
     private AuthResult loginLocal(
@@ -460,7 +480,7 @@ public final class AuthService {
         if (!this.sessionManager.isState(uuid, lease, AuthSession.State.GUEST)) {
             return AuthResult.failure("认证会话已过期，请重新连接。");
         }
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> optional = this.resolveSessionUser(uuid, lease);
         if (optional.isEmpty()) {
             return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
         }
@@ -474,13 +494,25 @@ public final class AuthService {
             this.publishLoginFailed(uuid, username, "\u5bc6\u7801\u9519\u8bef");
             return AuthResult.failure("\u5bc6\u7801\u9519\u8bef");
         }
+        return this.completePasswordAuthentication(
+            lease, uuid, user, totpCode, address, deviceId);
+    }
+
+    private AuthResult completePasswordAuthentication(
+        AuthLease lease,
+        UUID uuid,
+        StarxUser user,
+        String totpCode,
+        InetAddress address,
+        String deviceId
+    ) {
         RiskDecisionEngine.Decision loginDecision =
-            this.loginDecision(user, deviceId, address);
+            this.loginDecision(uuid, user, deviceId, address);
         if (loginDecision.action() != RiskDecisionEngine.Action.ALLOW) {
             if (loginDecision.action() == RiskDecisionEngine.Action.REQUIRE_TOTP
                 && totpCode != null
                 && TotpGenerator.verify(user.totpSecret(), totpCode, Instant.now())) {
-                return this.authenticate(user, lease, AuthSession.State.GUEST);
+                return this.authenticate(uuid, user, lease, AuthSession.State.GUEST);
             }
             AuthSession.State pendingState =
                 loginDecision.action() == RiskDecisionEngine.Action.REQUIRE_WEB_APPROVAL
@@ -514,11 +546,15 @@ public final class AuthService {
             return AuthResult.success("\u8bf7\u8f93\u5165\u4e8c\u6b65\u9a8c\u8bc1\u7801", AuthSession.State.AUTHENTICATING);
         }
         this.bruteForceProtector.clear(uuid);
-        return this.authenticate(user, lease, AuthSession.State.GUEST);
+        return this.authenticate(uuid, user, lease, AuthSession.State.GUEST);
     }
 
     public AuthResult verifyTotp(AuthLease lease, UUID uuid, String code) {
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        if (!this.sessionManager.isState(
+                uuid, lease, AuthSession.State.AUTHENTICATING)) {
+            return AuthResult.failure("\u8bf7\u5148\u767b\u5f55");
+        }
+        Optional<StarxUser> optional = this.resolveSessionUser(uuid, lease);
         if (optional.isEmpty()) {
             return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
         }
@@ -526,15 +562,11 @@ public final class AuthService {
         if (user.totpSecret() == null) {
             return AuthResult.failure("\u672a\u5f00\u542f\u4e8c\u6b65\u9a8c\u8bc1");
         }
-        if (!this.sessionManager.isState(
-                uuid, lease, AuthSession.State.AUTHENTICATING)) {
-            return AuthResult.failure("\u8bf7\u5148\u767b\u5f55");
-        }
         if (!TotpGenerator.verify(user.totpSecret(), code, Instant.now())) {
             this.publishLoginFailed(uuid, user.username(), "\u4e8c\u6b65\u9a8c\u8bc1\u7801\u9519\u8bef");
             return AuthResult.failure("\u4e8c\u6b65\u9a8c\u8bc1\u7801\u9519\u8bef");
         }
-        return this.authenticate(user, lease, AuthSession.State.AUTHENTICATING);
+        return this.authenticate(uuid, user, lease, AuthSession.State.AUTHENTICATING);
     }
 
     public boolean isAuthenticated(AuthLease lease, UUID uuid) {
@@ -553,11 +585,11 @@ public final class AuthService {
                 uuid, lease, AuthSession.State.WEB_APPROVAL_PENDING)) {
             return AuthResult.failure("网页登录确认已过期，请重新连接。");
         }
-        StarxUser user = this.userRepository.findFullByUuid(uuid).orElse(null);
+        StarxUser user = this.resolveSessionUser(uuid, lease).orElse(null);
         if (user == null) {
             return AuthResult.failure("用户未注册");
         }
-        return this.authenticate(user, lease, AuthSession.State.WEB_APPROVAL_PENDING);
+        return this.authenticate(uuid, user, lease, AuthSession.State.WEB_APPROVAL_PENDING);
     }
 
     public AuthResult logout(UUID uuid) {
@@ -579,7 +611,8 @@ public final class AuthService {
         String passwordError = PasswordValidator.validate(newPassword);
         if (passwordError != null) return AuthResult.failure(passwordError);
         this.revokeCredentialTrust(uuid);
-        this.userRepository.updatePassword(uuid, PasswordHasher.hash(newPassword));
+        this.userRepository.markPasswordMigrated(
+            uuid, PasswordHasher.hash(newPassword), Instant.now());
         return AuthResult.success("\u5bc6\u7801\u4fee\u6539\u6210\u529f");
     }
 
@@ -624,7 +657,12 @@ public final class AuthService {
     }
 
     public boolean isUserRegistered(UUID uuid) {
-        return this.userRepository.existsByUuid(uuid);
+        return this.resolveConnectedUser(uuid).isPresent();
+    }
+
+    public boolean isUserRegistered(UUID uuid, String username) {
+        return this.isUserRegistered(uuid)
+            || (username != null && this.userRepository.findFullByUsername(username).isPresent());
     }
 
     public Optional<AuthSession.State> getSessionState(UUID uuid) {
@@ -637,7 +675,10 @@ public final class AuthService {
     }
 
     public boolean isTotpEnabled(UUID uuid) {
-        return this.userRepository.findTotpSecretByUuid(uuid).isPresent();
+        return this.resolveConnectedUser(uuid)
+            .map(StarxUser::totpSecret)
+            .filter(secret -> secret != null && !secret.isBlank())
+            .isPresent();
     }
 
     public AuthResult verifyRecoveryCode(AuthLease lease, UUID uuid, String recoveryCode) {
@@ -655,7 +696,7 @@ public final class AuthService {
                     uuid, lease, AuthSession.State.AUTHENTICATING)) {
                 return AuthResult.failure("\u8bf7\u5148\u767b\u5f55");
             }
-            Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+            Optional<StarxUser> optional = this.resolveSessionUser(uuid, lease);
             if (optional.isEmpty()) {
                 return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
             }
@@ -680,8 +721,8 @@ public final class AuthService {
             List<String> remaining = new ArrayList<>(hashes);
             remaining.remove(matchedIndex);
             if (this.userRepository.replaceRecoveryCodes(
-                    uuid, stored, encodeRecoveryCodeHashes(remaining))) {
-                return this.authenticate(user, lease, AuthSession.State.AUTHENTICATING);
+                    user.uuid(), stored, encodeRecoveryCodeHashes(remaining))) {
+                return this.authenticate(uuid, user, lease, AuthSession.State.AUTHENTICATING);
             }
         }
         return AuthResult.failure("\u6062\u590d\u7801\u5df2\u66f4\u65b0\uff0c\u8bf7\u91cd\u8bd5");
@@ -801,7 +842,8 @@ public final class AuthService {
         if (passwordError != null) return AuthResult.failure(passwordError);
         UUID playerId = optional.get().uuid();
         this.revokeCredentialTrust(playerId);
-        this.userRepository.updatePassword(playerId, PasswordHasher.hash(newPassword));
+        this.userRepository.markPasswordMigrated(
+            playerId, PasswordHasher.hash(newPassword), Instant.now());
         return AuthResult.success("\u5bc6\u7801\u5df2\u91cd\u7f6e");
     }
 
@@ -876,22 +918,34 @@ public final class AuthService {
         AuthLease lease,
         AuthSession.State expected
     ) {
-        if (!this.sessionManager.isState(user.uuid(), lease, expected)) {
+        return this.authenticate(user.uuid(), user, lease, expected);
+    }
+
+    private AuthResult authenticate(
+        UUID sessionUuid,
+        StarxUser user,
+        AuthLease lease,
+        AuthSession.State expected
+    ) {
+        if (!this.sessionManager.isState(sessionUuid, lease, expected)) {
             return AuthResult.failure("认证会话已过期，请重新连接。");
         }
         this.userRepository.updateLastLogin(user.uuid(), Instant.now());
         if (!this.sessionManager.transition(
-                user.uuid(), lease, expected, AuthSession.State.AUTHENTICATED)) {
+                sessionUuid, lease, expected, AuthSession.State.AUTHENTICATED)) {
             return AuthResult.failure("认证会话已过期，请重新连接。");
         }
-        this.bruteForceProtector.clear(user.uuid());
-        this.rememberTrustedDevice(user.uuid(), lease);
-        this.sessionManager.get(user.uuid(), lease)
+        this.bruteForceProtector.clear(sessionUuid);
+        if (!sessionUuid.equals(user.uuid())) {
+            this.bruteForceProtector.clear(user.uuid());
+        }
+        this.rememberTrustedDevice(user.uuid(), sessionUuid, lease);
+        this.sessionManager.get(sessionUuid, lease)
             .map(AuthSession::address)
             .filter(Objects::nonNull)
             .map(InetAddress::getHostAddress)
             .ifPresent(address -> this.recordSuccessfulLogin(
-                user.uuid(), address, "local", this.sessionDeviceId(user.uuid(), lease)));
+                user.uuid(), address, "local", this.sessionDeviceId(sessionUuid, lease)));
         this.eventBus.publish("player:login:success", Map.of("uuid", user.uuid(), "username", user.username()));
         return AuthResult.success("\u767b\u5f55\u6210\u529f", AuthSession.State.AUTHENTICATED);
     }
@@ -914,7 +968,7 @@ public final class AuthService {
     }
 
     private RiskDecisionEngine.Decision loginDecision(
-        StarxUser user, String deviceId, InetAddress address) {
+        UUID sessionUuid, StarxUser user, String deviceId, InetAddress address) {
         Instant now = Instant.now();
         boolean trustedDevice;
         boolean familiarRegion;
@@ -934,11 +988,11 @@ public final class AuthService {
                 familiarRegion,
                 user.totpSecret() != null && !user.totpSecret().isBlank(),
                 AddressRisk.score(address),
-                this.bruteForceProtector.getAttemptCount(user.uuid()),
+                this.bruteForceProtector.getAttemptCount(sessionUuid),
                 this.webLoginApprovals != null));
         if (decision.action() != RiskDecisionEngine.Action.ALLOW) {
             this.eventBus.publish("player:login:risk-step-up", Map.of(
-                "uuid", user.uuid(),
+                "uuid", sessionUuid,
                 "score", decision.score(),
                 "action", decision.action().name(),
                 "reasons", decision.reasons()));
@@ -946,11 +1000,42 @@ public final class AuthService {
         return decision;
     }
 
+    private Optional<StarxUser> resolveSessionUser(UUID connectionUuid, AuthLease lease) {
+        return this.sessionManager.get(connectionUuid, lease)
+            .flatMap(session -> this.resolveAccount(session.username(), connectionUuid));
+    }
+
+    private Optional<StarxUser> resolveConnectedUser(UUID connectionUuid) {
+        Optional<StarxUser> bySession = this.sessionManager.get(connectionUuid)
+            .flatMap(session -> this.resolveAccount(session.username(), connectionUuid));
+        return bySession.isPresent()
+            ? bySession
+            : this.userRepository.findFullByUuid(connectionUuid);
+    }
+
+    private Optional<StarxUser> resolveAccount(String username, UUID connectionUuid) {
+        Optional<StarxUser> byUuid = this.userRepository.findFullByUuid(connectionUuid);
+        if (byUuid.isPresent()) {
+            return byUuid;
+        }
+        if (username != null && !username.isBlank()) {
+            Optional<StarxUser> byUsername = this.userRepository.findFullByUsername(username);
+            if (byUsername.isPresent()) {
+                return byUsername;
+            }
+        }
+        return Optional.empty();
+    }
+
     private void rememberTrustedDevice(UUID playerId, AuthLease lease) {
+        this.rememberTrustedDevice(playerId, playerId, lease);
+    }
+
+    private void rememberTrustedDevice(UUID playerId, UUID sessionUuid, AuthLease lease) {
         if (this.trustedDevices == null) return;
-        String deviceId = this.sessionDeviceId(playerId, lease);
+        String deviceId = this.sessionDeviceId(sessionUuid, lease);
         if (deviceId == null || deviceId.isBlank()) return;
-        this.sessionManager.get(playerId, lease)
+        this.sessionManager.get(sessionUuid, lease)
             .map(AuthSession::address)
             .filter(Objects::nonNull)
             .ifPresent(address -> this.trustedDevices.observe(

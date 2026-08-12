@@ -63,6 +63,20 @@ class CommandNamingContractTest {
   }
 
   @Test
+  void passwordResetIsAnAdminOnlySubcommandWithoutPasswordEchoing() throws Exception {
+    Path sourcePath = Path.of(
+        "src/main/java/io/github/addxiaoyi/starx/velocity/module/admin/AdminCommandsModule.java");
+    String source = Files.readString(sourcePath);
+
+    assertTrue(source.contains("setpassword"), "sxadmin must expose setpassword");
+    assertTrue(source.contains("starx.password.reset"), "password reset needs a dedicated permission");
+    assertTrue(source.contains("resetPassword"), "command must reuse AuthService password reset");
+    assertTrue(source.contains("instanceof Player") || source.contains("ConsoleCommandSource"),
+        "command must distinguish console and player sources");
+    assertFalse(source.contains("newPassword" + " ="), "command must not copy or log the plaintext password");
+  }
+
+  @Test
   void currentDocumentationUsesRegisteredCommands() throws Exception {
     List<Path> docs = List.of(
         Path.of("../../README.md"),

@@ -75,6 +75,27 @@ final class AuthServicePremiumIdentityTest {
     }
   }
 
+  @Test
+  void ipBypassUsesTheStoredAccountUuidWhenPremiumUuidChanges() throws Exception {
+    String username = "PremiumUser";
+    UUID offlineUuid = offlineUuid(username);
+    UUID premiumUuid = UUID.randomUUID();
+    TestUsers users = new TestUsers(existingUser(offlineUuid, username));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getLoopbackAddress();
+    try {
+      AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+      assertTrue(auth.openConnection(lease, premiumUuid, username, address, "device-a"));
+      auth.recordSuccessfulLogin(offlineUuid, address.getHostAddress(), "local", "device-a");
+
+      assertTrue(auth.shouldBypassAuth(
+          premiumUuid, address.getHostAddress(), "device-a", false, false, false));
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
   private static StarxUser existingUser(UUID uuid, String username) {
     Instant created = Instant.parse("2026-01-01T00:00:00Z");
     return new StarxUser(

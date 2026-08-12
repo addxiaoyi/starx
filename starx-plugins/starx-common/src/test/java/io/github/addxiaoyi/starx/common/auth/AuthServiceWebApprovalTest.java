@@ -15,6 +15,7 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -63,6 +64,54 @@ class AuthServiceWebApprovalTest {
       assertTrue(sessions.isState(playerId, current, AuthSession.State.AUTHENTICATED));
       assertTrue(auth.isAuthenticated(current, playerId));
       assertTrue(auth.approveWebLogin(current, playerId).success());
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void webApprovalResolvesTheStoredAccountFromTheCurrentConnectionUsername() {
+    UUID accountUuid = UUID.randomUUID();
+    UUID connectionUuid = UUID.randomUUID();
+    AliasUsers users = new AliasUsers(new StarxUser(
+        accountUuid, "Alex", null, PasswordHasher.hash("ValidPassword_123"), null,
+        false, Instant.now(), null, null, List.of(), null, "local", "completed",
+        null, null, null, null, 0L, null, false));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+    AuthLease lease = AuthLease.create();
+    assertTrue(sessions.open(
+        connectionUuid, "Alex", InetAddress.getLoopbackAddress(), lease) != null);
+    assertTrue(sessions.transition(
+        connectionUuid, lease, AuthSession.State.GUEST, AuthSession.State.WEB_APPROVAL_PENDING));
+
+    try {
+      AuthResult result = auth.approveWebLogin(lease, connectionUuid);
+
+      assertTrue(result.success());
+      assertTrue(sessions.isState(
+          connectionUuid, lease, AuthSession.State.AUTHENTICATED));
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void webApprovalChecksTheLeaseBeforeLookingUpTheAccount() {
+    UUID connectionUuid = UUID.randomUUID();
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthService auth = new AuthService(new EmptyUsers(), new LocalEventBus(), sessions);
+    AuthLease current = AuthLease.create();
+    AuthLease expired = AuthLease.create();
+    assertTrue(sessions.open(
+        connectionUuid, "MissingUser", InetAddress.getLoopbackAddress(), current) != null);
+
+    try {
+      AuthResult result = auth.requestWebLoginApproval(expired, connectionUuid, "MissingUser");
+
+      assertFalse(result.success());
+      assertEquals("认证会话已过期，请重新连接。", result.message());
+      assertTrue(sessions.isState(connectionUuid, current, AuthSession.State.GUEST));
     } finally {
       sessions.shutdown();
     }
@@ -196,6 +245,46 @@ class AuthServiceWebApprovalTest {
       assertFalse(approvalRequested.get());
     } finally {
       sessions.shutdown();
+    }
+  }
+
+  private static final class AliasUsers extends JdbcUserRepository {
+    private final StarxUser user;
+
+    private AliasUsers(StarxUser user) {
+      super(null);
+      this.user = user;
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUuid(UUID uuid) {
+      return this.user.uuid().equals(uuid) ? Optional.of(this.user) : Optional.empty();
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUsername(String username) {
+      return this.user.username().equalsIgnoreCase(username)
+          ? Optional.of(this.user) : Optional.empty();
+    }
+
+    @Override
+    public void updateLastLogin(UUID uuid, Instant lastLogin) {
+    }
+  }
+
+  private static final class EmptyUsers extends JdbcUserRepository {
+    private EmptyUsers() {
+      super(null);
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUuid(UUID uuid) {
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUsername(String username) {
+      return Optional.empty();
     }
   }
 }

@@ -78,14 +78,37 @@ final class AuthCommandHandlerTest {
     assertFalse(auth.totpCalled);
   }
 
+  @Test
+  void websiteLoginLetsTheServiceDistinguishExpiredSessionsFromUnregisteredUsers() {
+    FakeOperations auth = new FakeOperations();
+    auth.registered = false;
+    auth.webApprovalResult = AuthResult.failure("认证会话已过期，请重新连接。");
+    AuthCommandHandler handler = new AuthCommandHandler(auth);
+    AuthLease lease = AuthLease.create();
+
+    AuthResult result = handler.handleCredentials(
+        lease,
+        UUID.randomUUID(),
+        "Player",
+        "/login web",
+        null,
+        null);
+
+    assertFalse(result.success());
+    assertEquals("认证会话已过期，请重新连接。", result.message());
+    assertTrue(auth.webApprovalCalled);
+  }
+
   private static final class FakeOperations implements AuthCommandHandler.AuthOperations {
     private boolean registered;
     private boolean loginCalled;
     private boolean totpCalled;
     private boolean recoveryCalled;
+    private boolean webApprovalCalled;
     private String password;
     private String code;
     private AuthLease lease;
+    private AuthResult webApprovalResult = AuthResult.failure("网页登录确认当前不可用，请稍后重试");
 
     @Override
     public boolean isUserRegistered(UUID playerId) {
@@ -117,6 +140,16 @@ final class AuthCommandHandlerTest {
       this.lease = lease;
       this.password = password;
       return AuthResult.success("registered");
+    }
+
+    @Override
+    public AuthResult requestWebLoginApproval(
+        AuthLease lease,
+        UUID playerId,
+        String username
+    ) {
+      this.webApprovalCalled = true;
+      return this.webApprovalResult;
     }
 
     @Override

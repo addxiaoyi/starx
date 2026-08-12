@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonParser;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 class UniAuthClientProfileTest {
@@ -57,5 +60,32 @@ class UniAuthClientProfileTest {
 
     assertFalse(login.success());
     assertFalse(login.requiresLocalMigration());
+  }
+
+  @Test
+  void remoteServiceFailureIsNotReportedAsCredentialFailure() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/publickey", exchange -> {
+      byte[] body = "temporarily unavailable".getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(503, body.length);
+      try (var output = exchange.getResponseBody()) {
+        output.write(body);
+      }
+    });
+    server.start();
+    try {
+      UniAuthClient.LoginResponse login = new UniAuthClient(new UniAuthConfig(
+          true,
+          "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+          "test-key",
+          1000,
+          true)).login("Alice", "password").join();
+
+      assertFalse(login.success());
+      assertTrue(login.serviceUnavailable());
+      assertEquals("认证服务暂时不可用，请稍后重试", login.message());
+    } finally {
+      server.stop(0);
+    }
   }
 }
