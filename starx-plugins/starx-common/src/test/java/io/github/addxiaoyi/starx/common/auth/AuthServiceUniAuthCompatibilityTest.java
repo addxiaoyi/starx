@@ -33,7 +33,7 @@ class AuthServiceUniAuthCompatibilityTest {
 
   @Test
   void localPasswordWinsWhenImportedAccountStillHasPendingMigration() {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("PendingUser");
     InMemoryUsers users = new InMemoryUsers(user(accountUuid, "PendingUser", "pending"));
     UniAuthConfig config = config();
     UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
@@ -49,7 +49,7 @@ class AuthServiceUniAuthCompatibilityTest {
   @NullSource
   @ValueSource(strings = {"pending", "legacy", "unknown"})
   void localPasswordWinsForAnyMigrationStateWhenHashIsPresent(String migrationState) {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("StateUser");
     InMemoryUsers users = new InMemoryUsers(user(accountUuid, "StateUser", migrationState));
     UniAuthConfig config = config();
     UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
@@ -63,7 +63,7 @@ class AuthServiceUniAuthCompatibilityTest {
 
   @Test
   void localLoginUsesTheCurrentConnectionUuidWhenStoredIdentityDiffers() throws Exception {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("PremiumUser");
     UUID connectionUuid = UUID.randomUUID();
     InMemoryUsers users = new InMemoryUsers(user(accountUuid, "PremiumUser", "completed"));
     UniAuthConfig config = config();
@@ -100,7 +100,7 @@ class AuthServiceUniAuthCompatibilityTest {
 
   @Test
   void uniauthPasswordStillRequiresTotpForAHighRiskConnection() throws Exception {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("RemoteUser");
     UUID connectionUuid = UUID.randomUUID();
     String secret = TotpGenerator.generateSecret();
     InMemoryUsers users = new InMemoryUsers(
@@ -257,6 +257,11 @@ class AuthServiceUniAuthCompatibilityTest {
         UniAuthConfig.ProfileSyncConfig.defaults());
   }
 
+  private static UUID offlineUuid(String username) {
+    return UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
+  }
+
   private static StarxUser user(UUID uuid, String username, String migrationState) {
     return user(uuid, username, migrationState, PasswordHasher.hash(PASSWORD));
   }
@@ -329,6 +334,11 @@ class AuthServiceUniAuthCompatibilityTest {
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
       // The remote-login test isolates the authentication decision from persistence details.
     }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return false;
+    }
   }
 
   private static final class MultipleUsers extends JdbcUserRepository {
@@ -361,6 +371,11 @@ class AuthServiceUniAuthCompatibilityTest {
     @Override
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
       // The fixture does not exercise persistence.
+    }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return false;
     }
   }
 }

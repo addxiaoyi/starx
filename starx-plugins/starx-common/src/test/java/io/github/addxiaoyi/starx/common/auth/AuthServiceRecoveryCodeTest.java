@@ -78,7 +78,7 @@ final class AuthServiceRecoveryCodeTest {
     this.sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
     LocalEventBus events = new LocalEventBus();
     this.auth = new AuthService(this.users, events, this.sessions);
-    this.playerId = UUID.randomUUID();
+    this.playerId = offlineUuid("player");
     this.users.create(new StarxUser(
         this.playerId,
         "player",
@@ -242,5 +242,10 @@ final class AuthServiceRecoveryCodeTest {
         AuthSession.State.GUEST,
         AuthSession.State.AUTHENTICATING));
     return lease;
+  }
+
+  private static UUID offlineUuid(String username) {
+    return UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + username).getBytes(java.nio.charset.StandardCharsets.UTF_8));
   }
 }

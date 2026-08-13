@@ -471,7 +471,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager.register(new MapModIntegrationModule(this, MapModIntegrationModule.Config.from(
             this.config.modules().get("starx.integrations.mapmod"))));
         this.moduleManager.register(new LuckPermsContextModule(this, bindingRepo));
-        this.moduleManager.register(new WelcomeModule(this, userRepository));
+        this.moduleManager.register(new WelcomeModule(this, userRepository, authModule.authService()));
         JdbcPunishmentRepository punishmentRepo = new JdbcPunishmentRepository(defaultDataSource);
         JdbcStaffNoteRepository staffNoteRepo = new JdbcStaffNoteRepository(defaultDataSource);
         JdbcReportRepository reportRepo = new JdbcReportRepository(defaultDataSource);
@@ -491,7 +491,8 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
                 ? Map.of("status", "not_started")
                 : this.networkAutomationService.snapshot());
             return Map.copyOf(metrics);
-        }, backendBridge.commandMailbox(), backendBridge::acceptHttpMessage, incidentTimeline, playerSessions, accountDeletions, crossDeviceApprovals, bindingChallenges, accountIdentities::accountId);
+        }, backendBridge.commandMailbox(), backendBridge::acceptHttpMessage, incidentTimeline, playerSessions,
+            accountDeletions, accountEraser, crossDeviceApprovals, bindingChallenges, accountIdentities::accountId);
         this.lifecycle.own("HTTP API", this.httpApiServer::stop);
         this.moduleManager.register(new AdminCommandsModule(this, userRepository, punishmentRepo, staffNoteRepo, reportRepo, announcementRepo, bindingRepo, bindingVerification, authModule.authService()));
         WebhookEventPublisher webhookPublisher = new WebhookEventPublisher(this.eventBus, this.webhookClient);

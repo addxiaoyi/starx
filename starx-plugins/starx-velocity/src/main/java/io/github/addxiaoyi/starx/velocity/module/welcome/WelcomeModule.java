@@ -22,6 +22,7 @@ import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.player.ServerPostConnectEvent;
 import com.velocitypowered.api.proxy.Player;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
+import io.github.addxiaoyi.starx.common.auth.AuthService;
 import io.github.addxiaoyi.starx.common.model.StarxUser;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
@@ -43,20 +44,35 @@ implements VelocityModule {
     private static final Logger LOGGER = Logger.getLogger(WelcomeModule.class.getName());
     private final StarxVelocityPlugin plugin;
     private final JdbcUserRepository userRepository;
+    private final AuthService authService;
     private final Map<UUID, Instant> loginTimestamps = new ConcurrentHashMap<UUID, Instant>();
+    private final Map<UUID, UUID> accountIds = new ConcurrentHashMap<UUID, UUID>();
     private final Config config;
     private WelcomeListener listener;
 
     public WelcomeModule(StarxVelocityPlugin plugin, JdbcUserRepository userRepository) {
         this.plugin = plugin;
         this.userRepository = userRepository;
+        this.authService = null;
         this.config = Config.defaultConfig();
     }
 
     public WelcomeModule(StarxVelocityPlugin plugin, JdbcUserRepository userRepository, Config config) {
         this.plugin = plugin;
         this.userRepository = userRepository;
+        this.authService = null;
         this.config = config;
+    }
+
+    public WelcomeModule(
+        StarxVelocityPlugin plugin,
+        JdbcUserRepository userRepository,
+        AuthService authService
+    ) {
+        this.plugin = plugin;
+        this.userRepository = userRepository;
+        this.authService = authService;
+        this.config = Config.defaultConfig();
     }
 
     @Override
@@ -80,6 +96,7 @@ implements VelocityModule {
             this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
         }
         this.loginTimestamps.clear();
+        this.accountIds.clear();
     }
 
     private void onPlayerJoin(Player player) {
@@ -88,8 +105,12 @@ implements VelocityModule {
         this.loginTimestamps.put(uuid, Instant.now());
         String ip = this.getPlayerIp(player);
         LocalAddressInfo currentAddress = LocalAddressInfo.parse(ip);
-        this.saveLoginAddress(uuid, currentAddress);
-        Optional<StarxUser> userOpt = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> userOpt = this.authService == null
+            ? this.userRepository.findFullByUuid(uuid)
+            : this.authService.findConnectedUser(uuid);
+        UUID accountUuid = userOpt.map(StarxUser::uuid).orElse(uuid);
+        this.accountIds.put(uuid, accountUuid);
+        this.saveLoginAddress(accountUuid, currentAddress);
         if (userOpt.isPresent()) {
             StarxUser user = userOpt.get();
             this.sendWelcomeMessage(player, user, currentAddress);
@@ -100,9 +121,13 @@ implements VelocityModule {
 
     private void onPlayerQuit(Player player) {
         UUID uuid = player.getUniqueId();
+        UUID accountUuid = this.accountIds.remove(uuid);
+        if (accountUuid == null) {
+            accountUuid = uuid;
+        }
         Instant loginTime = this.loginTimestamps.remove(uuid);
         if (loginTime != null) {
-            this.recordSession(uuid, loginTime, Instant.now());
+            this.recordSession(accountUuid, loginTime, Instant.now());
         }
     }
 

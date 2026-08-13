@@ -71,4 +71,22 @@ class JdbcBindingChallengeRepositoryTest {
     assertTrue(repo.transition(consuming, BindingState.SENT, BindingAction.CONFIRM, 3L));
     assertFalse(repo.transition(consuming, BindingState.CONFIRMED, BindingAction.CONSUME, 11L));
   }
+
+  @Test
+  void executionCannotBeAcquiredAfterAConfirmedChallengeExpires() throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("confirmed-expiry.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute("CREATE TABLE starx_accounts (account_id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL)");
+      sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
+      sql.execute("INSERT INTO starx_accounts VALUES ('account-1', 1)");
+    }
+    JdbcBindingChallengeRepository repo = new JdbcBindingChallengeRepository(source);
+    String id = repo.create("account-1", "EMAIL", "hash-confirmed", 1L, 10L);
+    assertTrue(repo.transition(id, BindingState.CREATED, BindingAction.SEND, 2L));
+    assertTrue(repo.transition(id, BindingState.SENT, BindingAction.CONFIRM, 3L));
+
+    assertFalse(repo.acquireExecution(id, "owner-1", 11L, 20L));
+    assertEquals(BindingState.CONFIRMED, repo.find(id).orElseThrow().state());
+  }
 }

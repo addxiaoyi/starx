@@ -166,7 +166,9 @@ final class AuthFlowIndex<P, S, D> {
 
   boolean requiresAuth(P player) {
     Flow<S, D> flow = this.flow(player);
-    return flow != null && flow.state().get().phase() != Phase.COMPLETE;
+    return flow != null
+        && flow.state().get().phase() != Phase.COMPLETE
+        && flow.state().get().phase() != Phase.DENIED;
   }
 
   boolean requiresInput(P player) {

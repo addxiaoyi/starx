@@ -8,9 +8,23 @@ import org.junit.jupiter.api.Test;
 final class AuthAdmissionPolicyTest {
 
   @Test
-  void autoLoginRequiresPremiumOrTrustedExternalIdentity() {
-    assertTrue(AuthAdmissionPolicy.canAutoLogin(true, false));
-    assertTrue(AuthAdmissionPolicy.canAutoLogin(false, true));
-    assertFalse(AuthAdmissionPolicy.canAutoLogin(false, false));
+  void premiumLoginRequiresThePremiumBypassFlag() {
+    assertTrue(AuthAdmissionPolicy.isPremiumAutoLogin(true, true));
+    assertFalse(AuthAdmissionPolicy.isPremiumAutoLogin(true, false));
+    assertFalse(AuthAdmissionPolicy.isPremiumAutoLogin(false, true));
+  }
+
+  @Test
+  void floodgateLoginRequiresTheFloodgateBypassFlag() {
+    assertTrue(AuthAdmissionPolicy.isFloodgateAutoLogin(true, true));
+    assertFalse(AuthAdmissionPolicy.isFloodgateAutoLogin(true, false));
+    assertFalse(AuthAdmissionPolicy.isFloodgateAutoLogin(false, true));
+  }
+
+  @Test
+  void websiteBindingLoginRequiresTheSkinSiteBypassFlag() {
+    assertTrue(AuthAdmissionPolicy.isSkinSiteAutoLogin(true, true));
+    assertFalse(AuthAdmissionPolicy.isSkinSiteAutoLogin(true, false));
+    assertFalse(AuthAdmissionPolicy.isSkinSiteAutoLogin(false, true));
   }
 }

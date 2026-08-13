@@ -20,6 +20,7 @@ import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 import io.github.addxiaoyi.starx.common.database.JdbcVoteRepository;
 import io.github.addxiaoyi.starx.common.session.JdbcPlayerSessionRepository;
 import io.github.addxiaoyi.starx.common.account.JdbcAccountDeletionRepository;
+import io.github.addxiaoyi.starx.common.account.JdbcAccountErasureRepository;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendNodeRegistry;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendCommandMailbox;
@@ -84,6 +85,7 @@ public final class HttpApiServer implements RouteRegistrar {
     private final IncidentTimeline incidentTimeline;
     private final JdbcPlayerSessionRepository playerSessions;
     private final JdbcAccountDeletionRepository accountDeletions;
+    private final JdbcAccountErasureRepository accountEraser;
     private final CrossDeviceApprovalService crossDeviceApprovals;
     private final BindingChallengeService bindingChallenges;
     private final Function<UUID, String> accountIdResolver;
@@ -124,6 +126,7 @@ public final class HttpApiServer implements RouteRegistrar {
             IncidentTimeline incidentTimeline,
             JdbcPlayerSessionRepository playerSessions,
             JdbcAccountDeletionRepository accountDeletions,
+            JdbcAccountErasureRepository accountEraser,
             CrossDeviceApprovalService crossDeviceApprovals,
             BindingChallengeService bindingChallenges,
             Function<UUID, String> accountIdResolver) {
@@ -151,6 +154,7 @@ public final class HttpApiServer implements RouteRegistrar {
         this.incidentTimeline = Objects.requireNonNull(incidentTimeline, "incidentTimeline");
         this.playerSessions = Objects.requireNonNull(playerSessions, "playerSessions");
         this.accountDeletions = Objects.requireNonNull(accountDeletions, "accountDeletions");
+        this.accountEraser = Objects.requireNonNull(accountEraser, "accountEraser");
         this.crossDeviceApprovals = Objects.requireNonNull(
                 crossDeviceApprovals, "crossDeviceApprovals");
         this.bindingChallenges = Objects.requireNonNull(bindingChallenges, "bindingChallenges");
@@ -223,7 +227,8 @@ public final class HttpApiServer implements RouteRegistrar {
             } catch (IllegalArgumentException error) {
                 log.info("Cross-device approval disabled because no public website origin is configured: {}", error.getMessage());
             }
-            new DeleteUserHandler(this.authService).register(this, sensitiveAuth);
+            new DeleteUserHandler(this.authService, this.userRepository, this.accountEraser)
+                    .register(this, sensitiveAuth);
             new BindingUnlinkHandler(this.bindingRepo).register(this, sensitiveAuth);
             new AccountDeletionHandler(this.accountDeletions, this.userRepository)
                     .register(this, sensitiveAuth);

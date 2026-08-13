@@ -174,7 +174,7 @@ public final class UniAuthClient {
     if (code == 200) {
       PlayerProfileResponse profile = parseProfileResponse(json);
       return new LoginResponse(
-          true, "登录成功", profile.externalUserId(), profile.email(), false);
+          true, "登录成功", profile.externalUserId(), profile.email(), false, false, profile);
     }
     if (code == 403) {
       return new LoginResponse(true, "邮箱未验证，已转为本地认证", null, null, true);
@@ -340,14 +340,25 @@ public final class UniAuthClient {
       String userId,
       String email,
       boolean requiresLocalMigration,
-      boolean serviceUnavailable) {
+      boolean serviceUnavailable,
+      PlayerProfileResponse profile) {
+    public LoginResponse(
+        boolean success,
+        String message,
+        String userId,
+        String email,
+        boolean requiresLocalMigration,
+        boolean serviceUnavailable) {
+      this(success, message, userId, email, requiresLocalMigration, serviceUnavailable, null);
+    }
+
     public LoginResponse(
         boolean success,
         String message,
         String userId,
         String email,
         boolean requiresLocalMigration) {
-      this(success, message, userId, email, requiresLocalMigration, false);
+      this(success, message, userId, email, requiresLocalMigration, false, null);
     }
   }
 

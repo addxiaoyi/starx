@@ -80,10 +80,12 @@ public final class BindingChallengeService {
     BindingChallenge challenge = challenges.findExecutable(
         requireText(kind, "kind"), hash(kind, requireToken(rawToken))).orElse(null);
     if (challenge == null) return null;
-    if (challenge.state() == BindingState.CONFIRMED) return challenge;
-    if (now.toEpochMilli() <= challenge.expiresAt()) return challenge;
-    challenges.transition(
-        challenge.id(), BindingState.SENT, BindingAction.EXPIRE, now.toEpochMilli());
+    long nowMillis = now.toEpochMilli();
+    if (nowMillis <= challenge.expiresAt()) return challenge;
+    if (challenge.state() == BindingState.SENT) {
+      challenges.transition(
+          challenge.id(), BindingState.SENT, BindingAction.EXPIRE, nowMillis);
+    }
     return null;
   }
 

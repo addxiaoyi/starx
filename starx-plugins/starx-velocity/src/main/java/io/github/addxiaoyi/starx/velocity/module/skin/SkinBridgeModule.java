@@ -435,7 +435,7 @@ implements VelocityModule {
         if (backendTargets < 0) {
             throw new IllegalArgumentException("backendTargets must not be negative");
         }
-        return locallyPersisted || backendTargets > 0 || appliedToOnlinePlayer;
+        return locallyPersisted || backendTargets > 0;
     }
 
     private final class Listener {

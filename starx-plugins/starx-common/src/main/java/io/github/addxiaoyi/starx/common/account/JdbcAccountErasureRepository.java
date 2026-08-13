@@ -28,6 +28,7 @@ public final class JdbcAccountErasureRepository {
         delete(connection, "DELETE FROM starx_ip_sessions WHERE player_uuid = ?", playerUuid);
         delete(connection, "DELETE FROM starx_binding_audit WHERE player_uuid = ?", playerUuid);
         delete(connection, "DELETE FROM starx_player_bindings WHERE player_uuid = ?", playerUuid);
+        delete(connection, "DELETE FROM starx_website_bindings WHERE player_uuid = ?", playerUuid);
         deletePlayerReferences(connection, playerUuid);
         delete(connection, "DELETE FROM starx_users WHERE uuid = ?", playerUuid);
 

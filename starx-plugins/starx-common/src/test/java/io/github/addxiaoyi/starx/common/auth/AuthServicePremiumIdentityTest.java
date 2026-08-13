@@ -76,6 +76,53 @@ final class AuthServicePremiumIdentityTest {
   }
 
   @Test
+  void premiumTrustedLoginCannotClaimAnUnrelatedAccountWithTheSameUsername() throws Exception {
+    String username = "PremiumUser";
+    UUID unrelatedUuid = UUID.randomUUID();
+    UUID premiumUuid = UUID.randomUUID();
+    TestUsers users = new TestUsers(existingUser(unrelatedUuid, username));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    try {
+      AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+      assertTrue(auth.openConnection(lease, premiumUuid, username, InetAddress.getLoopbackAddress()));
+
+      AuthResult result = auth.autoLoginTrusted(
+          lease,
+          premiumUuid,
+          username,
+          InetAddress.getLoopbackAddress(),
+          "premium",
+          true);
+
+      assertFalse(result.success());
+      assertEquals(0, users.createCalls);
+      assertEquals(null, users.updatedUuid);
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void connectedUserLookupCannotResolveAnUnrelatedUuidByUsername() throws Exception {
+    String username = "PremiumUser";
+    UUID unrelatedUuid = UUID.randomUUID();
+    UUID connectionUuid = UUID.randomUUID();
+    TestUsers users = new TestUsers(existingUser(unrelatedUuid, username));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    try {
+      AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+      assertTrue(auth.openConnection(lease, connectionUuid, username, InetAddress.getLoopbackAddress()));
+
+      assertFalse(auth.findConnectedUser(connectionUuid).isPresent());
+      assertFalse(auth.isUserRegistered(connectionUuid, username));
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
   void ipBypassUsesTheStoredAccountUuidWhenPremiumUuidChanges() throws Exception {
     String username = "PremiumUser";
     UUID offlineUuid = offlineUuid(username);
@@ -91,6 +138,26 @@ final class AuthServicePremiumIdentityTest {
 
       assertTrue(auth.shouldBypassAuth(
           premiumUuid, address.getHostAddress(), "device-a", false, false, false));
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void resolvesTheStoredAccountForAChangedConnectionUuid() throws Exception {
+    String username = "PremiumUser";
+    UUID offlineUuid = offlineUuid(username);
+    UUID premiumUuid = UUID.randomUUID();
+    TestUsers users = new TestUsers(existingUser(offlineUuid, username));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    try {
+      AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+      assertTrue(auth.openConnection(lease, premiumUuid, username, InetAddress.getLoopbackAddress()));
+
+      StarxUser resolved = auth.findConnectedUser(premiumUuid).orElseThrow();
+
+      assertEquals(offlineUuid, resolved.uuid());
     } finally {
       sessions.shutdown();
     }

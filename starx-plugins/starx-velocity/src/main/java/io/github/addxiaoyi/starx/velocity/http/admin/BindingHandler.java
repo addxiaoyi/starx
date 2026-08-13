@@ -104,8 +104,7 @@ implements AdminHandler {
         UUID playerUuid = this.verificationService.verifyAndExecute(req.code, (operationId, candidate) -> {
             PlayerBinding binding = new PlayerBinding(
                 candidate, req.qqId, null, System.currentTimeMillis());
-            this.repo.save(binding);
-            return true;
+            return this.repo.save(binding);
         });
         if (playerUuid == null) {
             ctx.status(404).json(Map.of("error", "Invalid or expired code"));

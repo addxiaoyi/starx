@@ -69,14 +69,21 @@ implements AdminHandler {
             ctx.status(409).json(Map.of("error", "verified identity does not match player"));
             return;
         }
-        UserDto updated = UserDto.builder().uuid(existing.uuid()).username(existing.username()).email(existing.email()).premium(existing.premium()).createdAt(existing.createdAt()).lastLoginAt(existing.lastLoginAt()).externalUserId(externalUserId).build();
-        this.users.save(updated);
-        this.users.saveWebsiteBinding(existing.uuid(), existing.username(), externalUserId, trusted);
+        try {
+            this.users.linkExternalIdentity(existing.uuid(), existing.username(), externalUserId, trusted);
+        } catch (JdbcUserRepository.ExternalIdentityConflictException error) {
+            ctx.status(409).json(Map.of("error", "external identity already linked"));
+            return;
+        }
         this.eventBus.publish("link:external-user", Map.of(
             "username", req.username,
             "externalUserId", externalUserId == null ? "" : externalUserId,
-            "linked", externalUserId != null));
-        ctx.status(200).json(Map.of("success", true, "linked", externalUserId != null));
+            "linked", externalUserId != null,
+            "verified", trusted));
+        ctx.status(200).json(Map.of(
+            "success", true,
+            "linked", externalUserId != null,
+            "verified", trusted));
     }
 
     static String normalizeExternalUserId(String value) {

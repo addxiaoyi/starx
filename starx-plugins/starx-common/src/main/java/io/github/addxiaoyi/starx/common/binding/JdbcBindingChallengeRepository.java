@@ -87,7 +87,7 @@ public final class JdbcBindingChallengeRepository {
     if (leaseUntil <= now) throw new IllegalArgumentException("leaseUntil must be after now");
     String sql = "UPDATE starx_binding_challenges SET state = ?, "
         + "confirmed_at = COALESCE(confirmed_at, ?), execution_owner = ?, execution_lease_until = ? "
-        + "WHERE challenge_id = ? AND ((state = ? AND expires_at >= ?) "
+        + "WHERE challenge_id = ? AND expires_at >= ? AND ((state = ? AND expires_at >= ?) "
         + "OR (state = ? AND (execution_lease_until IS NULL OR execution_lease_until <= ?)))";
     try (Connection connection = dataSource.getConnection();
          PreparedStatement update = connection.prepareStatement(sql)) {
@@ -96,10 +96,11 @@ public final class JdbcBindingChallengeRepository {
       update.setString(3, requireText(owner, "owner"));
       update.setLong(4, leaseUntil);
       update.setString(5, requireText(id, "id"));
-      update.setString(6, BindingState.SENT.name());
-      update.setLong(7, now);
-      update.setString(8, BindingState.CONFIRMED.name());
-      update.setLong(9, now);
+      update.setLong(6, now);
+      update.setString(7, BindingState.SENT.name());
+      update.setLong(8, now);
+      update.setString(9, BindingState.CONFIRMED.name());
+      update.setLong(10, now);
       return update.executeUpdate() == 1;
     } catch (SQLException error) {
       throw new IllegalStateException("Failed to acquire binding challenge execution", error);

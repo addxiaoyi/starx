@@ -8,6 +8,7 @@ import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -103,6 +104,20 @@ public final class SessionManager {
 
     public void remove(UUID uuid) {
         this.sessions.remove(uuid);
+    }
+
+    public List<UUID> sessionIdsForUsername(String username) {
+        if (username == null || username.isBlank()) {
+            return List.of();
+        }
+        return this.sessions.entrySet().stream()
+            .filter(entry -> entry.getValue().username().equalsIgnoreCase(username))
+            .map(Map.Entry::getKey)
+            .toList();
+    }
+
+    public void removeByUsername(String username) {
+        this.sessionIdsForUsername(username).forEach(this.sessions::remove);
     }
 
     public boolean remove(UUID uuid, AuthLease lease) {

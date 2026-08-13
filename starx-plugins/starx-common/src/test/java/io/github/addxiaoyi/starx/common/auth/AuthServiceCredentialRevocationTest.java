@@ -66,6 +66,29 @@ class AuthServiceCredentialRevocationTest {
   }
 
   @Test
+  void passwordWriteFailurePreservesExistingTrust() throws Exception {
+    Fixture fixture = this.fixture();
+    StarxUser account = fixture.users.findFullByUuid(fixture.playerId).orElseThrow();
+    AuthService auth = new AuthService(
+        new FailingPasswordUserRepository(account), new LocalEventBus(), fixture.sessions,
+        fixture.ipSessions, fixture.devices);
+    try {
+      AuthResult result = auth.changePassword(
+          fixture.playerId, fixture.oldPassword, "NewPassword_456");
+
+      assertFalse(result.success());
+      assertTrue(fixture.sessions.get(fixture.playerId).isPresent());
+      assertTrue(fixture.ipSessions.hasRecentSessionMinutes(
+          fixture.playerId, fixture.address.getHostAddress(), fixture.deviceId, 30));
+      assertFalse(fixture.devices.listActive(fixture.playerId, Instant.now()).isEmpty());
+      assertTrue(fixture.users.findFullByUuid(fixture.playerId).orElseThrow()
+          .trustedDevices().contains(fixture.deviceId));
+    } finally {
+      fixture.sessions.shutdown();
+    }
+  }
+
+  @Test
   void revocationFailureNeverCommitsTheNewPasswordFirst() throws Exception {
     Fixture fixture = this.fixture();
     IpSessionStore failingStore = new IpSessionStore() {
@@ -234,6 +257,31 @@ class AuthServiceCredentialRevocationTest {
         throw new IllegalStateException("revocation unavailable");
       }
     };
+  }
+
+  private static final class FailingPasswordUserRepository extends JdbcUserRepository {
+    private final StarxUser account;
+
+    private FailingPasswordUserRepository(StarxUser account) {
+      super(null);
+      this.account = account;
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUuid(UUID uuid) {
+      return this.account.uuid().equals(uuid) ? Optional.of(this.account) : Optional.empty();
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUsername(String username) {
+      return this.account.username().equalsIgnoreCase(username)
+          ? Optional.of(this.account) : Optional.empty();
+    }
+
+    @Override
+    public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
+      throw new IllegalStateException("database unavailable");
+    }
   }
 
   private Fixture fixture() throws Exception {

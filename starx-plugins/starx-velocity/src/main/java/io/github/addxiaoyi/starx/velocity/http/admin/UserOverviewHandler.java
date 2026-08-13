@@ -69,7 +69,7 @@ public final class UserOverviewHandler implements AdminHandler {
     Map<String, Object> linked = new LinkedHashMap<>();
     linked.put("qqBound", binding != null && binding.qqId() != null && !binding.qqId().isBlank());
     linked.put("discordBound", binding != null && binding.discordId() != null && !binding.discordId().isBlank());
-    linked.put("websiteBound", user.externalUserId() != null && !user.externalUserId().isBlank());
+    linked.put("websiteBound", users.hasTrustedWebsiteBinding(user.uuid(), user.username()));
 
     Map<String, Object> play = new LinkedHashMap<>();
     play.put("totalMillis", session == null ? 0L : session.totalPlaytime());

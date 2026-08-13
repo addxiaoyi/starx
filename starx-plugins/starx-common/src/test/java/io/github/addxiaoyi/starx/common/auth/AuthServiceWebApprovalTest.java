@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.common.auth;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,6 +42,13 @@ class AuthServiceWebApprovalTest {
             last_login_isp VARCHAR(255), last_login_location VARCHAR(255), total_playtime BIGINT,
             last_logout_at TIMESTAMP, welcome_message_shown BOOLEAN)
           """);
+      sql.execute("""
+          CREATE TABLE starx_website_bindings (
+            player_uuid VARCHAR(36) NOT NULL,
+            username VARCHAR(255) NOT NULL,
+            verified BOOLEAN NOT NULL DEFAULT FALSE,
+            PRIMARY KEY (player_uuid, username))
+          """);
     }
     UUID playerId = UUID.randomUUID();
     JdbcUserRepository users = new JdbcUserRepository(source);
@@ -71,7 +79,7 @@ class AuthServiceWebApprovalTest {
 
   @Test
   void webApprovalResolvesTheStoredAccountFromTheCurrentConnectionUsername() {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("Alex");
     UUID connectionUuid = UUID.randomUUID();
     AliasUsers users = new AliasUsers(new StarxUser(
         accountUuid, "Alex", null, PasswordHasher.hash("ValidPassword_123"), null,
@@ -117,8 +125,13 @@ class AuthServiceWebApprovalTest {
     }
   }
 
+  private static UUID offlineUuid(String username) {
+    return UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + username).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  }
+
   @Test
-  void highRiskLoginRequestsWebApprovalWithoutEnablingTotp() throws Exception {
+  void highRiskUnboundLoginFallsBackToLocalAuthentication() throws Exception {
     SQLiteDataSource source = new SQLiteDataSource();
     source.setUrl("jdbc:sqlite:" + this.tempDir.resolve("risk-web-approval.db"));
     try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
@@ -131,6 +144,13 @@ class AuthServiceWebApprovalTest {
             migration_state VARCHAR(20), password_migrated_at TIMESTAMP, last_login_ip VARCHAR(255),
             last_login_isp VARCHAR(255), last_login_location VARCHAR(255), total_playtime BIGINT,
             last_logout_at TIMESTAMP, welcome_message_shown BOOLEAN)
+          """);
+      sql.execute("""
+          CREATE TABLE starx_website_bindings (
+            player_uuid VARCHAR(36) NOT NULL,
+            username VARCHAR(255) NOT NULL,
+            verified BOOLEAN NOT NULL DEFAULT FALSE,
+            PRIMARY KEY (player_uuid, username))
           """);
     }
     UUID playerId = UUID.randomUUID();
@@ -156,9 +176,9 @@ class AuthServiceWebApprovalTest {
           lease, playerId, "Alex", password, null, address, "new-device");
 
       assertTrue(result.success());
-      assertEquals(AuthSession.State.WEB_APPROVAL_PENDING, result.state());
-      assertEquals(lease, requestedLease.get());
-      assertTrue(result.webApprovalUrl().contains("action=approve_login"));
+      assertEquals(AuthSession.State.AUTHENTICATED, result.state());
+      assertNull(requestedLease.get());
+      assertNull(result.webApprovalUrl());
       assertTrue(users.findFullByUuid(playerId).orElseThrow().totpSecret() == null);
     } finally {
       sessions.shutdown();
@@ -166,7 +186,7 @@ class AuthServiceWebApprovalTest {
   }
 
   @Test
-  void registeredPlayerCanStartWebsiteLoginWithoutEnteringGamePassword() throws Exception {
+  void unboundPlayerCannotStartWebsiteLogin() throws Exception {
     SQLiteDataSource source = new SQLiteDataSource();
     source.setUrl("jdbc:sqlite:" + this.tempDir.resolve("direct-web-login.db"));
     try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
@@ -179,6 +199,13 @@ class AuthServiceWebApprovalTest {
             migration_state VARCHAR(20), password_migrated_at TIMESTAMP, last_login_ip VARCHAR(255),
             last_login_isp VARCHAR(255), last_login_location VARCHAR(255), total_playtime BIGINT,
             last_logout_at TIMESTAMP, welcome_message_shown BOOLEAN)
+          """);
+      sql.execute("""
+          CREATE TABLE starx_website_bindings (
+            player_uuid VARCHAR(36) NOT NULL,
+            username VARCHAR(255) NOT NULL,
+            verified BOOLEAN NOT NULL DEFAULT FALSE,
+            PRIMARY KEY (player_uuid, username))
           """);
     }
     UUID playerId = UUID.randomUUID();
@@ -199,9 +226,20 @@ class AuthServiceWebApprovalTest {
       AuthResult result = new AuthCommandHandler(auth).handleCredentials(
           lease, playerId, "Alex", "/login web", address, "device-a");
 
-      assertTrue(result.success());
-      assertEquals(AuthSession.State.WEB_APPROVAL_PENDING, result.state());
-      assertTrue(result.webApprovalUrl().contains("action=approve_login"));
+      assertFalse(result.success());
+      assertEquals("请先完成网站绑定，再使用网站登录", result.message());
+      assertEquals(AuthSession.State.GUEST, sessions.get(playerId, lease).orElseThrow().state());
+
+      try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+        sql.execute("INSERT INTO starx_website_bindings(player_uuid, username, verified) "
+            + "VALUES ('" + playerId + "', 'Alex', TRUE)");
+      }
+      AuthResult boundResult = new AuthCommandHandler(auth).handleCredentials(
+          lease, playerId, "Alex", "/login web", address, "device-a");
+
+      assertTrue(boundResult.success());
+      assertEquals(AuthSession.State.WEB_APPROVAL_PENDING, boundResult.state());
+      assertTrue(boundResult.webApprovalUrl().contains("action=approve_login"));
     } finally {
       sessions.shutdown();
     }

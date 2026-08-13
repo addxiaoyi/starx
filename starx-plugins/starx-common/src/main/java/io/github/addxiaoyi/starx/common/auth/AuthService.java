@@ -23,6 +23,7 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import java.lang.reflect.Type;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -54,6 +55,7 @@ public final class AuthService {
     private final Map<UUID, PendingTotp> pendingTotp = new ConcurrentHashMap<>();
     private final RiskDecisionEngine riskDecisions = new RiskDecisionEngine();
     private volatile WebLoginApprovalGateway webLoginApprovals;
+    private volatile boolean totpAvailable = true;
 
     // 免密配置
     private int ipBypassMinutes = 30;  // 同 IP 免密有效期（分钟）
@@ -229,6 +231,10 @@ public final class AuthService {
         this.premiumBypass = enabled;
     }
 
+    public void setTotpAvailable(boolean enabled) {
+        this.totpAvailable = enabled;
+    }
+
     /**
      * 设置是否启用基岩版免密
      */
@@ -286,6 +292,10 @@ public final class AuthService {
         if (optional.isEmpty()) {
             return AuthResult.failure("请先注册游戏账号，再使用网站登录");
         }
+        StarxUser user = optional.get();
+        if (!this.userRepository.hasTrustedWebsiteBinding(user.uuid(), user.username())) {
+            return AuthResult.failure("请先完成网站绑定，再使用网站登录");
+        }
         if (!this.sessionManager.transition(
                 uuid, lease, AuthSession.State.GUEST, AuthSession.State.WEB_APPROVAL_PENDING)) {
             return AuthResult.failure("认证会话已过期，请重新连接。");
@@ -333,11 +343,11 @@ public final class AuthService {
         if (account.isEmpty()) {
             Optional<StarxUser> sameName = this.userRepository.findFullByUsername(sessionUsername);
             if (sameName.isPresent()) {
-                if (!premium) {
+                UUID offlineUuid = UUID.nameUUIDFromBytes(
+                    ("OfflinePlayer:" + sessionUsername).getBytes(StandardCharsets.UTF_8));
+                if (!premium || !sameName.get().uuid().equals(offlineUuid)) {
                     return AuthResult.failure("该用户名已注册，请使用原账号登录");
                 }
-                // FastLogin may expose the official UUID while StarX still owns the old offline UUID.
-                // Keep the stored identity stable so UUID-bound data and device hashes survive.
                 account = sameName;
             }
         }
@@ -601,26 +611,24 @@ public final class AuthService {
     }
 
     public AuthResult changePassword(UUID uuid, String oldPassword, String newPassword) {
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> optional = this.resolveConnectedUser(uuid);
         if (optional.isEmpty()) {
             return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
         }
-        if (!PasswordHasher.verify(oldPassword, optional.get().passwordHash())) {
+        StarxUser user = optional.get();
+        if (!PasswordHasher.verify(oldPassword, user.passwordHash())) {
             return AuthResult.failure("\u539f\u5bc6\u7801\u9519\u8bef");
         }
         String passwordError = PasswordValidator.validate(newPassword);
         if (passwordError != null) return AuthResult.failure(passwordError);
-        this.revokeCredentialTrust(uuid);
-        this.userRepository.markPasswordMigrated(
-            uuid, PasswordHasher.hash(newPassword), Instant.now());
-        return AuthResult.success("\u5bc6\u7801\u4fee\u6539\u6210\u529f");
+        return this.changePasswordAndRevokeTrust(user, newPassword, "\u5bc6\u7801\u4fee\u6539\u6210\u529f");
     }
 
     public AuthResult addTrustedDevice(UUID uuid, String deviceId) {
         if (deviceId == null || deviceId.isBlank()) {
             return AuthResult.failure("\u8bbe\u5907\u6807\u8bc6\u4e0d\u80fd\u4e3a\u7a7a");
         }
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> optional = this.resolveConnectedUser(uuid);
         if (optional.isEmpty()) {
             return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
         }
@@ -629,12 +637,12 @@ public final class AuthService {
             return AuthResult.success("\u8bbe\u5907\u5df2\u4fe1\u4efb");
         }
         devices.add(deviceId);
-        this.userRepository.updateTrustedDevices(uuid, devices);
+        this.userRepository.updateTrustedDevices(optional.get().uuid(), devices);
         return AuthResult.success("\u8bbe\u5907\u5df2\u6dfb\u52a0\u4fe1\u4efb");
     }
 
     public AuthResult removeTrustedDevice(UUID uuid, String deviceId) {
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> optional = this.resolveConnectedUser(uuid);
         if (optional.isEmpty()) {
             return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
         }
@@ -642,7 +650,7 @@ public final class AuthService {
         if (!devices.remove(deviceId)) {
             return AuthResult.failure("\u8bbe\u5907\u4e0d\u5728\u4fe1\u4efb\u5217\u8868\u4e2d");
         }
-        this.userRepository.updateTrustedDevices(uuid, devices);
+        this.userRepository.updateTrustedDevices(optional.get().uuid(), devices);
         return AuthResult.success("\u8bbe\u5907\u5df2\u53d6\u6d88\u4fe1\u4efb");
     }
 
@@ -650,7 +658,9 @@ public final class AuthService {
         if (deviceId == null || deviceId.isBlank()) {
             return false;
         }
-        return this.userRepository.findTrustedDevicesByUuid(uuid).map(json -> {
+        return this.resolveConnectedUser(uuid)
+            .flatMap(user -> this.userRepository.findTrustedDevicesByUuid(user.uuid()))
+            .map(json -> {
             List<String> devices = AuthService.parseTrustedDevices(json);
             return devices.contains(deviceId);
         }).orElse(false);
@@ -660,9 +670,19 @@ public final class AuthService {
         return this.resolveConnectedUser(uuid).isPresent();
     }
 
+    public Optional<StarxUser> findConnectedUser(UUID uuid) {
+        Objects.requireNonNull(uuid, "uuid");
+        return this.resolveConnectedUser(uuid);
+    }
+
+    public boolean hasTrustedWebsiteBinding(UUID connectionUuid, String username) {
+        return this.resolveConnectedUser(connectionUuid)
+            .map(user -> this.userRepository.hasTrustedWebsiteBinding(user.uuid(), user.username()))
+            .orElse(false);
+    }
+
     public boolean isUserRegistered(UUID uuid, String username) {
-        return this.isUserRegistered(uuid)
-            || (username != null && this.userRepository.findFullByUsername(username).isPresent());
+        return this.isUserRegistered(uuid);
     }
 
     public Optional<AuthSession.State> getSessionState(UUID uuid) {
@@ -733,11 +753,11 @@ public final class AuthService {
     }
 
     AuthResult enableTotp(UUID uuid, String password) {
-        if (!this.userRepository.existsByUuid(uuid)) {
+        StarxUser user = this.resolveConnectedUser(uuid).orElse(null);
+        if (user == null) {
             return AuthResult.failure("\u7528\u6237\u4e0d\u5b58\u5728");
         }
-        Optional<String> existingHash = this.userRepository.findPasswordHashByUuid(uuid);
-        if (existingHash.isEmpty() || !PasswordHasher.verify(password, existingHash.get())) {
+        if (!PasswordHasher.verify(password, user.passwordHash())) {
             return AuthResult.failure("\u5bc6\u7801\u9519\u8bef");
         }
         String secret = TotpGenerator.generateSecret();
@@ -745,17 +765,17 @@ public final class AuthService {
         List<String> hashedCodes = recoveryCodes.stream()
             .map(PasswordHasher::hash)
             .toList();
-        this.revokeSecurityTrust(uuid, true, "totp-enabled");
+        this.revokeSecurityTrust(user.uuid(), true, "totp-enabled");
         if (!this.userRepository.enableTotp(
-                uuid, secret, encodeRecoveryCodeHashes(hashedCodes))) {
+                user.uuid(), secret, encodeRecoveryCodeHashes(hashedCodes))) {
             return AuthResult.failure("\u7528\u6237\u4e0d\u5b58\u5728");
         }
-        this.eventBus.publish("player:totp:enabled", Map.of("uuid", uuid, "method", "direct"));
+        this.eventBus.publish("player:totp:enabled", Map.of("uuid", user.uuid(), "method", "direct"));
         return AuthResult.totpEnabled(secret, recoveryCodes);
     }
 
     public TotpEnrollment beginTotpEnrollment(UUID uuid, String password) {
-        StarxUser user = this.userRepository.findFullByUuid(uuid)
+        StarxUser user = this.resolveConnectedUser(uuid)
             .orElseThrow(() -> new IllegalArgumentException("用户不存在"));
         if (!PasswordHasher.verify(password, user.passwordHash())) {
             throw new IllegalArgumentException("密码错误");
@@ -765,7 +785,7 @@ public final class AuthService {
         }
         String secret = TotpGenerator.generateSecret();
         Instant expiresAt = Instant.now().plus(TOTP_ENROLLMENT_TTL);
-        this.pendingTotp.put(uuid, new PendingTotp(secret, expiresAt));
+        this.pendingTotp.put(uuid, new PendingTotp(user.uuid(), secret, expiresAt));
         return new TotpEnrollment(
             secret,
             TotpProvisioning.uri("StarMC", user.username(), secret).toString(),
@@ -784,19 +804,19 @@ public final class AuthService {
         }
         List<String> recoveryCodes = RecoveryCodeGenerator.generate();
         List<String> hashedCodes = recoveryCodes.stream().map(PasswordHasher::hash).toList();
-        this.revokeSecurityTrust(uuid, true, "totp-enabled");
+        this.revokeSecurityTrust(pending.accountUuid(), true, "totp-enabled");
         if (!this.userRepository.enableTotp(
-                uuid, pending.secret(), encodeRecoveryCodeHashes(hashedCodes))) {
+                pending.accountUuid(), pending.secret(), encodeRecoveryCodeHashes(hashedCodes))) {
             return AuthResult.failure("用户不存在");
         }
         this.pendingTotp.remove(uuid, pending);
         this.eventBus.publish("player:totp:enabled", Map.of(
-            "uuid", uuid, "method", "confirmed_enrollment"));
+            "uuid", pending.accountUuid(), "method", "confirmed_enrollment"));
         return AuthResult.totpEnabled(pending.secret(), recoveryCodes);
     }
 
     public AuthResult rotateRecoveryCodes(UUID uuid, String code) {
-        StarxUser user = this.userRepository.findFullByUuid(uuid).orElse(null);
+        StarxUser user = this.resolveConnectedUser(uuid).orElse(null);
         if (user == null || user.totpSecret() == null || user.totpSecret().isBlank()) {
             return AuthResult.failure("二步验证未开启");
         }
@@ -806,14 +826,14 @@ public final class AuthService {
         List<String> recoveryCodes = RecoveryCodeGenerator.generate();
         List<String> hashes = recoveryCodes.stream().map(PasswordHasher::hash).toList();
         if (!this.userRepository.replaceRecoveryCodes(
-                uuid, user.recoveryCodes(), encodeRecoveryCodeHashes(hashes))) {
+                user.uuid(), user.recoveryCodes(), encodeRecoveryCodeHashes(hashes))) {
             return AuthResult.failure("恢复码已更新，请重试");
         }
         return AuthResult.recoveryCodesRotated(recoveryCodes);
     }
 
     public AuthResult disableTotp(UUID uuid, String password) {
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> optional = this.resolveConnectedUser(uuid);
         if (optional.isEmpty()) {
             return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
         }
@@ -824,12 +844,12 @@ public final class AuthService {
         if (user.totpSecret() == null) {
             return AuthResult.failure("\u4e8c\u6b65\u9a8c\u8bc1\u672a\u5f00\u542f");
         }
-        this.revokeSecurityTrust(uuid, true, "totp-disabled");
-        if (!this.userRepository.disableTotp(uuid)) {
+        this.revokeSecurityTrust(user.uuid(), true, "totp-disabled");
+        if (!this.userRepository.disableTotp(user.uuid())) {
             return AuthResult.failure("二步验证状态已更新，请重试");
         }
         this.pendingTotp.remove(uuid);
-        this.eventBus.publish("player:totp:disabled", Map.of("uuid", uuid, "username", user.username()));
+        this.eventBus.publish("player:totp:disabled", Map.of("uuid", user.uuid(), "username", user.username()));
         return AuthResult.success("\u4e8c\u6b65\u9a8c\u8bc1\u5df2\u5173\u95ed");
     }
 
@@ -840,16 +860,43 @@ public final class AuthService {
         }
         String passwordError = PasswordValidator.validate(newPassword);
         if (passwordError != null) return AuthResult.failure(passwordError);
-        UUID playerId = optional.get().uuid();
-        this.revokeCredentialTrust(playerId);
-        this.userRepository.markPasswordMigrated(
-            playerId, PasswordHasher.hash(newPassword), Instant.now());
-        return AuthResult.success("\u5bc6\u7801\u5df2\u91cd\u7f6e");
+        return this.changePasswordAndRevokeTrust(optional.get(), newPassword, "\u5bc6\u7801\u5df2\u91cd\u7f6e");
     }
 
-    private void revokeCredentialTrust(UUID playerId) {
-        this.revokeSecurityTrust(playerId, false, "password-changed");
-        this.eventBus.publish("player:credentials:changed", Map.of("uuid", playerId));
+    private AuthResult changePasswordAndRevokeTrust(
+        StarxUser user, String newPassword, String successMessage
+    ) {
+        try {
+            this.userRepository.markPasswordMigrated(
+                user.uuid(), PasswordHasher.hash(newPassword), Instant.now());
+        } catch (RuntimeException error) {
+            logger.log(Level.WARNING, "Password update failed for " + user.username(), error);
+            return AuthResult.failure("\u5bc6\u7801\u66f4\u65b0\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+        }
+        try {
+            this.revokeCredentialTrust(user);
+            return AuthResult.success(successMessage);
+        } catch (RuntimeException error) {
+            try {
+                this.userRepository.restorePasswordMigration(
+                    user.uuid(), user.passwordHash(), user.migrationState(), user.passwordMigratedAt());
+            } catch (RuntimeException restoreError) {
+                error.addSuppressed(restoreError);
+            }
+            throw error;
+        }
+    }
+
+    private void revokeCredentialTrust(StarxUser user) {
+        List<UUID> connectionIds = this.sessionManager.sessionIdsForUsername(user.username());
+        this.revokeSecurityTrust(user.uuid(), false, "password-changed");
+        this.sessionManager.removeByUsername(user.username());
+        if (connectionIds.isEmpty()) {
+            this.eventBus.publish("player:credentials:changed", Map.of("uuid", user.uuid()));
+            return;
+        }
+        connectionIds.forEach(connectionId -> this.eventBus.publish(
+            "player:credentials:changed", Map.of("uuid", connectionId)));
     }
 
     private void revokeSecurityTrust(UUID playerId, boolean keepCurrentSession, String reason) {
@@ -878,7 +925,7 @@ public final class AuthService {
     }
 
     public AuthResult bindEmail(UUID uuid, String email) {
-        Optional<StarxUser> optional = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> optional = this.resolveConnectedUser(uuid);
         if (optional.isEmpty()) {
             return AuthResult.failure("\u7528\u6237\u4e0d\u5b58\u5728");
         }
@@ -989,7 +1036,9 @@ public final class AuthService {
                 user.totpSecret() != null && !user.totpSecret().isBlank(),
                 AddressRisk.score(address),
                 this.bruteForceProtector.getAttemptCount(sessionUuid),
-                this.webLoginApprovals != null));
+                this.webLoginApprovals != null,
+                this.userRepository.hasTrustedWebsiteBinding(user.uuid(), user.username()),
+                this.totpAvailable));
         if (decision.action() != RiskDecisionEngine.Action.ALLOW) {
             this.eventBus.publish("player:login:risk-step-up", Map.of(
                 "uuid", sessionUuid,
@@ -1020,7 +1069,9 @@ public final class AuthService {
         }
         if (username != null && !username.isBlank()) {
             Optional<StarxUser> byUsername = this.userRepository.findFullByUsername(username);
-            if (byUsername.isPresent()) {
+            UUID offlineUuid = UUID.nameUUIDFromBytes(
+                ("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
+            if (byUsername.filter(user -> user.uuid().equals(offlineUuid)).isPresent()) {
                 return byUsername;
             }
         }
@@ -1077,7 +1128,7 @@ public final class AuthService {
         }
     }
 
-    private record PendingTotp(String secret, Instant expiresAt) {
+    private record PendingTotp(UUID accountUuid, String secret, Instant expiresAt) {
     }
 
     private static String encodeRecoveryCodeHashes(List<String> hashes) {

@@ -463,6 +463,9 @@ public static final class HttpConfig {
         private final OfflineIdentityConfig offlineIdentity;
         private final int passwordBypassMinutes;
         private final String bindingWebsiteUrl;
+        private final boolean premiumBypass;
+        private final boolean floodgateBypass;
+        private final boolean skinSiteBypass;
 
         public AuthConfig(boolean allowOfflineDefault) {
             this(allowOfflineDefault, AuthUxConfig.defaults(), OfflineIdentityConfig.defaults(), 30);
@@ -483,6 +486,13 @@ public static final class HttpConfig {
 
         public AuthConfig(boolean allowOfflineDefault, AuthUxConfig ux, OfflineIdentityConfig offlineIdentity,
                           int passwordBypassMinutes, String bindingWebsiteUrl) {
+            this(allowOfflineDefault, ux, offlineIdentity, passwordBypassMinutes, bindingWebsiteUrl,
+                    true, true, true);
+        }
+
+        public AuthConfig(boolean allowOfflineDefault, AuthUxConfig ux, OfflineIdentityConfig offlineIdentity,
+                          int passwordBypassMinutes, String bindingWebsiteUrl,
+                          boolean premiumBypass, boolean floodgateBypass, boolean skinSiteBypass) {
             this.allowOfflineDefault = allowOfflineDefault;
             this.ux = ux == null ? AuthUxConfig.defaults() : ux;
             this.offlineIdentity = offlineIdentity == null
@@ -490,6 +500,9 @@ public static final class HttpConfig {
                     : offlineIdentity;
             this.passwordBypassMinutes = Math.max(0, passwordBypassMinutes);
             this.bindingWebsiteUrl = normalizeUrl(bindingWebsiteUrl);
+            this.premiumBypass = premiumBypass;
+            this.floodgateBypass = floodgateBypass;
+            this.skinSiteBypass = skinSiteBypass;
         }
 
         public boolean allowOfflineDefault() {
@@ -509,6 +522,12 @@ public static final class HttpConfig {
         }
 
         public String bindingWebsiteUrl() { return this.bindingWebsiteUrl; }
+
+        public boolean premiumBypass() { return this.premiumBypass; }
+
+        public boolean floodgateBypass() { return this.floodgateBypass; }
+
+        public boolean skinSiteBypass() { return this.skinSiteBypass; }
 
         private static String normalizeUrl(String value) {
             String url = value == null || value.isBlank() ? "https://star-web.top" : value.trim();

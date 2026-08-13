@@ -39,6 +39,12 @@ auth:
   binding-website-url: https://star-web.top
   # 同一 IP 成功用密码登录后，允许该账号在多少分钟内复用登录状态；0 表示关闭。
   password-bypass-minutes: 30
+  # 是否允许正版身份自动登录；关闭后正版玩家仍可使用密码登录。
+  premium-bypass: true
+  # 是否允许 Floodgate 可信身份自动登录；关闭后基岩玩家仍可使用密码登录。
+  floodgate-bypass: true
+  # 是否允许已验证网站绑定自动登录；关闭后绑定仍保留，但必须输入密码。
+  skin-site-bypass: true
   # 未被可信身份来源识别时，是否默认按离线账号处理。为避免正版/离线误判，建议保持 false。
   allow-offline-default: false
   offline-identity:

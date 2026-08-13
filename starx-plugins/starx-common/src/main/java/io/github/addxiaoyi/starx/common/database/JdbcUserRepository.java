@@ -67,22 +67,27 @@ implements UserRepository {
     @Override
     public void save(UserDto user) {
         this.withTransaction(conn -> {
+            String externalUserId = normalizeExternalUserId(user.externalUserId());
+            ensureExternalIdentityAvailable(conn, user.uuid(), externalUserId);
             Optional<StarxUser> existing = this.findFullByUuid(conn, user.uuid());
             if (existing.isPresent()) {
-                this.updateFromDto(conn, user, existing.get().passwordHash(), existing.get().totpSecret(), existing.get().trustedDevices());
+                this.updateFromDto(conn, user, externalUserId,
+                    existing.get().passwordHash(), existing.get().totpSecret(), existing.get().trustedDevices());
             } else {
-                this.insertFromDto(conn, user);
+                this.insertFromDto(conn, user, externalUserId);
             }
         });
     }
 
     public void saveUser(StarxUser user) {
         this.withTransaction(conn -> {
+            String externalUserId = normalizeExternalUserId(user.externalUserId());
+            ensureExternalIdentityAvailable(conn, user.uuid(), externalUserId);
             Optional<StarxUser> existing = this.findFullByUuid(conn, user.uuid());
             if (existing.isPresent()) {
-                this.update(conn, user);
+                this.update(conn, user, externalUserId);
             } else {
-                this.insert(conn, user);
+                this.insert(conn, user, externalUserId);
             }
         });
     }
@@ -136,7 +141,11 @@ implements UserRepository {
     }
 
     public void create(StarxUser user) {
-        this.withTransaction(conn -> this.insert(conn, user));
+        this.withTransaction(conn -> {
+            String externalUserId = normalizeExternalUserId(user.externalUserId());
+            ensureExternalIdentityAvailable(conn, user.uuid(), externalUserId);
+            this.insert(conn, user, externalUserId);
+        });
     }
 
     public void updateTotpSecret(UUID uuid, String totpSecret) {
@@ -265,27 +274,137 @@ implements UserRepository {
         String sourceSystem
     ) {
         Objects.requireNonNull(uuid, "uuid");
-        this.execute(
-            "UPDATE starx_users SET external_user_id = ?, source_system = ? WHERE uuid = ?",
-            stmt -> {
-                stmt.setString(1, externalUserId);
-                stmt.setString(2, sourceSystem);
-                stmt.setString(3, uuid.toString());
+        String normalized = externalUserId == null ? null : externalUserId.trim();
+        if (normalized != null && normalized.isBlank()) normalized = null;
+        String identity = normalized;
+        try {
+            this.withTransaction(conn -> {
+                if (identity != null && !externalIdentityAvailable(conn, uuid, identity)) {
+                    throw new ExternalIdentityConflictException(identity);
+                }
+                String previousIdentity;
+                try (PreparedStatement query = conn.prepareStatement(
+                    "SELECT external_user_id FROM starx_users WHERE uuid = ?")) {
+                    query.setString(1, uuid.toString());
+                    try (ResultSet rows = query.executeQuery()) {
+                        if (!rows.next()) {
+                            throw new IllegalStateException("External identity target account is missing: " + uuid);
+                        }
+                        previousIdentity = normalizeExternalUserId(rows.getString(1));
+                    }
+                }
+                try (PreparedStatement update = conn.prepareStatement(
+                    "UPDATE starx_users SET external_user_id = ?, source_system = ? WHERE uuid = ?")) {
+                    update.setString(1, identity);
+                    update.setString(2, sourceSystem);
+                    update.setString(3, uuid.toString());
+                    if (update.executeUpdate() != 1) {
+                        throw new IllegalStateException("External identity target account is missing: " + uuid);
+                    }
+                }
+                if (!Objects.equals(previousIdentity, identity)) {
+                    try (PreparedStatement delete = conn.prepareStatement(
+                        "DELETE FROM starx_website_bindings WHERE player_uuid = ?")) {
+                        delete.setString(1, uuid.toString());
+                        delete.executeUpdate();
+                    }
+                }
             });
+        } catch (RuntimeException error) {
+            throw translateExternalIdentityConflict(error, identity);
+        }
     }
 
     public void saveWebsiteBinding(UUID uuid, String username, String externalUserId, boolean verified) {
-        this.execute("DELETE FROM starx_website_bindings WHERE player_uuid = ?", stmt -> stmt.setString(1, uuid.toString()));
-        if (externalUserId == null || externalUserId.isBlank()) return;
-        this.execute(
-            "INSERT INTO starx_website_bindings (player_uuid, username, external_user_id, verified, updated_at) VALUES (?, ?, ?, ?, ?)",
-            stmt -> {
-                stmt.setString(1, uuid.toString());
-                stmt.setString(2, username);
-                stmt.setString(3, externalUserId);
-                stmt.setBoolean(4, verified);
-                stmt.setLong(5, System.currentTimeMillis());
+        this.linkExternalIdentity(uuid, username, externalUserId, verified);
+    }
+
+    public void linkExternalIdentity(
+        UUID uuid, String username, String externalUserId, boolean verified) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(username, "username");
+        String normalized = externalUserId == null ? null : externalUserId.trim();
+        if (normalized != null && normalized.isBlank()) normalized = null;
+        String identity = normalized;
+        try {
+            this.withTransaction(conn -> {
+                if (identity != null && !externalIdentityAvailable(conn, uuid, identity)) {
+                    throw new ExternalIdentityConflictException(identity);
+                }
+                try (PreparedStatement update = conn.prepareStatement(
+                    "UPDATE starx_users SET external_user_id = ? WHERE uuid = ?")) {
+                    update.setString(1, identity);
+                    update.setString(2, uuid.toString());
+                    if (update.executeUpdate() != 1) {
+                        throw new IllegalStateException("External identity target account is missing: " + uuid);
+                    }
+                }
+                try (PreparedStatement delete = conn.prepareStatement(
+                    "DELETE FROM starx_website_bindings WHERE player_uuid = ?")) {
+                    delete.setString(1, uuid.toString());
+                    delete.executeUpdate();
+                }
+                if (identity == null) return;
+                try (PreparedStatement insert = conn.prepareStatement(
+                    "INSERT INTO starx_website_bindings "
+                        + "(player_uuid, username, external_user_id, verified, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?)")) {
+                    insert.setString(1, uuid.toString());
+                    insert.setString(2, username);
+                    insert.setString(3, identity);
+                    insert.setBoolean(4, verified);
+                    insert.setLong(5, System.currentTimeMillis());
+                    insert.executeUpdate();
+                }
             });
+        } catch (RuntimeException error) {
+            throw translateExternalIdentityConflict(error, identity);
+        }
+    }
+
+    private boolean externalIdentityAvailable(Connection conn, UUID uuid, String externalUserId)
+        throws SQLException {
+        String sql = "SELECT 1 FROM starx_users WHERE external_user_id = ? AND uuid <> ? "
+            + "UNION ALL SELECT 1 FROM starx_website_bindings "
+            + "WHERE external_user_id = ? AND player_uuid <> ? LIMIT 1";
+        try (PreparedStatement query = conn.prepareStatement(sql)) {
+            query.setString(1, externalUserId);
+            query.setString(2, uuid.toString());
+            query.setString(3, externalUserId);
+            query.setString(4, uuid.toString());
+            try (ResultSet rows = query.executeQuery()) {
+                return !rows.next();
+            }
+        }
+    }
+
+    private void ensureExternalIdentityAvailable(
+        Connection connection, UUID uuid, String externalUserId) throws SQLException {
+        if (externalUserId != null && !externalIdentityAvailable(connection, uuid, externalUserId)) {
+            throw new ExternalIdentityConflictException(externalUserId);
+        }
+    }
+
+    private static String normalizeExternalUserId(String externalUserId) {
+        if (externalUserId == null) return null;
+        String normalized = externalUserId.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private static RuntimeException translateExternalIdentityConflict(
+        RuntimeException error, String externalUserId) {
+        if (externalUserId == null) return error;
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof SQLException sql
+                && (sql.getErrorCode() == 19
+                    || sql.getMessage() != null
+                    && sql.getMessage().toLowerCase(java.util.Locale.ROOT).contains("unique"))) {
+                return new ExternalIdentityConflictException(externalUserId);
+            }
+            current = current.getCause();
+        }
+        return error;
     }
 
     public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
@@ -303,6 +422,25 @@ implements UserRepository {
         });
         if (updated != 1) {
             throw new IllegalStateException("Password migration target account is missing: " + uuid);
+        }
+    }
+
+    public void restorePasswordMigration(
+        UUID uuid,
+        String passwordHash,
+        String migrationState,
+        Instant migratedAt
+    ) {
+        int updated = this.executeUpdate(
+            "UPDATE starx_users SET password_hash = ?, migration_state = ?, password_migrated_at = ? WHERE uuid = ?",
+            stmt -> {
+                stmt.setString(1, passwordHash);
+                stmt.setString(2, migrationState);
+                stmt.setTimestamp(3, migratedAt == null ? null : Timestamp.from(migratedAt));
+                stmt.setString(4, uuid.toString());
+            });
+        if (updated != 1) {
+            throw new IllegalStateException("Password restore target account is missing: " + uuid);
         }
     }
 
@@ -360,7 +498,7 @@ implements UserRepository {
         }
     }
 
-    private void insertFromDto(Connection conn, UserDto user) throws SQLException {
+    private void insertFromDto(Connection conn, UserDto user, String externalUserId) throws SQLException {
         Instant now = user.createdAt() != null ? user.createdAt() : Instant.now();
         try (PreparedStatement ps = conn.prepareStatement("INSERT INTO starx_users (uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");){
             ps.setString(1, user.uuid().toString());
@@ -371,13 +509,15 @@ implements UserRepository {
             ps.setBoolean(6, user.premium());
             ps.setTimestamp(7, Timestamp.from(now));
             ps.setTimestamp(8, user.lastLoginAt() != null ? Timestamp.from(user.lastLoginAt()) : null);
-            ps.setString(9, user.externalUserId());
+            ps.setString(9, externalUserId);
             ps.setNull(10, 12);
             ps.executeUpdate();
         }
     }
 
-    private void updateFromDto(Connection conn, UserDto user, String existingPasswordHash, String existingTotpSecret, List<String> existingTrustedDevices) throws SQLException {
+    private void updateFromDto(Connection conn, UserDto user, String externalUserId,
+                               String existingPasswordHash, String existingTotpSecret,
+                               List<String> existingTrustedDevices) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("UPDATE starx_users SET username = ?, email = ?, password_hash = ?, totp_secret = ?, premium = ?, created_at = ?, last_login_at = ?, external_user_id = ?, trusted_devices = ? WHERE uuid = ?");){
             ps.setString(1, user.username());
             ps.setString(2, user.email());
@@ -386,14 +526,14 @@ implements UserRepository {
             ps.setBoolean(5, user.premium());
             ps.setTimestamp(6, user.createdAt() != null ? Timestamp.from(user.createdAt()) : Timestamp.from(Instant.now()));
             ps.setTimestamp(7, user.lastLoginAt() != null ? Timestamp.from(user.lastLoginAt()) : null);
-            ps.setString(8, user.externalUserId());
+            ps.setString(8, externalUserId);
             ps.setString(9, this.toJson(existingTrustedDevices));
             ps.setString(10, user.uuid().toString());
             ps.executeUpdate();
         }
     }
 
-    private void insert(Connection conn, StarxUser user) throws SQLException {
+    private void insert(Connection conn, StarxUser user, String externalUserId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("INSERT INTO starx_users (uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices, recovery_codes, source_system, migration_state, password_migrated_at, last_login_ip, last_login_isp, last_login_location, total_playtime, last_logout_at, welcome_message_shown) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");){
             ps.setString(1, user.uuid().toString());
             ps.setString(2, user.username());
@@ -403,7 +543,7 @@ implements UserRepository {
             ps.setBoolean(6, user.premium());
             ps.setTimestamp(7, Timestamp.from(user.createdAt()));
             ps.setTimestamp(8, user.lastLoginAt() != null ? Timestamp.from(user.lastLoginAt()) : null);
-            ps.setString(9, user.externalUserId());
+            ps.setString(9, externalUserId);
             ps.setString(10, this.toJson(user.trustedDevices()));
             ps.setString(11, user.recoveryCodes());
             ps.setString(12, user.sourceSystem());
@@ -419,7 +559,7 @@ implements UserRepository {
         }
     }
 
-    private void update(Connection conn, StarxUser user) throws SQLException {
+    private void update(Connection conn, StarxUser user, String externalUserId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("UPDATE starx_users SET username = ?, email = ?, password_hash = ?, totp_secret = ?, premium = ?, created_at = ?, last_login_at = ?, external_user_id = ?, trusted_devices = ?, recovery_codes = ?, source_system = ?, migration_state = ?, password_migrated_at = ?, last_login_ip = ?, last_login_isp = ?, last_login_location = ?, total_playtime = ?, last_logout_at = ?, welcome_message_shown = ? WHERE uuid = ?");){
             ps.setString(1, user.username());
             ps.setString(2, user.email());
@@ -428,7 +568,7 @@ implements UserRepository {
             ps.setBoolean(5, user.premium());
             ps.setTimestamp(6, Timestamp.from(user.createdAt()));
             ps.setTimestamp(7, user.lastLoginAt() != null ? Timestamp.from(user.lastLoginAt()) : null);
-            ps.setString(8, user.externalUserId());
+            ps.setString(8, externalUserId);
             ps.setString(9, this.toJson(user.trustedDevices()));
             ps.setString(10, user.recoveryCodes());
             ps.setString(11, user.sourceSystem());
@@ -496,7 +636,10 @@ implements UserRepository {
                 body.execute(conn);
                 conn.commit();
             }
-            catch (Exception e) {
+            catch (RuntimeException e) {
+                conn.rollback();
+                throw e;
+            } catch (Exception e) {
                 conn.rollback();
                 throw new RuntimeException("Transaction failed", e);
             }
@@ -599,5 +742,11 @@ implements UserRepository {
     @FunctionalInterface
     private static interface TransactionBody {
         public void execute(Connection var1) throws SQLException;
+    }
+
+    public static final class ExternalIdentityConflictException extends IllegalStateException {
+        public ExternalIdentityConflictException(String externalUserId) {
+            super("External identity is already linked: " + externalUserId);
+        }
     }
 }

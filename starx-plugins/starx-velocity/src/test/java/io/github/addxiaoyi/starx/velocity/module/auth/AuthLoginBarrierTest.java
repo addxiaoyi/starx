@@ -78,7 +78,7 @@ final class AuthLoginBarrierTest {
 
       assertSame(reason, enforced.orElseThrow());
       assertTrue(sessions.get(playerId, lease).isEmpty());
-      assertTrue(flows.requiresAuth(player));
+      assertFalse(flows.requiresAuth(player));
     } finally {
       sessions.shutdown();
     }
@@ -106,7 +106,7 @@ final class AuthLoginBarrierTest {
           auth);
 
       assertTrue(sessions.get(playerId, lease).isEmpty());
-      assertTrue(flows.requiresAuth(player));
+      assertFalse(flows.requiresAuth(player));
     } finally {
       sessions.shutdown();
     }

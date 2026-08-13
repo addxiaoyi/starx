@@ -3,6 +3,8 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.auth;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
@@ -68,9 +70,7 @@ implements VelocityModule {
         String url = baseUrl + "session/minecraft/profile/" + uuid.toString().replace("-", "");
         ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
             if (response.statusCode() == 200) {
-                String body = (String)response.body();
-                boolean nameMatches = body.contains("\"name\"") && body.contains("\"" + username + "\"");
-                future.complete(nameMatches);
+                future.complete(matchesProfileUuid(response.body(), uuid));
             } else {
                 future.complete(false);
             }
@@ -80,6 +80,29 @@ implements VelocityModule {
             return null;
         });
         return future;
+    }
+
+    private static boolean matchesProfileUuid(String body, UUID expectedUuid) {
+        if (body == null || expectedUuid == null) {
+            return false;
+        }
+        try {
+            JsonElement id = JsonParser.parseString(body).getAsJsonObject().get("id");
+            if (id == null || !id.isJsonPrimitive() || !id.getAsJsonPrimitive().isString()) {
+                return false;
+            }
+            String value = id.getAsString().trim();
+            if (value.length() == 32) {
+                value = value.substring(0, 8) + "-"
+                    + value.substring(8, 12) + "-"
+                    + value.substring(12, 16) + "-"
+                    + value.substring(16, 20) + "-"
+                    + value.substring(20);
+            }
+            return UUID.fromString(value).equals(expectedUuid);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     public CompletableFuture<Boolean> checkAllServers(String username, UUID uuid) {

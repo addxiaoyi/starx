@@ -35,6 +35,7 @@ class JdbcAccountErasureRepositoryTest {
       sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
       sql.execute(JdbcAccountDeletionRepository.CREATE_TABLE_SQL);
       sql.execute("CREATE TABLE starx_player_bindings (player_uuid VARCHAR(36) PRIMARY KEY, qq_id VARCHAR(64), discord_id VARCHAR(64), created_at BIGINT NOT NULL)");
+      sql.execute("CREATE TABLE starx_website_bindings (player_uuid VARCHAR(36) PRIMARY KEY, website_user_id VARCHAR(64), verified_at BIGINT)");
       sql.execute("CREATE TABLE starx_binding_audit (audit_id VARCHAR(36) PRIMARY KEY, player_uuid VARCHAR(36) NOT NULL, binding_kind VARCHAR(16), action VARCHAR(16), actor VARCHAR(128), occurred_at BIGINT)");
       sql.execute("CREATE TABLE starx_trusted_devices (id VARCHAR(36) PRIMARY KEY, player_uuid VARCHAR(36) NOT NULL, fingerprint_hash VARCHAR(64), region_key VARCHAR(128), label VARCHAR(128), first_seen_at BIGINT, last_seen_at BIGINT, expires_at BIGINT, revoked_at BIGINT)");
       sql.execute("CREATE TABLE starx_ip_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, player_uuid VARCHAR(36) NOT NULL, ip_address VARCHAR(45), isp VARCHAR(255), location VARCHAR(255), login_time BIGINT, source VARCHAR(16))");
@@ -52,6 +53,7 @@ class JdbcAccountErasureRepositoryTest {
       insert(connection, "INSERT INTO starx_player_server_segments(segment_id, session_id, player_uuid, server_name, started_at) VALUES (?, ?, ?, ?, ?)", "segment-player", "session-player", player, "hub", 1L);
       insert(connection, "INSERT INTO starx_binding_challenges(challenge_id, account_id, kind, token_hash, state, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)", "challenge-player", "account-player", "EMAIL", "hash-player", "CREATED", 1L, 2L);
       insert(connection, "INSERT INTO starx_player_bindings(player_uuid, qq_id, created_at) VALUES (?, ?, ?)", player, "123", 1L);
+      insert(connection, "INSERT INTO starx_website_bindings(player_uuid, website_user_id, verified_at) VALUES (?, ?, ?)", player, "website-player", 1L);
       insert(connection, "INSERT INTO starx_binding_audit(audit_id, player_uuid, action) VALUES (?, ?, ?)", "audit-player", player, "BIND");
       insert(connection, "INSERT INTO starx_trusted_devices(id, player_uuid) VALUES (?, ?)", "device-player", player);
       insert(connection, "INSERT INTO starx_ip_sessions(player_uuid, ip_address) VALUES (?, ?)", player, "127.0.0.1");
@@ -66,6 +68,7 @@ class JdbcAccountErasureRepositoryTest {
     assertEquals(0, count(source, "starx_player_server_segments", "player_uuid", player));
     assertEquals(0, count(source, "starx_binding_challenges", "challenge_id", "challenge-player"));
     assertEquals(0, count(source, "starx_player_bindings", "player_uuid", player));
+    assertEquals(0, count(source, "starx_website_bindings", "player_uuid", player));
     assertEquals(0, count(source, "starx_trusted_devices", "player_uuid", player));
     assertEquals(0, count(source, "starx_ip_sessions", "player_uuid", player));
   }

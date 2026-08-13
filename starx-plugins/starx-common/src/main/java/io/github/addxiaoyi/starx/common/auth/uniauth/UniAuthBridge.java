@@ -4,6 +4,7 @@ import io.github.addxiaoyi.starx.common.crypto.PasswordHasher;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 import io.github.addxiaoyi.starx.common.model.StarxUser;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -52,10 +53,56 @@ public final class UniAuthBridge {
             "邮箱未验证账号只能迁移已有本地档案",
             null));
       }
-      return profileForLogin(username).thenApply(profile -> existing.isPresent()
-          ? migrateExisting(existing.get(), username, password, profile)
-          : createFromUniAuth(uuid, username, password, login, profile));
+      return profileForLogin(username).thenApply(profile -> {
+        StarxUser account = existing.orElse(null);
+        UniAuthClient.PlayerProfileResponse identity = profile == null ? login.profile() : profile;
+        if (!isProfileIdentityCompatible(uuid, username, account, identity)) {
+          return new BridgeResult(false, "UniAuth \u8fd4\u56de\u7684\u8eab\u4efd\u4e0e\u5f53\u524d\u73a9\u5bb6\u4e0d\u4e00\u81f4", null);
+        }
+        return existing.isPresent()
+            ? migrateExisting(existing.get(), username, password, profile)
+            : createFromUniAuth(uuid, username, password, login, profile);
+      });
     });
+  }
+
+  static boolean isProfileIdentityCompatible(
+      UUID connectionUuid,
+      String username,
+      StarxUser existing,
+      UniAuthClient.PlayerProfileResponse profile) {
+    if (profile == null) {
+      return true;
+    }
+    String profileUsername = clean(profile.username());
+    String profileUuid = clean(profile.uuid());
+    if (profileUsername == null && profileUuid == null) {
+      return true;
+    }
+    if (profileUsername != null && (username == null
+        || !profileUsername.equalsIgnoreCase(username))) {
+      return false;
+    }
+    if (profileUuid == null) {
+      return true;
+    }
+    try {
+      UUID remoteUuid = UUID.fromString(profileUuid);
+      return remoteUuid.equals(connectionUuid)
+          || existing != null && remoteUuid.equals(existing.uuid());
+    } catch (IllegalArgumentException ignored) {
+      return false;
+    }
+  }
+
+  static boolean isOfflineUuidAlias(UUID connectionUuid, String username, StarxUser account) {
+    if (connectionUuid == null || username == null || username.isBlank() || account == null
+        || !username.equalsIgnoreCase(account.username())) {
+      return false;
+    }
+    UUID offlineUuid = UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
+    return offlineUuid.equals(account.uuid());
   }
 
   private CompletableFuture<BridgeResult> authenticateLocally(
@@ -236,7 +283,8 @@ public final class UniAuthBridge {
     if (username == null || username.isBlank()) {
       return Optional.empty();
     }
-    return userRepository.findFullByUsername(username);
+    return userRepository.findFullByUsername(username)
+        .filter(account -> isOfflineUuidAlias(uuid, username, account));
   }
 
   private static String safeMessage(Throwable throwable) {

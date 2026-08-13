@@ -27,17 +27,17 @@ class RiskDecisionEngineTest {
 
   @Test
   void criticalRiskUsesWebsiteApprovalButKeepsTotpFallback() {
-    RiskDecisionEngine.Input input = new RiskDecisionEngine.Input(false, false, true, 55, 0, true);
+    RiskDecisionEngine.Input input = new RiskDecisionEngine.Input(false, false, true, 55, 0, true, true);
     assertEquals(RiskDecisionEngine.Action.REQUIRE_WEB_APPROVAL, engine.decide(input).action());
 
-    RiskDecisionEngine.Input websiteDown = new RiskDecisionEngine.Input(false, false, true, 55, 0, false);
+    RiskDecisionEngine.Input websiteDown = new RiskDecisionEngine.Input(false, false, true, 55, 0, false, false);
     assertEquals(RiskDecisionEngine.Action.REQUIRE_TOTP, engine.decide(websiteDown).action());
   }
 
   @Test
   void neverRequiresTotpWhenPlayerHasNotEnabledIt() {
     RiskDecisionEngine.Input websiteUp =
-        new RiskDecisionEngine.Input(false, false, false, 100, 0, true);
+        new RiskDecisionEngine.Input(false, false, false, 100, 0, true, true);
     assertEquals(
         RiskDecisionEngine.Action.REQUIRE_WEB_APPROVAL,
         engine.decide(websiteUp).action());
@@ -45,6 +45,22 @@ class RiskDecisionEngineTest {
     RiskDecisionEngine.Input websiteDown =
         new RiskDecisionEngine.Input(false, false, false, 100, 0, false);
     assertEquals(RiskDecisionEngine.Action.ALLOW, engine.decide(websiteDown).action());
+  }
+
+  @Test
+  void unboundGameAccountDoesNotRequireWebsiteApproval() {
+    RiskDecisionEngine.Decision decision = engine.decide(
+        new RiskDecisionEngine.Input(false, false, false, 100, 0, true, false));
+
+    assertEquals(RiskDecisionEngine.Action.ALLOW, decision.action());
+  }
+
+  @Test
+  void disabledTotpFallsBackToWebsiteApprovalWhenTheAccountIsBound() {
+    RiskDecisionEngine.Decision decision = engine.decide(
+        new RiskDecisionEngine.Input(false, true, true, 10, 1, true, true, false));
+
+    assertEquals(RiskDecisionEngine.Action.REQUIRE_WEB_APPROVAL, decision.action());
   }
 
   @Test

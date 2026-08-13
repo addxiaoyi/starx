@@ -63,6 +63,7 @@ import net.kyori.adventure.key.Key;
 import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.title.Title;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 
 public final class AuthModule implements VelocityModule {
@@ -238,15 +239,24 @@ public final class AuthModule implements VelocityModule {
     UworldFlowSession flowSession = this.uworld.session(player).orElse(null);
     if (flowSession == null) return false;
     CompletableFuture<Boolean> completion = new CompletableFuture<>();
+    AtomicBoolean expired = new AtomicBoolean();
     try {
       flowSession.execute(() -> {
         try {
-          if (!this.isCurrentFlow(player, flowSession, lease)) {
+          if (expired.get() || !this.isCurrentFlow(player, flowSession, lease)) {
             completion.complete(false);
             return;
           }
           AuthResult result = this.authService.approveWebLogin(lease, playerId);
-          if (!result.success()) {
+          if (expired.get() || !result.success()) {
+            if (expired.get()) {
+              this.failAuthenticationDispatch(flowSession, player, lease);
+            }
+            completion.complete(false);
+            return;
+          }
+          if (expired.get()) {
+            this.failAuthenticationDispatch(flowSession, player, lease);
             completion.complete(false);
             return;
           }
@@ -260,6 +270,8 @@ public final class AuthModule implements VelocityModule {
       });
       return completion.get(5, TimeUnit.SECONDS);
     } catch (Exception error) {
+      expired.set(true);
+      this.failAuthenticationDispatch(flowSession, player, lease);
       this.logger.log(Level.WARNING,
           "Unable to complete web login approval for " + playerId, error);
       return false;
@@ -428,7 +440,11 @@ public final class AuthModule implements VelocityModule {
     this.authService = new AuthService(this.userRepository, this.eventBus, this.sessionManager,
         this.uniauthConfig, uniAuthBridge,
         this.ipSessionStore, this.trustedDeviceRepository);
+    this.authService.setTotpAvailable(this.totpConfig.enabled());
     this.authService.setIpBypassMinutes(authConfig.passwordBypassMinutes());
+    this.authService.setPremiumBypass(authConfig.premiumBypass());
+    this.authService.setFloodgateBypass(authConfig.floodgateBypass());
+    this.authService.setSkinSiteBypass(authConfig.skinSiteBypass());
     this.commandHandler = new AuthCommandHandler(this.authService);
   }
 
@@ -443,12 +459,20 @@ public final class AuthModule implements VelocityModule {
     }
     boolean premium = this.premiumResolver.isPremium(playerId, player.isOnlineMode());
     boolean trustedExternalIdentity = this.trustedIdentity.isTrusted(playerId);
-    boolean trustedWebsiteBinding = this.userRepository.hasTrustedWebsiteBinding(playerId, username);
+    boolean trustedWebsiteBinding = this.authService.hasTrustedWebsiteBinding(playerId, username);
+    AuthService.BypassConfig bypassConfig = this.authService.getBypassConfig();
+    boolean floodgateAutoLogin = AuthAdmissionPolicy.isFloodgateAutoLogin(
+        trustedExternalIdentity, bypassConfig.floodgateBypass());
+    boolean skinSiteAutoLogin = AuthAdmissionPolicy.isSkinSiteAutoLogin(
+        trustedWebsiteBinding, bypassConfig.skinSiteBypass());
     boolean recentPasswordLogin = address != null
         && this.authService.shouldBypassAuth(
             playerId, address.getHostAddress(), this.deviceId(player), false, false, false);
-    if (AuthAdmissionPolicy.canAutoLogin(premium, trustedExternalIdentity || trustedWebsiteBinding) || recentPasswordLogin) {
-      AuthResult result = premium
+    boolean premiumAutoLogin = AuthAdmissionPolicy.isPremiumAutoLogin(
+        premium, bypassConfig.premiumBypass());
+    if (AuthAdmissionPolicy.canAutoLogin(
+        premiumAutoLogin, floodgateAutoLogin || skinSiteAutoLogin) || recentPasswordLogin) {
+      AuthResult result = premiumAutoLogin
           ? this.authService.autoLogin(lease, playerId, username, address)
           : recentPasswordLogin
           ? this.authService.autoLoginTrusted(lease, playerId, username, address, "ip-session", false)
@@ -457,7 +481,7 @@ public final class AuthModule implements VelocityModule {
               playerId,
               username,
               address,
-              trustedWebsiteBinding ? "website-binding" : "floodgate",
+              skinSiteAutoLogin ? "website-binding" : "floodgate",
               false);
       return this.finishTrustedLogin(player, result);
     }
@@ -570,7 +594,7 @@ public final class AuthModule implements VelocityModule {
     } catch (RuntimeException error) {
       this.logger.log(Level.SEVERE,
           "Unable to return authentication result for " + player.getUsername(), error);
-      this.authService.cancelAuthentication(player.getUniqueId(), lease);
+      this.failAuthenticationDispatch(flowSession, player, lease);
     }
   }
 
@@ -598,7 +622,7 @@ public final class AuthModule implements VelocityModule {
       this.logger.log(Level.SEVERE,
           "Unable to return authentication failure for " + player.getUsername(),
           dispatchError);
-      this.authService.cancelAuthentication(player.getUniqueId(), lease);
+      this.failAuthenticationDispatch(flowSession, player, lease);
     }
   }
 
@@ -614,6 +638,13 @@ public final class AuthModule implements VelocityModule {
       return false;
     }
     return this.uworld.session(player).filter(current -> current == expected).isPresent();
+  }
+
+  private void failAuthenticationDispatch(
+      UworldFlowSession flowSession, Player player, AuthLease lease) {
+    this.flows.deny(player, AUTH_ERROR);
+    this.authService.cancelAuthentication(player.getUniqueId(), lease);
+    flowSession.fail(AUTH_ERROR);
   }
 
   private void applyAuthResult(
@@ -702,7 +733,7 @@ public final class AuthModule implements VelocityModule {
         StarxUser user;
         try {
           registered = this.authService.isUserRegistered(player.getUniqueId());
-          user = this.userRepository.findFullByUuid(player.getUniqueId()).orElse(null);
+          user = this.authService.findConnectedUser(player.getUniqueId()).orElse(null);
         } catch (RuntimeException error) {
           this.returnPromptFailure(flowSession, player, lease, error);
           return;
@@ -716,7 +747,7 @@ public final class AuthModule implements VelocityModule {
         } catch (RuntimeException error) {
           this.logger.log(Level.SEVERE,
               "Unable to return authentication prompt for " + player.getUsername(), error);
-          this.authService.cancelAuthentication(player.getUniqueId(), lease);
+          this.failAuthenticationDispatch(flowSession, player, lease);
         }
       }).schedule();
     } catch (RuntimeException error) {
@@ -748,7 +779,7 @@ public final class AuthModule implements VelocityModule {
       this.logger.log(Level.SEVERE,
           "Unable to return authentication prompt failure for " + player.getUsername(),
           dispatchError);
-      this.authService.cancelAuthentication(player.getUniqueId(), lease);
+      this.failAuthenticationDispatch(flowSession, player, lease);
     }
   }
 

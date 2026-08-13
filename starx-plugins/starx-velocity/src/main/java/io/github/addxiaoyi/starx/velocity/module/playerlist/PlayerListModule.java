@@ -20,6 +20,7 @@ import io.github.addxiaoyi.starx.velocity.variable.StarxVariableService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 
@@ -111,8 +112,11 @@ public final class PlayerListModule implements VelocityModule {
 
   public StarxVariableService.PlayerContext contextFor(Player player) {
     Objects.requireNonNull(player, "player");
-    StarxUser user = this.users.findFullByUuid(player.getUniqueId()).orElse(null);
-    PlayerBinding binding = this.bindings.findByPlayer(player.getUniqueId()).orElse(null);
+    StarxUser user = this.authentication.authService()
+        .findConnectedUser(player.getUniqueId())
+        .orElse(null);
+    UUID accountUuid = user == null ? player.getUniqueId() : user.uuid();
+    PlayerBinding binding = this.bindings.findByPlayer(accountUuid).orElse(null);
     String serverName = player.getCurrentServer()
         .map(connection -> connection.getServerInfo().getName())
         .orElse(null);
@@ -122,8 +126,8 @@ public final class PlayerListModule implements VelocityModule {
     PlayerIdentityMetrics metrics = PlayerIdentityMetrics.from(
         user,
         binding,
-        this.sessions.summary(player.getUniqueId()).orElse(null),
-        this.sessions.playtimeByServer(player.getUniqueId()),
+        this.sessions.summary(accountUuid).orElse(null),
+        this.sessions.playtimeByServer(accountUuid),
         Instant.now());
     return this.contextFactory.create(
         player.getUniqueId(),

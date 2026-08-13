@@ -40,6 +40,7 @@ final class AuthServicePersistentTrustedDeviceTest {
             last_logout_at TIMESTAMP, welcome_message_shown BOOLEAN)
           """);
       statement.execute(JdbcTrustedDeviceRepository.CREATE_TABLE_SQL);
+      statement.execute("CREATE TABLE starx_website_bindings (player_uuid VARCHAR(36) PRIMARY KEY, username VARCHAR(16) NOT NULL, external_user_id VARCHAR(100) NOT NULL, verified BOOLEAN NOT NULL DEFAULT FALSE, updated_at BIGINT NOT NULL)");
     }
 
     UUID playerId = UUID.randomUUID();

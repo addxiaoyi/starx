@@ -2,6 +2,32 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [0.4.9] - 2026-08-13
+
+### Fixed
+
+- 外部 Yggdrasil 身份校验改为严格比较 UUID，不再用响应正文中的玩家名片段判断身份。
+- Premium、UniAuth 和网页登录兼容路径不再接受任意同名账号；离线兼容别名只接受确定性的 OfflinePlayer UUID。
+- 增加不同 UUID 同名、同 UUID 改名和第三方身份冲突的回归测试。
+
+### Verification
+
+- `:starx-plugins:starx-common:test` 与 `:starx-plugins:starx-velocity:test` 通过。
+- universal JAR 的平台描述符、版本和重复类边界由发布校验验证。
+
+## [0.4.8] - 2026-08-13
+
+### Fixed
+
+- 拒绝已确认但已过期的跨设备绑定挑战，避免过期令牌继续执行登录、邮箱或皮肤操作。
+- 账号注销时同步删除网站绑定，避免注销后残留网站信任关系。
+- 让 Premium 与 Floodgate 自动登录严格遵守各自的 bypass 开关，并修复绑定冲突仍返回成功的问题。
+
+### Verification
+
+- common 与 velocity 主代码、测试代码编译通过。
+- 定向测试因本机 Gradle worker 缺失 `worker.org.gradle.process.internal.worker.GradleWorkerMain` 暂未能运行。
+
 ## [0.4.5] - 2026-08-12
 
 ### Fixed
@@ -256,3 +282,15 @@
 - 加入网站节点同步、皮肤纹理同步和永久归档。
 - 加入 Velocity 与后端自动配置、节点发现和 heartbeat 配置。
 - 完成 Universal JAR 重复类、描述符和平台 API 边界校验。
+# StarX Changelog
+
+## [0.4.6] - 2026-08-13
+
+- 修复未注册网站的老游戏账号在高风险登录时被错误送入网页确认、导致无法登录的问题。
+- 只有已验证网站绑定的账号才触发网页审批；未绑定账号按本地密码/TOTP流程继续认证。
+## [0.4.7] - 2026-08-13
+
+- 修复未完成网站绑定时手动 `/login web` 仍进入等待确认的问题。
+- 修复全局关闭 TOTP 后高风险账号仍被要求输入不可用验证码的问题。
+- 修复认证异步派发异常和网页登录审批超时后残留认证会话的问题。
+- 修复管理端网站绑定状态与已验证绑定表不一致的问题，并让正版免密开关真正生效。

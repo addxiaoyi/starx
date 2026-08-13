@@ -27,7 +27,7 @@ final class AuthServiceSessionIdentityTest {
   @Test
   void loginUsesTheSessionUsernameWhenCallerSuppliesAnotherUsername() {
     UUID connectionUuid = UUID.randomUUID();
-    UUID sessionAccountUuid = UUID.randomUUID();
+    UUID sessionAccountUuid = offlineUuid(SESSION_USERNAME);
     UUID externalAccountUuid = UUID.randomUUID();
     String credential = "session-credential";
     String credentialHash = PasswordHasher.hash(credential);
@@ -117,7 +117,7 @@ final class AuthServiceSessionIdentityTest {
   @Test
   void trustedLoginUsesTheSessionUsernameWhenCallerSuppliesAnotherUsername() {
     UUID connectionUuid = UUID.randomUUID();
-    UUID sessionAccountUuid = UUID.randomUUID();
+    UUID sessionAccountUuid = offlineUuid(SESSION_USERNAME);
     UUID externalAccountUuid = UUID.randomUUID();
     String credentialHash = PasswordHasher.hash("session-credential");
     RecordingUsers users = new RecordingUsers(
@@ -171,6 +171,11 @@ final class AuthServiceSessionIdentityTest {
         false);
   }
 
+  private static UUID offlineUuid(String username) {
+    return UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + username).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  }
+
   private static class RecordingUsers extends JdbcUserRepository {
     private final Map<UUID, StarxUser> users;
     private final List<String> usernameLookups = new ArrayList<>();
@@ -202,6 +207,11 @@ final class AuthServiceSessionIdentityTest {
     @Override
     public void updatePremium(UUID uuid, boolean premium) {
       // The fixture isolates the session identity boundary.
+    }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return false;
     }
   }
 
