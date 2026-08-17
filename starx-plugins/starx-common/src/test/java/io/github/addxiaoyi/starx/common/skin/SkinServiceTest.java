@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 final class SkinServiceTest {
@@ -48,6 +51,15 @@ final class SkinServiceTest {
 
     assertTrue(events.types.contains("skin:applied"));
     assertTrue(events.types.contains("skin:updated"));
+  }
+
+  @Test
+  void supportsHistoricalMinecraftUuidLookup() throws Exception {
+    Path source = Path.of("src/main/java/io/github/addxiaoyi/starx/common/skin/SkinService.java");
+    String text = Files.readString(source, StandardCharsets.UTF_8);
+
+    assertTrue(text.contains("knownMinecraftUuidsResolver"));
+    assertTrue(text.contains("knownMinecraftUuidsResolver.apply(requested)"));
   }
 
   private static final class FailingSkinRepository implements SkinRepository {

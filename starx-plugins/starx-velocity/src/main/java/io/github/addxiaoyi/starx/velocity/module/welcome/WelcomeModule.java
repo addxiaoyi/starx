@@ -47,6 +47,8 @@ implements VelocityModule {
     private final AuthService authService;
     private final Map<UUID, Instant> loginTimestamps = new ConcurrentHashMap<UUID, Instant>();
     private final Map<UUID, UUID> accountIds = new ConcurrentHashMap<UUID, UUID>();
+    private final Map<UUID, Player> activePlayers = new ConcurrentHashMap<UUID, Player>();
+    private final LatestWriteGate<UUID> loginAddressWrites = new LatestWriteGate<>();
     private final Config config;
     private WelcomeListener listener;
 
@@ -85,6 +87,7 @@ implements VelocityModule {
         WelcomeListener currentListener = new WelcomeListener();
         this.listener = currentListener;
         this.plugin.proxy().getEventManager().register(this.plugin, currentListener);
+        this.plugin.proxy().getAllPlayers().forEach(this::restoreActivePlayer);
         LOGGER.info("Welcome module enabled");
     }
 
@@ -97,11 +100,14 @@ implements VelocityModule {
         }
         this.loginTimestamps.clear();
         this.accountIds.clear();
+        this.activePlayers.clear();
+        this.loginAddressWrites.clear();
     }
 
     private void onPlayerJoin(Player player) {
         UUID uuid = player.getUniqueId();
         String username = player.getUsername();
+        this.activePlayers.put(uuid, player);
         this.loginTimestamps.put(uuid, Instant.now());
         String ip = this.getPlayerIp(player);
         LocalAddressInfo currentAddress = LocalAddressInfo.parse(ip);
@@ -121,6 +127,9 @@ implements VelocityModule {
 
     private void onPlayerQuit(Player player) {
         UUID uuid = player.getUniqueId();
+        if (!this.detachActivePlayer(uuid, player)) {
+            return;
+        }
         UUID accountUuid = this.accountIds.remove(uuid);
         if (accountUuid == null) {
             accountUuid = uuid;
@@ -129,6 +138,29 @@ implements VelocityModule {
         if (loginTime != null) {
             this.recordSession(accountUuid, loginTime, Instant.now());
         }
+    }
+
+    private boolean detachActivePlayer(UUID uuid, Player player) {
+        java.util.concurrent.atomic.AtomicBoolean removed =
+            new java.util.concurrent.atomic.AtomicBoolean();
+        this.activePlayers.compute(uuid, (ignored, current) -> {
+            if (current == player) {
+                removed.set(true);
+                return null;
+            }
+            return current;
+        });
+        return removed.get();
+    }
+
+    private void restoreActivePlayer(Player player) {
+        UUID uuid = player.getUniqueId();
+        this.activePlayers.put(uuid, player);
+        this.loginTimestamps.put(uuid, Instant.now());
+        Optional<StarxUser> user = this.authService == null
+            ? this.userRepository.findFullByUuid(uuid)
+            : this.authService.findConnectedUser(uuid);
+        this.accountIds.put(uuid, user.map(StarxUser::uuid).orElse(uuid));
     }
 
     void recordSession(UUID uuid, Instant loginTime, Instant logoutTime) {
@@ -148,18 +180,24 @@ implements VelocityModule {
     }
 
     private void saveLoginAddress(UUID uuid, LocalAddressInfo address) {
-        this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> {
-            try {
-                this.userRepository.updateLoginInfo(
+        LatestWriteGate<UUID>.Ticket ticket = this.loginAddressWrites.claim(uuid);
+        try {
+            this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> {
+                try {
+                    this.loginAddressWrites.run(ticket, () -> this.userRepository.updateLoginInfo(
                         uuid,
                         address.address(),
                         "",
-                        address.locationLabel());
-            }
-            catch (Exception e) {
-                LOGGER.log(Level.WARNING, "无法保存玩家 " + uuid + " 的登录地址", e);
-            }
-        }).schedule();
+                        address.locationLabel()));
+                }
+                catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "无法保存玩家 " + uuid + " 的登录地址", e);
+                }
+            }).schedule();
+        } catch (RuntimeException error) {
+            this.loginAddressWrites.cancel(ticket);
+            throw error;
+        }
     }
 
     private void sendWelcomeMessage(

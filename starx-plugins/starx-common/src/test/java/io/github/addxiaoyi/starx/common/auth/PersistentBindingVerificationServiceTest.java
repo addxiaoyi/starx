@@ -12,8 +12,11 @@ import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.sqlite.SQLiteDataSource;
@@ -51,6 +54,26 @@ class PersistentBindingVerificationServiceTest {
   }
 
   @Test
+  void newestPersistentCodeReplacesAnOlderCodeForTheSameAccount() throws Exception {
+    SQLiteDataSource source = database();
+    UUID playerId = UUID.randomUUID();
+    int[] values = {123456, 123457};
+    AtomicInteger index = new AtomicInteger();
+    BindingVerificationService codes = new BindingVerificationService(
+        new BindingChallengeService(new JdbcBindingChallengeRepository(source)),
+        ignored -> "account-1", ignored -> playerId,
+        Clock.fixed(Instant.parse("2026-07-22T12:00:00Z"), ZoneOffset.UTC),
+        Duration.ofMinutes(5), uuid -> Set.of(uuid),
+        () -> values[index.getAndIncrement()]);
+
+    String first = codes.generateCode(playerId);
+    String second = codes.generateCode(playerId);
+
+    assertNull(codes.verifyCode(first));
+    assertEquals(playerId, codes.verifyCode(second));
+  }
+
+  @Test
   void failedBindingActionReleasesCodeForRetry() throws Exception {
     SQLiteDataSource source = database();
     UUID playerId = UUID.fromString("5f82333e-9d6a-4da0-934a-8c753d554cb0");
@@ -67,6 +90,91 @@ class PersistentBindingVerificationServiceTest {
     assertNull(codes.verifyAndExecute(code, ignored -> true));
   }
 
+  @Test
+  void memoryBindingCodeAcceptsAHistoricalMinecraftUuid() {
+    UUID offlineUuid = UUID.randomUUID();
+    UUID premiumUuid = UUID.randomUUID();
+    Clock clock = Clock.fixed(Instant.parse("2026-07-22T12:00:00Z"), ZoneOffset.UTC);
+    BindingVerificationService codes = new BindingVerificationService(
+        requested -> Set.of(offlineUuid, premiumUuid), clock, Duration.ofMinutes(5));
+    String code = codes.generateCode(offlineUuid);
+
+    assertEquals(offlineUuid, codes.verifyCodeIf(code, premiumUuid::equals));
+  }
+
+  @Test
+  void memoryBindingCodeExpiresAtItsExactDeadline() {
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-22T12:00:00Z"));
+    UUID playerId = UUID.randomUUID();
+    BindingVerificationService codes = new BindingVerificationService(
+        ignored -> Set.of(playerId), clock, Duration.ofMinutes(5));
+    String code = codes.generateCode(playerId);
+
+    clock.advance(Duration.ofMinutes(5));
+
+    assertNull(codes.verifyCode(code));
+    assertNull(codes.verifyAndExecute(code, ignored -> true));
+  }
+
+  @Test
+  void newestMemoryCodeReplacesAnOlderCodeForTheSamePlayer() {
+    UUID playerId = UUID.randomUUID();
+    int[] values = {123456, 123457};
+    AtomicInteger index = new AtomicInteger();
+    BindingVerificationService codes = new BindingVerificationService(
+        uuid -> Set.of(uuid), Clock.systemUTC(), Duration.ofMinutes(5),
+        () -> values[index.getAndIncrement()]);
+
+    String first = codes.generateCode(playerId);
+    String second = codes.generateCode(playerId);
+
+    assertNull(codes.verifyCode(first));
+    assertEquals(playerId, codes.verifyCode(second));
+  }
+
+  @Test
+  void codeCollisionDoesNotReplaceAnotherPlayersPendingCode() {
+    UUID firstPlayer = UUID.randomUUID();
+    UUID secondPlayer = UUID.randomUUID();
+    int[] generated = {123456, 123456, 123457};
+    AtomicInteger index = new AtomicInteger();
+    BindingVerificationService codes = new BindingVerificationService(
+        uuid -> Set.of(uuid),
+        Clock.systemUTC(),
+        Duration.ofMinutes(5),
+        () -> generated[Math.min(index.getAndIncrement(), generated.length - 1)]);
+
+    String firstCode = codes.generateCode(firstPlayer);
+    String secondCode = codes.generateCode(secondPlayer);
+
+    assertEquals("123456", firstCode);
+    assertEquals("123457", secondCode);
+    assertEquals(firstPlayer, codes.verifyCode(firstCode));
+    assertEquals(secondPlayer, codes.verifyCode(secondCode));
+  }
+
+  @Test
+  void persistentCodeCollisionRetriesWithAnotherCode() throws Exception {
+    SQLiteDataSource source = database();
+    BindingChallengeService challenges =
+        new BindingChallengeService(new JdbcBindingChallengeRepository(source));
+    Clock clock = Clock.fixed(Instant.parse("2026-07-22T12:00:00Z"), ZoneOffset.UTC);
+    UUID firstPlayer = UUID.randomUUID();
+    UUID secondPlayer = UUID.randomUUID();
+    BindingVerificationService first = new BindingVerificationService(
+        challenges, ignored -> "account-1", ignored -> firstPlayer, clock, Duration.ofMinutes(5),
+        uuid -> Set.of(uuid), () -> 123456);
+    int[] generated = {123456, 123457};
+    AtomicInteger index = new AtomicInteger();
+    BindingVerificationService second = new BindingVerificationService(
+        challenges, ignored -> "account-2", ignored -> secondPlayer, clock, Duration.ofMinutes(5),
+        uuid -> Set.of(uuid),
+        () -> generated[Math.min(index.getAndIncrement(), generated.length - 1)]);
+
+    assertEquals("123456", first.generateCode(firstPlayer));
+    assertEquals("123457", second.generateCode(secondPlayer));
+  }
+
   private SQLiteDataSource database() throws Exception {
     SQLiteDataSource source = new SQLiteDataSource();
     source.setUrl("jdbc:sqlite:" + tempDir.resolve(UUID.randomUUID() + ".db").toAbsolutePath());
@@ -74,6 +182,7 @@ class PersistentBindingVerificationServiceTest {
       sql.execute("CREATE TABLE starx_accounts (account_id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL)");
       sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
       sql.execute("INSERT INTO starx_accounts VALUES ('account-1', 1)");
+      sql.execute("INSERT INTO starx_accounts VALUES ('account-2', 1)");
     }
     return source;
   }
@@ -86,5 +195,21 @@ class PersistentBindingVerificationServiceTest {
         accountId -> accountId.equals("account-1") ? playerId : null,
         clock,
         Duration.ofMinutes(5));
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant current;
+
+    private MutableClock(Instant current) {
+      this.current = current;
+    }
+
+    private void advance(Duration duration) {
+      this.current = this.current.plus(duration);
+    }
+
+    @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+    @Override public Clock withZone(ZoneId zone) { return this; }
+    @Override public Instant instant() { return this.current; }
   }
 }

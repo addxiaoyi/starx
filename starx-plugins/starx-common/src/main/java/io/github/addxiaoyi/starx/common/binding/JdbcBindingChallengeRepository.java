@@ -4,6 +4,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,7 +42,47 @@ public final class JdbcBindingChallengeRepository {
       insert.executeUpdate();
       return id;
     } catch (SQLException error) {
+      if (isUniqueConstraint(error)) {
+        throw new ChallengeTokenConflictException("Binding challenge token already exists", error);
+      }
       throw new IllegalStateException("Failed to create binding challenge", error);
+    }
+  }
+
+  public String createReplacingActive(
+      String accountId, String kind, String payload, String tokenHash, long createdAt, long expiresAt) {
+    if (expiresAt <= createdAt) throw new IllegalArgumentException("expiresAt must be after createdAt");
+    String id = UUID.randomUUID().toString();
+    String normalizedAccount = requireText(accountId, "accountId");
+    String normalizedKind = requireText(kind, "kind");
+    String normalizedToken = requireText(tokenHash, "tokenHash");
+    try (Connection connection = dataSource.getConnection()) {
+      connection.setAutoCommit(false);
+      try {
+        revokeActive(connection, normalizedAccount, normalizedKind, createdAt);
+        try (PreparedStatement insert = connection.prepareStatement(
+            "INSERT INTO starx_binding_challenges (challenge_id, account_id, kind, payload, token_hash, state, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+          insert.setString(1, id);
+          insert.setString(2, normalizedAccount);
+          insert.setString(3, normalizedKind);
+          insert.setString(4, payload);
+          insert.setString(5, normalizedToken);
+          insert.setString(6, BindingState.CREATED.name());
+          insert.setLong(7, createdAt);
+          insert.setLong(8, expiresAt);
+          insert.executeUpdate();
+        }
+        connection.commit();
+        return id;
+      } catch (SQLException error) {
+        connection.rollback();
+        if (isUniqueConstraint(error)) {
+          throw new ChallengeTokenConflictException("Binding challenge token already exists", error);
+        }
+        throw error;
+      }
+    } catch (SQLException error) {
+      throw new IllegalStateException("Failed to replace active binding challenge", error);
     }
   }
 
@@ -66,8 +108,13 @@ public final class JdbcBindingChallengeRepository {
     sql.append(" WHERE challenge_id = ? AND state = ?");
     boolean requiresActiveChallenge = action == BindingAction.CONFIRM
         || action == BindingAction.CONSUME;
-    if (requiresActiveChallenge) sql.append(" AND expires_at >= ?");
-    if (action == BindingAction.EXPIRE) sql.append(" AND expires_at < ?");
+    boolean requiresNoActiveExecution = action == BindingAction.REVOKE
+        || action == BindingAction.EXPIRE;
+    if (requiresActiveChallenge) sql.append(" AND expires_at > ?");
+    if (action == BindingAction.EXPIRE) sql.append(" AND expires_at <= ?");
+    if (requiresNoActiveExecution) {
+      sql.append(" AND (execution_owner IS NULL OR execution_lease_until <= ?)");
+    }
     try (Connection connection = dataSource.getConnection(); PreparedStatement update = connection.prepareStatement(sql.toString())) {
       update.setString(1, next.name());
       int offset = 2;
@@ -75,7 +122,8 @@ public final class JdbcBindingChallengeRepository {
       if (timestampColumn != null) update.setLong(offset++, at);
       update.setString(offset++, id);
       update.setString(offset++, expected.name());
-      if (requiresActiveChallenge || action == BindingAction.EXPIRE) update.setLong(offset, at);
+      if (requiresActiveChallenge || action == BindingAction.EXPIRE) update.setLong(offset++, at);
+      if (requiresNoActiveExecution) update.setLong(offset, at);
       return update.executeUpdate() == 1;
     } catch (SQLException error) {
       throw new IllegalStateException("Failed to transition binding challenge", error);
@@ -87,7 +135,7 @@ public final class JdbcBindingChallengeRepository {
     if (leaseUntil <= now) throw new IllegalArgumentException("leaseUntil must be after now");
     String sql = "UPDATE starx_binding_challenges SET state = ?, "
         + "confirmed_at = COALESCE(confirmed_at, ?), execution_owner = ?, execution_lease_until = ? "
-        + "WHERE challenge_id = ? AND expires_at >= ? AND ((state = ? AND expires_at >= ?) "
+        + "WHERE challenge_id = ? AND expires_at > ? AND ((state = ? AND expires_at > ?) "
         + "OR (state = ? AND (execution_lease_until IS NULL OR execution_lease_until <= ?)))";
     try (Connection connection = dataSource.getConnection();
          PreparedStatement update = connection.prepareStatement(sql)) {
@@ -114,8 +162,8 @@ public final class JdbcBindingChallengeRepository {
     }
     boolean consume = action == BindingAction.CONSUME;
     String sql = consume
-        ? "UPDATE starx_binding_challenges SET state = ?, token_hash = ?, consumed_at = ?, execution_owner = NULL, execution_lease_until = NULL WHERE challenge_id = ? AND state = ? AND execution_owner = ?"
-        : "UPDATE starx_binding_challenges SET state = ?, confirmed_at = NULL, execution_owner = NULL, execution_lease_until = NULL WHERE challenge_id = ? AND state = ? AND execution_owner = ?";
+        ? "UPDATE starx_binding_challenges SET state = ?, token_hash = ?, consumed_at = ?, execution_owner = NULL, execution_lease_until = NULL WHERE challenge_id = ? AND state = ? AND execution_owner = ? AND execution_lease_until > ?"
+        : "UPDATE starx_binding_challenges SET state = ?, confirmed_at = NULL, execution_owner = NULL, execution_lease_until = NULL WHERE challenge_id = ? AND state = ? AND execution_owner = ? AND execution_lease_until > ?";
     try (Connection connection = dataSource.getConnection();
          PreparedStatement update = connection.prepareStatement(sql)) {
       int offset = 1;
@@ -126,7 +174,8 @@ public final class JdbcBindingChallengeRepository {
       }
       update.setString(offset++, requireText(id, "id"));
       update.setString(offset++, BindingState.CONFIRMED.name());
-      update.setString(offset, requireText(owner, "owner"));
+      update.setString(offset++, requireText(owner, "owner"));
+      update.setLong(offset, at);
       if (update.executeUpdate() == 1) return true;
     } catch (SQLException error) {
       if (consume && isConsumed(id)) return true;
@@ -178,6 +227,54 @@ public final class JdbcBindingChallengeRepository {
     return find(id).map(challenge -> challenge.state() == BindingState.CONSUMED).orElse(false);
   }
 
+  private static void revokeActive(
+      Connection connection, String accountId, String kind, long revokedAt) throws SQLException {
+    List<String> activeIds = new ArrayList<>();
+    try (PreparedStatement query = connection.prepareStatement(
+        "SELECT challenge_id FROM starx_binding_challenges "
+            + "WHERE account_id = ? AND kind = ? AND state IN (?, ?, ?)")) {
+      query.setString(1, accountId);
+      query.setString(2, kind);
+      query.setString(3, BindingState.CREATED.name());
+      query.setString(4, BindingState.SENT.name());
+      query.setString(5, BindingState.CONFIRMED.name());
+      try (ResultSet rows = query.executeQuery()) {
+        while (rows.next()) {
+          activeIds.add(rows.getString(1));
+        }
+      }
+    }
+    try (PreparedStatement query = connection.prepareStatement(
+        "SELECT challenge_id FROM starx_binding_challenges "
+            + "WHERE account_id = ? AND kind = ? AND state = ?")) {
+      query.setString(1, accountId);
+      query.setString(2, kind);
+      query.setString(3, BindingState.CONFIRMED.name());
+      try (ResultSet rows = query.executeQuery()) {
+        if (rows.next()) {
+          throw new ChallengeInProgressException(
+              "Binding challenge execution is still in progress: " + rows.getString(1));
+        }
+      }
+    }
+    try (PreparedStatement update = connection.prepareStatement(
+        "UPDATE starx_binding_challenges SET state = ?, token_hash = ?, revoked_at = ?, "
+            + "execution_owner = NULL, execution_lease_until = NULL "
+            + "WHERE challenge_id = ? AND state IN (?, ?, ?)")) {
+      for (String id : activeIds) {
+        update.setString(1, BindingState.REVOKED.name());
+        update.setString(2, "terminal:" + id + ":" + revokedAt);
+        update.setLong(3, revokedAt);
+        update.setString(4, id);
+        update.setString(5, BindingState.CREATED.name());
+        update.setString(6, BindingState.SENT.name());
+        update.setString(7, BindingState.CONFIRMED.name());
+        update.addBatch();
+      }
+      update.executeBatch();
+    }
+  }
+
   private static BindingChallenge map(ResultSet row) throws SQLException {
     return new BindingChallenge(
         row.getString(1), row.getString(2), row.getString(3), row.getString(4), row.getString(5),
@@ -188,5 +285,36 @@ public final class JdbcBindingChallengeRepository {
     String text = Objects.requireNonNull(value, field).trim();
     if (text.isEmpty()) throw new IllegalArgumentException(field + " must not be blank");
     return text;
+  }
+
+  static boolean isUniqueConstraint(SQLException error) {
+    SQLException current = error;
+    while (current != null) {
+      String state = current.getSQLState();
+      if (current instanceof java.sql.SQLIntegrityConstraintViolationException
+          || current.getErrorCode() == 19
+          || state != null && state.startsWith("23")) {
+        return true;
+      }
+      String message = current.getMessage();
+      if (message != null) {
+        String normalized = message.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.contains("unique") || normalized.contains("duplicate")) return true;
+      }
+      current = current.getNextException();
+    }
+    return false;
+  }
+
+  public static final class ChallengeTokenConflictException extends IllegalStateException {
+    public ChallengeTokenConflictException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  public static final class ChallengeInProgressException extends IllegalStateException {
+    public ChallengeInProgressException(String message) {
+      super(message);
+    }
   }
 }

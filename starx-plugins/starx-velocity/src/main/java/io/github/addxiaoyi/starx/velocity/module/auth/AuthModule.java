@@ -21,6 +21,7 @@ import io.github.addxiaoyi.starx.common.auth.AuthResult;
 import io.github.addxiaoyi.starx.common.auth.AuthService;
 import io.github.addxiaoyi.starx.common.auth.AuthSession;
 import io.github.addxiaoyi.starx.common.auth.DeviceFingerprint;
+import io.github.addxiaoyi.starx.common.identity.IdentitySource;
 import io.github.addxiaoyi.starx.common.auth.IpSessionStore;
 import io.github.addxiaoyi.starx.common.auth.PremiumResolver;
 import io.github.addxiaoyi.starx.common.auth.SessionManager;
@@ -260,10 +261,12 @@ public final class AuthModule implements VelocityModule {
             completion.complete(false);
             return;
           }
-          player.sendMessage(Component.text(
-              "网页登录确认成功，正在进入服务器。", NamedTextColor.GREEN));
-          this.routeAuthenticatedPlayer(player);
-          completion.complete(true);
+          boolean routed = this.routeAuthenticatedPlayer(player);
+          if (routed) {
+            player.sendMessage(Component.text(
+                "网页登录确认成功，正在进入服务器。", NamedTextColor.GREEN));
+          }
+          completion.complete(routed);
         } catch (RuntimeException error) {
           completion.completeExceptionally(error);
         }
@@ -453,12 +456,17 @@ public final class AuthModule implements VelocityModule {
     String username = player.getUsername();
     InetAddress address = this.playerAddress(player);
     if (this.externalHandshake.matches(player.getRawVirtualHost().orElse(null))) {
-      AuthResult result = this.authService.autoLoginTrusted(
-          lease, playerId, username, address, "external-handshake", false);
-      return this.finishTrustedLogin(player, result);
+      this.logger.fine("Validated external-handshake for " + username
+          + "; continuing with normal identity authentication");
     }
     boolean premium = this.premiumResolver.isPremium(playerId, player.isOnlineMode());
     boolean trustedExternalIdentity = this.trustedIdentity.isTrusted(playerId);
+    IdentitySource trustedSource = premium
+        ? IdentitySource.MOJANG
+        : trustedExternalIdentity ? IdentitySource.FLOODGATE : null;
+    if (trustedSource != null && this.authService.findConnectedUser(playerId).isPresent()) {
+      this.authService.observeTrustedMinecraftIdentity(playerId, username, trustedSource);
+    }
     boolean trustedWebsiteBinding = this.authService.hasTrustedWebsiteBinding(playerId, username);
     AuthService.BypassConfig bypassConfig = this.authService.getBypassConfig();
     boolean floodgateAutoLogin = AuthAdmissionPolicy.isFloodgateAutoLogin(
@@ -507,9 +515,11 @@ public final class AuthModule implements VelocityModule {
     RegisteredServer target = this.targetServer;
     if (target == null) {
       this.logMissingTarget();
+      this.authService.logout(player.getUniqueId());
       return Optional.of(TARGET_UNAVAILABLE);
     }
     if (!this.flows.route(player, target)) {
+      this.authService.logout(player.getUniqueId());
       return Optional.of(AUTH_ERROR);
     }
     return Optional.empty();
@@ -696,26 +706,31 @@ public final class AuthModule implements VelocityModule {
     this.routeAuthenticatedPlayer(player);
   }
 
-  private void routeAuthenticatedPlayer(Player player) {
+  private boolean routeAuthenticatedPlayer(Player player) {
     RegisteredServer target = this.targetServer;
     if (target == null) {
       this.logMissingTarget();
+      this.authService.logout(player.getUniqueId());
       this.flows.deny(player, TARGET_UNAVAILABLE);
       this.uworld.session(player).ifPresent(session -> session.fail(TARGET_UNAVAILABLE));
       player.disconnect(TARGET_UNAVAILABLE);
-      return;
+      return false;
     }
     if (!this.flows.route(player, target)) {
+      this.authService.logout(player.getUniqueId());
       this.flows.deny(player, AUTH_ERROR);
       player.disconnect(AUTH_ERROR);
-      return;
+      return false;
     }
 
     UworldFlowSession session = this.uworld.session(player).orElse(null);
     if (session == null || !session.complete(target)) {
+      this.authService.logout(player.getUniqueId());
       this.flows.deny(player, TARGET_UNAVAILABLE);
       player.disconnect(TARGET_UNAVAILABLE);
+      return false;
     }
+    return true;
   }
 
   private boolean checkRateLimit(UUID playerId) {
@@ -1042,6 +1057,9 @@ public final class AuthModule implements VelocityModule {
         player.disconnect(BACKEND_BLOCKED);
       } else if (result == AuthFlowIndex.ConnectResult.COMPLETED) {
         AuthModule.this.loginAttempts.remove(player.getUniqueId());
+        AuthModule.this.flows.lease(player).ifPresent(lease ->
+            AuthModule.this.authService.completeAuthenticatedProvisioning(
+                player.getUniqueId(), lease));
       } else if (result == AuthFlowIndex.ConnectResult.IGNORED
           && AuthModule.this.flows.requiresAuth(player)) {
         AuthModule.this.logger.log(Level.SEVERE,

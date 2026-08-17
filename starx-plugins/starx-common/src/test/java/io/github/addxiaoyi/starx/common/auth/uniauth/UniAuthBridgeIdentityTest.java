@@ -14,12 +14,34 @@ final class UniAuthBridgeIdentityTest {
   @Test
   void rejectsAProfileForAnotherUsernameBeforeLocalMigration() {
     UUID connectionUuid = UUID.randomUUID();
-    StarxUser account = user(UUID.randomUUID(), "CurrentPlayer");
+    StarxUser account = user(offlineUuid("CurrentPlayer"), "CurrentPlayer");
     UniAuthClient.PlayerProfileResponse profile = new UniAuthClient.PlayerProfileResponse(
         true, true, true, "OtherPlayer", connectionUuid.toString(), null, null, "REGISTERED");
 
     assertFalse(UniAuthBridge.isProfileIdentityCompatible(
         connectionUuid, "CurrentPlayer", account, profile));
+  }
+
+  @Test
+  void rejectsAProfileWithoutIdentityForANewAccount() {
+    UUID connectionUuid = UUID.randomUUID();
+    UniAuthClient.PlayerProfileResponse profile = new UniAuthClient.PlayerProfileResponse(
+        true, true, true, null, null, null, null, "REGISTERED");
+
+    assertFalse(UniAuthBridge.isProfileIdentityCompatible(
+        connectionUuid, "CurrentPlayer", null, profile));
+  }
+
+  @Test
+  void keepsExistingAccountAuthenticationCompatibleWhenProfileIdentityIsMissing() {
+    UUID connectionUuid = UUID.randomUUID();
+    StarxUser account = user(connectionUuid, "CurrentPlayer");
+    UniAuthClient.PlayerProfileResponse profile = new UniAuthClient.PlayerProfileResponse(
+        true, true, true, null, null, "external-7", "mail@example.test", "REGISTERED");
+
+    assertTrue(UniAuthBridge.isProfileIdentityCompatible(
+        connectionUuid, "CurrentPlayer", account, profile));
+    assertFalse(UniAuthBridge.hasProfileIdentity(profile));
   }
 
   @Test
@@ -37,7 +59,7 @@ final class UniAuthBridgeIdentityTest {
   @Test
   void doesNotTreatAnUnrelatedUuidAsTheSameAccountJustBecauseTheNameMatches() {
     UUID connectionUuid = UUID.randomUUID();
-    StarxUser account = user(UUID.randomUUID(), "CurrentPlayer");
+    StarxUser account = user(offlineUuid("CurrentPlayer"), "CurrentPlayer");
 
     assertFalse(UniAuthBridge.isOfflineUuidAlias(connectionUuid, "CurrentPlayer", account));
   }
@@ -48,7 +70,22 @@ final class UniAuthBridgeIdentityTest {
     StarxUser account = user(offlineUuid, "CurrentPlayer");
 
     assertTrue(UniAuthBridge.isOfflineUuidAlias(
-        UUID.randomUUID(), "CurrentPlayer", account));
+        offlineUuid, "CurrentPlayer", account));
+  }
+
+  @Test
+  void acceptsOfflineAliasWhenLoginNameCapitalizationChanged() {
+    UUID offlineUuid = offlineUuid("CurrentPlayer");
+    StarxUser account = user(offlineUuid, "CurrentPlayer");
+
+    assertTrue(UniAuthBridge.isOfflineUuidAlias(offlineUuid, "currentplayer", account));
+  }
+
+  @Test
+  void normalizesValidProfileEmailsAndSkipsInvalidValues() {
+    assertTrue("alice@example.test".equals(
+        UniAuthBridge.normalizeProfileEmail(" Alice@Example.Test ")));
+    assertTrue(UniAuthBridge.normalizeProfileEmail("not-an-email") == null);
   }
 
   private static StarxUser user(UUID uuid, String username) {

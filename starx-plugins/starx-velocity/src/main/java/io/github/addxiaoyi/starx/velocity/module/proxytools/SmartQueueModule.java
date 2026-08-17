@@ -84,6 +84,7 @@ implements VelocityModule {
         SmartQueueListener currentListener = new SmartQueueListener();
         this.listener = currentListener;
         proxy.getEventManager().register((Object)this.plugin, (Object)currentListener);
+        proxy.getAllPlayers().forEach(this.queueService::recordJoin);
         this.processingTask = proxy.getScheduler().buildTask((Object)this.plugin, this::sampleAndProcess)
             .repeat(Duration.ofMillis(this.config.checkIntervalMillis())).schedule();
         this.plugin.logger().info("SmartQueue: VIP priority + dynamic release enabled");

@@ -18,6 +18,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
+import java.util.Locale;
 
 /**
  * Migration module for importing users from other auth systems.
@@ -55,7 +56,7 @@ public final class MigrationModule implements VelocityModule {
 
     @Override
     public void onDisable() {
-        RUNNING.set(false);
+        // An active import owns the guard until its finally block completes.
     }
 
     public static boolean isRunning() {
@@ -82,7 +83,7 @@ public final class MigrationModule implements VelocityModule {
         int errors = 0;
 
         try (Connection sourceConn = getSourceConnection()) {
-            String schemaMode = config.schemaMode();
+            String schemaMode = normalizeSchemaMode(config.schemaMode());
             String tablePrefix = config.tablePrefix();
             plugin.logger().log(Level.INFO,
                 "Starting StarVC metadata import (schema={0}, prefix={1}, dryRun={2})",
@@ -93,11 +94,6 @@ public final class MigrationModule implements VelocityModule {
 
             try (PreparedStatement st = sourceConn.prepareStatement(query);
                  ResultSet rs = st.executeQuery()) {
-
-                if (!rs.isBeforeFirst()) {
-                    plugin.logger().log(Level.WARNING, "No user data found");
-                    return new MigrationResult(0, 0, 0, 0, 0, 0, dryRun);
-                }
 
                 while (rs.next()) {
                     total++;
@@ -132,6 +128,10 @@ public final class MigrationModule implements VelocityModule {
                 }
             }
 
+            if (total == 0) {
+                plugin.logger().log(Level.WARNING, "No user data found");
+            }
+
             plugin.logger().log(Level.INFO,
                 "StarVC import complete: total={0}, imported={1}, skippedExisting={2}, skippedInvalid={3}, errors={4}",
                 new Object[]{total, imported, skippedExisting, skippedInvalid, errors});
@@ -147,24 +147,45 @@ public final class MigrationModule implements VelocityModule {
         return new MigrationResult(total, imported, skippedExisting, skippedInvalid, errors, duration, dryRun);
     }
 
-    private String buildStarVCQuery(String schemaMode, String tablePrefix) {
-        String tableName = tablePrefix + switch (schemaMode.toLowerCase()) {
+    static String buildStarVCQuery(String schemaMode, String tablePrefix) {
+        String mode = normalizeSchemaMode(schemaMode);
+        String prefix = validateTablePrefix(tablePrefix);
+        String tableName = prefix + switch (mode) {
             case "authme" -> "authme";
             case "authlib" -> "users";
             case "luckperms" -> "luckperms_players";
-            default -> "starvc_users";
+            case "starx.starvc" -> "starvc_users";
+            default -> throw new IllegalArgumentException("Unsupported migration schema mode: " + schemaMode);
         };
 
-        return switch (schemaMode.toLowerCase()) {
+        return switch (mode) {
             case "authme" -> String.format(
                 "SELECT realname AS username, uuid, email, is_premium AS premium FROM %s", tableName);
             case "authlib" -> String.format(
                 "SELECT username, uuid, email, premium FROM %s", tableName);
             case "luckperms" -> String.format(
                 "SELECT username, uuid FROM %s", tableName);
-            default -> String.format(
+            case "starx.starvc" -> String.format(
                 "SELECT uuid, username, email, premium FROM %s", tableName);
+            default -> throw new IllegalArgumentException("Unsupported migration schema mode: " + schemaMode);
         };
+    }
+
+    static String normalizeSchemaMode(String schemaMode) {
+        if (schemaMode == null || schemaMode.isBlank()) {
+            throw new IllegalArgumentException("Migration schema mode must not be blank");
+        }
+        return schemaMode.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String validateTablePrefix(String tablePrefix) {
+        if (tablePrefix == null || tablePrefix.isEmpty()) {
+            return "";
+        }
+        if (!tablePrefix.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new IllegalArgumentException("Migration table prefix must be a simple SQL identifier prefix");
+        }
+        return tablePrefix;
     }
 
     private StarVCUserEntry parseStarVCUserEntry(ResultSet rs, String schemaMode) throws Exception {
@@ -193,10 +214,8 @@ public final class MigrationModule implements VelocityModule {
             default -> {
                 uuidStr = rs.getString("uuid");
                 username = rs.getString("username");
-                try {
-                    email = rs.getString("email");
-                    premium = rs.getBoolean("premium");
-                } catch (Exception ignored) {}
+                email = rs.getString("email");
+                premium = rs.getBoolean("premium");
             }
         }
 

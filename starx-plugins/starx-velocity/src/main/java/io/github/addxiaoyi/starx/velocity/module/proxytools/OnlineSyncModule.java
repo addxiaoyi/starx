@@ -41,6 +41,7 @@ implements VelocityModule {
     private final StarxVelocityPlugin plugin;
     private final Config config;
     private final Map<UUID, String> onlinePlayers = new ConcurrentHashMap<UUID, String>();
+    private final Map<UUID, Player> activePlayers = new ConcurrentHashMap<UUID, Player>();
     private CommandMeta commandMeta;
     private OnlineListener listener;
 
@@ -63,6 +64,10 @@ implements VelocityModule {
         OnlineListener currentListener = new OnlineListener();
         this.listener = currentListener;
         proxy.getEventManager().register((Object)this.plugin, (Object)currentListener);
+        proxy.getAllPlayers().forEach(player -> {
+            this.activePlayers.put(player.getUniqueId(), player);
+            this.onlinePlayers.put(player.getUniqueId(), player.getUsername());
+        });
         this.commandMeta = proxy.getCommandManager().metaBuilder("sxonline").plugin(this.plugin).build();
         proxy.getCommandManager().register(this.commandMeta, (Command)new ListCommand());
     }
@@ -76,6 +81,7 @@ implements VelocityModule {
         this.listener = null;
         if (currentListener != null) this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
         this.onlinePlayers.clear();
+        this.activePlayers.clear();
     }
 
     public int getOnlineCount() {
@@ -84,11 +90,28 @@ implements VelocityModule {
 
     void onPostLogin(PostLoginEvent event) {
         Player player = event.getPlayer();
+        this.activePlayers.put(player.getUniqueId(), player);
         this.onlinePlayers.put(player.getUniqueId(), player.getUsername());
     }
 
     void onDisconnect(DisconnectEvent event) {
-        this.onlinePlayers.remove(event.getPlayer().getUniqueId());
+        Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
+        if (!this.detachActivePlayer(playerId, player)) return;
+        this.onlinePlayers.remove(playerId);
+    }
+
+    private boolean detachActivePlayer(UUID playerId, Player player) {
+        java.util.concurrent.atomic.AtomicBoolean removed =
+            new java.util.concurrent.atomic.AtomicBoolean();
+        this.activePlayers.compute(playerId, (ignored, current) -> {
+            if (current == player) {
+                removed.set(true);
+                return null;
+            }
+            return current;
+        });
+        return removed.get();
     }
 
     public static interface Config {

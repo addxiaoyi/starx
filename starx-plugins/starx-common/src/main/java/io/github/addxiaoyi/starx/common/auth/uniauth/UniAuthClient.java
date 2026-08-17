@@ -204,16 +204,18 @@ public final class UniAuthClient {
 
   public CompletableFuture<StatusResponse> fetchStatus(String username) {
     return fetchProfile(username).thenApply(profile -> new StatusResponse(
+        profile.success(),
         profile.exists(),
         profile.registered(),
-        profile.status()));
+        profile.status(),
+        profile.serviceUnavailable()));
   }
 
   static PlayerProfileResponse parseProfileResponse(JsonObject json) {
     int code = integer(json, "code", 500);
     if (code != 200) {
       return new PlayerProfileResponse(
-          false, false, false, null, null, null, null, "ERROR");
+          false, false, false, null, null, null, null, "ERROR", code >= 500);
     }
 
     JsonObject data = object(json, "data");
@@ -362,7 +364,21 @@ public final class UniAuthClient {
     }
   }
 
-  public record StatusResponse(boolean exists, boolean imported, String status) {}
+  public record StatusResponse(
+      boolean success,
+      boolean exists,
+      boolean imported,
+      String status,
+      boolean serviceUnavailable) {
+    public StatusResponse(boolean exists, boolean imported, String status) {
+      this(
+          !"ERROR".equalsIgnoreCase(status) && !"disabled".equalsIgnoreCase(status),
+          exists,
+          imported,
+          status,
+          "ERROR".equalsIgnoreCase(status));
+    }
+  }
 
   public record PlayerProfileResponse(
       boolean success,
@@ -372,10 +388,23 @@ public final class UniAuthClient {
       String uuid,
       String externalUserId,
       String email,
-      String status) {
+      String status,
+      boolean serviceUnavailable) {
+    public PlayerProfileResponse(
+        boolean success,
+        boolean exists,
+        boolean registered,
+        String username,
+        String uuid,
+        String externalUserId,
+        String email,
+        String status) {
+      this(success, exists, registered, username, uuid, externalUserId, email, status, false);
+    }
+
     static PlayerProfileResponse error() {
       return new PlayerProfileResponse(
-          false, false, false, null, null, null, null, "ERROR");
+          false, false, false, null, null, null, null, "ERROR", true);
     }
   }
 }

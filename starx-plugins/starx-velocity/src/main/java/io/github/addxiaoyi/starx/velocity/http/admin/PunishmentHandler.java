@@ -14,15 +14,28 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 public final class PunishmentHandler
 implements AdminHandler {
     private static final Set<String> VALID_TYPES = Set.of("BAN", "MUTE", "WARN", "KICK", "TEMPBAN", "TEMPMUTE");
     private static final int MAX_REASON_LENGTH = 500;
     private final JdbcPunishmentRepository repo;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
     public PunishmentHandler(JdbcPunishmentRepository repo) {
+        this(repo, uuid -> uuid, uuid -> Set.of(uuid));
+    }
+
+    public PunishmentHandler(
+        JdbcPunishmentRepository repo,
+        Function<UUID, UUID> canonicalUuidResolver,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.repo = Objects.requireNonNull(repo, "repo");
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     @Override
@@ -45,7 +58,7 @@ implements AdminHandler {
         String player = ctx.queryParam("player");
         if (player != null && !player.isBlank()) {
             try {
-                result = this.repo.findByPlayer(UUID.fromString(player));
+                result = this.repo.findByPlayers(this.knownMinecraftUuidsResolver.apply(UUID.fromString(player)));
             }
             catch (IllegalArgumentException e) {
                 ctx.status(400).json(Map.of("error", "Invalid UUID format"));
@@ -87,7 +100,9 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", "reason too long (max 500 characters)"));
             return;
         }
-        Punishment p = new Punishment(UUID.randomUUID().toString(), req.targetUuid, targetName, normalizedType, req.reason != null ? this.sanitizeInput(req.reason) : null, req.staffUuid, staffName, System.currentTimeMillis(), req.expiresAt, true);
+        UUID targetUuid = this.canonicalUuidResolver.apply(req.targetUuid);
+        UUID staffUuid = this.canonicalUuidResolver.apply(req.staffUuid);
+        Punishment p = new Punishment(UUID.randomUUID().toString(), targetUuid, targetName, normalizedType, req.reason != null ? this.sanitizeInput(req.reason) : null, staffUuid, staffName, System.currentTimeMillis(), req.expiresAt, true);
         this.repo.record(p);
         ctx.status(201).json(Map.of("id", p.id(), "success", true));
     }

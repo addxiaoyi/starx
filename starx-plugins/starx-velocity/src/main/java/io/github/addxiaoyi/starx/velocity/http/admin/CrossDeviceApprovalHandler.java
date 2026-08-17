@@ -45,21 +45,37 @@ public final class CrossDeviceApprovalHandler implements AdminHandler {
 
   private void createRequest(JsonHttpExchange ctx) throws IOException {
     Request request = parse(ctx);
-    Map<String, Object> response = create(request.playerId, request.username, request.action);
+    Map<String, Object> response = create(
+        request.playerId, request.username, request.action, request.email);
     ctx.status(Boolean.TRUE.equals(response.get("ok")) ? 201 : 400).json(response);
   }
 
   private void confirmRequest(JsonHttpExchange ctx) throws IOException {
     Request request = parse(ctx);
-    CrossDeviceApprovalService.Action requested = action(request.action);
-    CrossDeviceApprovalService.Approval approval = this.approvals.approveAndExecute(
-        request.token, UUID.fromString(request.playerId), request.username, requested,
-        (operationId, challenge) -> this.executor.execute(operationId, challenge, request.email));
-    ctx.status(approval.success() ? 200 : 409).json(Map.of(
-        "ok", approval.success(), "status", approval.status().name()));
+    try {
+      CrossDeviceApprovalService.Action requested = action(request.action);
+      CrossDeviceApprovalService.Approval approval = this.approvals.approveAndExecute(
+          request.token, parsePlayerUuid(request.playerId), request.username, requested,
+          (operationId, challenge) -> {
+            if (requested == CrossDeviceApprovalService.Action.BIND_EMAIL
+                && !sameEmail(challenge.payload(), request.email)) {
+              return false;
+            }
+            return this.executor.execute(operationId, challenge, challenge.payload());
+          });
+      ctx.status(approval.success() ? 200 : 409).json(Map.of(
+          "ok", approval.success(), "status", approval.status().name()));
+    } catch (IllegalArgumentException error) {
+      ctx.status(400).json(Map.of("ok", false, "error", "invalid_request"));
+    }
   }
 
   Map<String, Object> create(String rawPlayerId, String username, String rawAction) {
+    return create(rawPlayerId, username, rawAction, null);
+  }
+
+  Map<String, Object> create(
+      String rawPlayerId, String username, String rawAction, String email) {
     try {
       CrossDeviceApprovalService.Action action;
       try {
@@ -73,8 +89,10 @@ public final class CrossDeviceApprovalHandler implements AdminHandler {
       if (action == CrossDeviceApprovalService.Action.APPROVE_LOGIN) {
         return Map.of("ok", false, "error", "login_challenge_requires_live_session");
       }
+      String payload = action == CrossDeviceApprovalService.Action.BIND_EMAIL
+          ? requireEmail(email) : null;
       CrossDeviceApprovalService.Challenge challenge = this.approvals.create(
-          UUID.fromString(rawPlayerId), username, action);
+        parsePlayerUuid(rawPlayerId), username, action, payload);
       return Map.of(
           "ok", true,
           "action", action.name(),
@@ -84,6 +102,14 @@ public final class CrossDeviceApprovalHandler implements AdminHandler {
           "token", challenge.token());
     } catch (IllegalArgumentException error) {
       return Map.of("ok", false, "error", "invalid_request");
+    }
+  }
+
+  private static UUID parsePlayerUuid(String rawPlayerId) {
+    try {
+      return UUID.fromString(Objects.requireNonNullElse(rawPlayerId, "").trim());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("player_id is invalid", error);
     }
   }
 
@@ -111,6 +137,19 @@ public final class CrossDeviceApprovalHandler implements AdminHandler {
   private static String normalizeOrigin(String origin) {
     if (origin == null || origin.isBlank()) throw new IllegalArgumentException("website origin is required");
     return origin.trim().replaceAll("/+$", "");
+  }
+
+  private static String requireEmail(String email) {
+    String normalized = Objects.requireNonNullElse(email, "").trim().toLowerCase(Locale.ROOT);
+    if (normalized.isBlank() || normalized.length() > 254 || !normalized.contains("@")) {
+      throw new IllegalArgumentException("email is invalid");
+    }
+    return normalized;
+  }
+
+  private static boolean sameEmail(String expected, String supplied) {
+    return expected != null && expected.equals(Objects.requireNonNullElse(supplied, "")
+        .trim().toLowerCase(Locale.ROOT));
   }
 
   private static final class Request {

@@ -12,14 +12,28 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 public final class StaffNoteHandler
 implements AdminHandler {
     private final JdbcStaffNoteRepository repo;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
     public StaffNoteHandler(JdbcStaffNoteRepository repo) {
+        this(repo, uuid -> uuid, uuid -> Set.of(uuid));
+    }
+
+    public StaffNoteHandler(
+        JdbcStaffNoteRepository repo,
+        Function<UUID, UUID> canonicalUuidResolver,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.repo = Objects.requireNonNull(repo, "repo");
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     @Override
@@ -42,7 +56,7 @@ implements AdminHandler {
         String player = ctx.queryParam("player");
         if (player != null && !player.isBlank()) {
             try {
-                result = this.repo.findByPlayer(UUID.fromString(player));
+                result = this.repo.findByPlayers(this.knownMinecraftUuidsResolver.apply(UUID.fromString(player)));
             }
             catch (IllegalArgumentException e) {
                 ctx.status(400).json(Map.of("error", "Invalid UUID format"));
@@ -74,7 +88,11 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", "severity must be INFO, WARNING, or CRITICAL"));
             return;
         }
-        StaffNote note = new StaffNote(UUID.randomUUID().toString(), req.targetUuid, this.sanitizeInput(noteText), severity, req.staffUuid != null ? req.staffUuid : UUID.fromString("00000000-0000-0000-0000-000000000000"), System.currentTimeMillis());
+        UUID targetUuid = this.canonicalUuidResolver.apply(req.targetUuid);
+        UUID staffUuid = req.staffUuid != null
+            ? this.canonicalUuidResolver.apply(req.staffUuid)
+            : UUID.fromString("00000000-0000-0000-0000-000000000000");
+        StaffNote note = new StaffNote(UUID.randomUUID().toString(), targetUuid, this.sanitizeInput(noteText), severity, staffUuid, System.currentTimeMillis());
         this.repo.addNote(note);
         ctx.status(201).json(Map.of("id", note.id(), "success", true));
     }

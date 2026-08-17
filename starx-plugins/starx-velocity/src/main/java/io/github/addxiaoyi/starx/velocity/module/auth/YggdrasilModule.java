@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -106,9 +107,21 @@ implements VelocityModule {
     }
 
     public CompletableFuture<Boolean> checkAllServers(String username, UUID uuid) {
-        CompletableFuture<Boolean> result = new CompletableFuture<Boolean>();
-        result.complete(false);
-        return result;
+        if (this.config.servers().isEmpty()) {
+            return CompletableFuture.completedFuture(false);
+        }
+        List<CompletableFuture<Boolean>> checks = this.config.servers().keySet().stream()
+            .map(serverName -> this.checkUserExists(username, uuid, serverName))
+            .toList();
+        return allSuccessful(checks);
+    }
+
+    static CompletableFuture<Boolean> allSuccessful(List<CompletableFuture<Boolean>> checks) {
+        Objects.requireNonNull(checks, "checks");
+        if (checks.isEmpty()) return CompletableFuture.completedFuture(false);
+        return CompletableFuture.allOf(checks.toArray(CompletableFuture[]::new))
+            .handle((ignored, error) -> error == null
+                && checks.stream().allMatch(check -> Boolean.TRUE.equals(check.join())));
     }
 
     public CompletableFuture<String> authenticate(String username, String serverId, String ip, String serverName) {

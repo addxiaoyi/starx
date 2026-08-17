@@ -10,6 +10,7 @@ import io.github.addxiaoyi.starx.common.model.StarxUser;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.UUID;
@@ -25,6 +26,18 @@ final class JdbcUserRepositoryExternalIdentityTest {
   private JdbcUserRepository users;
   private UUID firstPlayer;
   private UUID secondPlayer;
+
+  @Test
+  void mapsPostgresAndMysqlUniqueConstraintsToIdentityConflicts() {
+    assertTrue(JdbcUserRepository.translateExternalIdentityConflict(
+        new RuntimeException(new SQLException("duplicate key", "23505")), "site-user-7")
+        instanceof JdbcUserRepository.ExternalIdentityConflictException);
+    assertTrue(JdbcUserRepository.translateExternalIdentityConflict(
+        new RuntimeException(new SQLException("Duplicate entry", "23000")), "site-user-7")
+        instanceof JdbcUserRepository.ExternalIdentityConflictException);
+    assertTrue(JdbcUserRepository.isUniqueConstraint(
+        new RuntimeException(new SQLException("Duplicate entry", "23000"))));
+  }
 
   @BeforeEach
   void setUp() throws Exception {
@@ -55,6 +68,20 @@ final class JdbcUserRepositoryExternalIdentityTest {
 
     assertEquals("site-user-7", readUserExternalId(this.firstPlayer));
     assertTrue(hasWebsiteBinding(this.firstPlayer, "site-user-7", true));
+  }
+
+  @Test
+  void usernameExistenceChecksAreCaseInsensitive() throws Exception {
+    try (Connection connection = this.source.getConnection();
+         PreparedStatement update = connection.prepareStatement(
+             "UPDATE starx_users SET username = ? WHERE uuid = ?")) {
+      update.setString(1, "Alex");
+      update.setString(2, this.firstPlayer.toString());
+      update.executeUpdate();
+    }
+
+    assertTrue(this.users.existsByUsername("alex"));
+    assertTrue(this.users.existsByUsernameOrUuid("ALEX", UUID.randomUUID()));
   }
 
   @Test
@@ -163,6 +190,21 @@ final class JdbcUserRepositoryExternalIdentityTest {
     assertFalse(hasWebsiteBinding(this.firstPlayer, "site-user-7", true));
   }
 
+  @Test
+  void rollsBackEmailWhenProfileSyncFailsAfterEmailPlanning() throws Exception {
+    try (Connection connection = this.source.getConnection(); Statement statement = connection.createStatement()) {
+      statement.execute("CREATE TRIGGER reject_profile_identity BEFORE UPDATE OF external_user_id ON starx_users BEGIN SELECT RAISE(ABORT, 'forced profile sync failure'); END");
+    }
+
+    assertThrows(
+        RuntimeException.class,
+        () -> this.users.synchronizeProfile(
+            this.firstPlayer, "new@example.test", "remote-1", "uniauth", true));
+
+    assertEquals(null, readUserEmail(this.firstPlayer));
+    assertEquals(null, readUserExternalId(this.firstPlayer));
+  }
+
   private void insertUser(Connection connection, UUID uuid, String externalId) throws Exception {
     try (PreparedStatement insert = connection.prepareStatement(
         "INSERT INTO starx_users (uuid, external_user_id) VALUES (?, ?)")) {
@@ -176,6 +218,18 @@ final class JdbcUserRepositoryExternalIdentityTest {
     try (Connection connection = this.source.getConnection();
          PreparedStatement query = connection.prepareStatement(
              "SELECT external_user_id FROM starx_users WHERE uuid = ?")) {
+      query.setString(1, uuid.toString());
+      try (var rows = query.executeQuery()) {
+        assertTrue(rows.next());
+        return rows.getString(1);
+      }
+    }
+  }
+
+  private String readUserEmail(UUID uuid) throws Exception {
+    try (Connection connection = this.source.getConnection();
+         PreparedStatement query = connection.prepareStatement(
+             "SELECT email FROM starx_users WHERE uuid = ?")) {
       query.setString(1, uuid.toString());
       try (var rows = query.executeQuery()) {
         assertTrue(rows.next());

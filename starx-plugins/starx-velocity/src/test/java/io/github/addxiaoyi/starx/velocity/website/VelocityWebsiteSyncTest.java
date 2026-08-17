@@ -3,9 +3,12 @@ package io.github.addxiaoyi.starx.velocity.website;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
+import io.github.addxiaoyi.starx.api.dto.UserDto;
+import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendNodeRegistry;
 import io.github.addxiaoyi.starx.website.NodeSnapshot;
 import io.github.addxiaoyi.starx.website.ServerSnapshot;
@@ -14,9 +17,38 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class VelocityWebsiteSyncTest {
+  @Test
+  void expandsHistoricalUsersToAllKnownMinecraftUuidAliases() {
+    UUID offlineUuid = UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+    UUID premiumUuid = UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
+    UserDto user = UserDto.builder()
+        .uuid(offlineUuid)
+        .username("LegacyName")
+        .createdAt(Instant.parse("2026-07-27T00:00:00Z"))
+        .build();
+    JdbcUserRepository users = new JdbcUserRepository(null) {
+      @Override
+      public List<UserDto> findAll() {
+        return List.of(user);
+      }
+    };
+
+    List<SkinsRestorerTextureSource.PlayerRef> players =
+        VelocityWebsiteSync.historicalPlayers(
+            users,
+            ignored -> Set.of(offlineUuid, premiumUuid),
+            ignored -> { });
+
+    assertEquals(Set.of(offlineUuid, premiumUuid),
+        players.stream().map(SkinsRestorerTextureSource.PlayerRef::uuid).collect(java.util.stream.Collectors.toSet()));
+    assertTrue(players.stream().allMatch(player -> player.name().equals("LegacyName")));
+  }
+
   @Test
   void aggregatesKnownAndUnseenBackendsWithoutFabricatingProxyMetrics() {
     Instant now = Instant.parse("2026-07-27T00:00:00Z");

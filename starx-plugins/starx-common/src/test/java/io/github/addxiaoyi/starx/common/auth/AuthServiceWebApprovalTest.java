@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,6 +27,47 @@ import org.sqlite.SQLiteDataSource;
 
 class AuthServiceWebApprovalTest {
   @TempDir Path tempDir;
+
+  @Test
+  void cancellationRemovesAPendingWebApprovalSession() {
+    UUID playerId = UUID.randomUUID();
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthService auth = new AuthService(new EmptyUsers(), new LocalEventBus(), sessions);
+    AuthLease lease = AuthLease.create();
+    assertTrue(sessions.open(
+        playerId, "Alex", InetAddress.getLoopbackAddress(), lease) != null);
+    assertTrue(sessions.transition(
+        playerId, lease, AuthSession.State.GUEST, AuthSession.State.WEB_APPROVAL_PENDING));
+
+    try {
+      assertTrue(auth.cancelAuthentication(playerId, lease));
+      assertTrue(sessions.get(playerId, lease).isEmpty());
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void cancellationRemovesAnApprovedSessionForTheSameLease() {
+    UUID playerId = UUID.randomUUID();
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthService auth = new AuthService(new EmptyUsers(), new LocalEventBus(), sessions);
+    AuthLease lease = AuthLease.create();
+    assertTrue(sessions.open(
+        playerId, "Alex", InetAddress.getLoopbackAddress(), lease) != null);
+    assertTrue(sessions.transition(
+        playerId, lease, AuthSession.State.GUEST, AuthSession.State.WEB_APPROVAL_PENDING));
+    assertTrue(sessions.transition(
+        playerId, lease,
+        AuthSession.State.WEB_APPROVAL_PENDING, AuthSession.State.AUTHENTICATED));
+
+    try {
+      assertTrue(auth.cancelAuthentication(playerId, lease));
+      assertTrue(sessions.get(playerId, lease).isEmpty());
+    } finally {
+      sessions.shutdown();
+    }
+  }
 
   @Test
   void approvesOnlyTheCurrentAuthenticatingLease() throws Exception {
@@ -87,6 +129,7 @@ class AuthServiceWebApprovalTest {
         null, null, null, null, 0L, null, false));
     SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
     AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+    auth.bindMinecraftIdentityResolver(ignored -> Set.of(connectionUuid, accountUuid));
     AuthLease lease = AuthLease.create();
     assertTrue(sessions.open(
         connectionUuid, "Alex", InetAddress.getLoopbackAddress(), lease) != null);
@@ -99,6 +142,86 @@ class AuthServiceWebApprovalTest {
       assertTrue(result.success());
       assertTrue(sessions.isState(
           connectionUuid, lease, AuthSession.State.AUTHENTICATED));
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void webApprovalUsesTheLiveSessionNameForAMigratedAccount() throws Exception {
+    UUID legacyUuid = offlineUuid("LegacyName");
+    UUID currentUuid = UUID.randomUUID();
+    BoundAliasUsers users = new BoundAliasUsers(new StarxUser(
+        legacyUuid, "LegacyName", null, PasswordHasher.hash("ValidPassword_123"), null,
+        false, Instant.now(), null, null, List.of(), null, "local", "completed",
+        null, null, null, null, 0L, null, false), "CurrentName");
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+    AtomicReference<String> requestedName = new AtomicReference<>();
+    auth.bindMinecraftIdentityResolver(ignored -> Set.of(currentUuid, legacyUuid));
+    auth.bindWebLoginApprovalGateway((uuid, username, activeLease) -> {
+      requestedName.set(username);
+      return "https://star-web.top/minecraft/approve?token=test&action=approve_login";
+    });
+    AuthLease lease = AuthLease.create();
+    assertTrue(sessions.open(
+        currentUuid, "CurrentName", InetAddress.getLoopbackAddress(), lease) != null);
+
+    try {
+      AuthResult result = auth.requestWebLoginApproval(lease, currentUuid, "CurrentName");
+
+      assertTrue(result.success());
+      assertEquals("CurrentName", requestedName.get());
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void webApprovalChecksTheWebsiteBindingAgainstTheLiveSessionName() {
+    UUID playerId = UUID.randomUUID();
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    BoundAliasUsers users = new BoundAliasUsers(new StarxUser(
+        playerId, "OldName", null, PasswordHasher.hash("ValidPassword_123"), null,
+        false, Instant.now(), null, null, List.of(), null, "local", "completed",
+        null, null, null, null, 0L, null, false), "CurrentName");
+    AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+    auth.bindWebLoginApprovalGateway((uuid, username, lease) ->
+        "https://star-web.top/minecraft/approve?token=test&action=approve_login");
+    AuthLease lease = AuthLease.create();
+    assertTrue(sessions.open(
+        playerId, "CurrentName", InetAddress.getLoopbackAddress(), lease) != null);
+
+    try {
+      AuthResult result = auth.requestWebLoginApproval(lease, playerId, "CurrentName");
+
+      assertTrue(result.success());
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void passwordRiskDecisionUsesTheLiveSessionNameForWebsiteBinding() throws Exception {
+    UUID playerId = UUID.randomUUID();
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    BoundAliasUsers users = new BoundAliasUsers(new StarxUser(
+        playerId, "OldName", null, PasswordHasher.hash("ValidPassword_123"), null,
+        false, Instant.now(), null, null, List.of(), null, "local", "completed",
+        null, null, null, null, 0L, null, false), "CurrentName");
+    AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+    auth.bindWebLoginApprovalGateway((uuid, username, lease) ->
+        "https://star-web.top/minecraft/approve?token=test&action=approve_login");
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getByName("203.0.113.42");
+    assertTrue(sessions.open(playerId, "CurrentName", address, "new-device", lease) != null);
+
+    try {
+      AuthResult result = auth.login(
+          lease, playerId, "CurrentName", "ValidPassword_123", null, address, "new-device");
+
+      assertTrue(result.success());
+      assertEquals(AuthSession.State.WEB_APPROVAL_PENDING, result.state());
     } finally {
       sessions.shutdown();
     }
@@ -307,6 +430,33 @@ class AuthServiceWebApprovalTest {
 
     @Override
     public void updateLastLogin(UUID uuid, Instant lastLogin) {
+    }
+  }
+
+  private static final class BoundAliasUsers extends JdbcUserRepository {
+    private final StarxUser user;
+    private final String bindingName;
+
+    private BoundAliasUsers(StarxUser user, String bindingName) {
+      super(null);
+      this.user = user;
+      this.bindingName = bindingName;
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUuid(UUID uuid) {
+      return this.user.uuid().equals(uuid) ? Optional.of(this.user) : Optional.empty();
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUsername(String username) {
+      return this.user.username().equalsIgnoreCase(username)
+          ? Optional.of(this.user) : Optional.empty();
+    }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return this.user.uuid().equals(uuid) && this.bindingName.equalsIgnoreCase(username);
     }
   }
 

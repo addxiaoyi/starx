@@ -29,7 +29,7 @@ implements UserRepository {
     private static final String SELECT_COLUMNS = "uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices, COALESCE(recovery_codes, '') as recovery_codes, source_system, migration_state, password_migrated_at, last_login_ip, last_login_isp, last_login_location, total_playtime, last_logout_at, welcome_message_shown";
     private static final String SELECT_BY_UUID = "SELECT uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices, COALESCE(recovery_codes, '') as recovery_codes, source_system, migration_state, password_migrated_at, last_login_ip, last_login_isp, last_login_location, total_playtime, last_logout_at, welcome_message_shown FROM starx_users WHERE uuid = ?";
     private static final String SELECT_BY_USERNAME = "SELECT uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices, COALESCE(recovery_codes, '') as recovery_codes, source_system, migration_state, password_migrated_at, last_login_ip, last_login_isp, last_login_location, total_playtime, last_logout_at, welcome_message_shown FROM starx_users WHERE LOWER(username) = LOWER(?)";
-    private static final String SELECT_BY_EMAIL = "SELECT uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices, COALESCE(recovery_codes, '') as recovery_codes, source_system, migration_state, password_migrated_at, last_login_ip, last_login_isp, last_login_location, total_playtime, last_logout_at, welcome_message_shown FROM starx_users WHERE email = ?";
+    private static final String SELECT_BY_EMAIL = "SELECT uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices, COALESCE(recovery_codes, '') as recovery_codes, source_system, migration_state, password_migrated_at, last_login_ip, last_login_isp, last_login_location, total_playtime, last_logout_at, welcome_message_shown FROM starx_users WHERE LOWER(email) = LOWER(?)";
     private static final String SELECT_ALL = "SELECT uuid, username, email, password_hash, totp_secret, premium, created_at, last_login_at, external_user_id, trusted_devices, COALESCE(recovery_codes, '') as recovery_codes, source_system, migration_state, password_migrated_at, last_login_ip, last_login_isp, last_login_location, total_playtime, last_logout_at, welcome_message_shown FROM starx_users";
     private static final String DELETE_BY_UUID = "DELETE FROM starx_users WHERE uuid = ?";
     private static final Type TRUSTED_DEVICES_TYPE = new TypeToken<List<String>>(){}.getType();
@@ -57,7 +57,9 @@ implements UserRepository {
 
     @Override
     public boolean existsByUsername(String username) {
-        return this.queryOne("SELECT 1 FROM starx_users WHERE username = ?", stmt -> stmt.setString(1, username), rs -> 1).isPresent();
+        return this.queryOne(
+            "SELECT 1 FROM starx_users WHERE LOWER(username) = LOWER(?)",
+            stmt -> stmt.setString(1, username), rs -> 1).isPresent();
     }
 
     public List<UserDto> findAll() {
@@ -111,7 +113,7 @@ implements UserRepository {
     }
 
     public boolean existsByUsernameOrUuid(String username, UUID uuid) {
-        return this.queryOne("SELECT 1 FROM starx_users WHERE username = ? OR uuid = ?", stmt -> {
+        return this.queryOne("SELECT 1 FROM starx_users WHERE LOWER(username) = LOWER(?) OR uuid = ?", stmt -> {
             stmt.setString(1, username);
             stmt.setString(2, uuid.toString());
         }, rs -> 1).isPresent();
@@ -177,30 +179,151 @@ implements UserRepository {
             }) == 1;
     }
 
-    public boolean tryUpdateEmail(UUID uuid, String email) {
+    public boolean restoreTotp(UUID uuid, String totpSecret, String recoveryCodes) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(totpSecret, "totpSecret");
         return this.executeUpdate(
-            "UPDATE starx_users SET email = ? WHERE uuid = ? "
-                + "AND NOT EXISTS (SELECT 1 FROM starx_users WHERE email = ? AND uuid <> ?)",
+            "UPDATE starx_users SET totp_secret = ?, recovery_codes = ? WHERE uuid = ?",
             stmt -> {
-            stmt.setString(1, email);
-            stmt.setString(2, uuid.toString());
-            stmt.setString(3, email);
-            stmt.setString(4, uuid.toString());
-        }) == 1;
+                stmt.setString(1, totpSecret);
+                stmt.setString(2, recoveryCodes);
+                stmt.setString(3, uuid.toString());
+            }) == 1;
+    }
+
+    public boolean disableTotpIfCurrent(
+        UUID uuid, String expectedSecret, String expectedRecoveryCodes) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(expectedSecret, "expectedSecret");
+        Objects.requireNonNull(expectedRecoveryCodes, "expectedRecoveryCodes");
+        return this.executeUpdate(
+            "UPDATE starx_users SET totp_secret = NULL, recovery_codes = NULL "
+                + "WHERE uuid = ? AND totp_secret = ? AND COALESCE(recovery_codes, '') = ?",
+            stmt -> {
+                stmt.setString(1, uuid.toString());
+                stmt.setString(2, expectedSecret);
+                stmt.setString(3, expectedRecoveryCodes);
+            }) == 1;
+    }
+
+    public boolean restoreTotpIfCurrentDisabled(
+        UUID uuid, String totpSecret, String recoveryCodes) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(totpSecret, "totpSecret");
+        Objects.requireNonNull(recoveryCodes, "recoveryCodes");
+        return this.executeUpdate(
+            "UPDATE starx_users SET totp_secret = ?, recovery_codes = ? "
+                + "WHERE uuid = ? AND totp_secret IS NULL AND recovery_codes IS NULL",
+            stmt -> {
+                stmt.setString(1, totpSecret);
+                stmt.setString(2, recoveryCodes);
+                stmt.setString(3, uuid.toString());
+            }) == 1;
+    }
+
+    public boolean tryUpdateEmail(UUID uuid, String email) {
+        try {
+            return this.executeUpdate(
+                "UPDATE starx_users SET email = ? WHERE uuid = ? "
+                    + "AND NOT EXISTS (SELECT 1 FROM starx_users WHERE LOWER(email) = LOWER(?) AND uuid <> ?)",
+                stmt -> {
+                stmt.setString(1, email);
+                stmt.setString(2, uuid.toString());
+                stmt.setString(3, email);
+                stmt.setString(4, uuid.toString());
+            }) == 1;
+        } catch (RuntimeException error) {
+            if (isUniqueConstraint(error)) return false;
+            throw error;
+        }
+    }
+
+    public void synchronizeProfile(
+        UUID uuid,
+        String email,
+        String externalUserId,
+        String sourceSystem,
+        boolean updateEmail) {
+        Objects.requireNonNull(uuid, "uuid");
+        String normalizedEmail = email == null ? null : email.trim();
+        String normalizedExternalId = normalizeExternalUserId(externalUserId);
+        try {
+            this.withTransaction(conn -> {
+                StarxUser existing = this.findFullByUuid(conn, uuid)
+                    .orElseThrow(() -> new IllegalStateException(
+                        "Profile sync target account is missing: " + uuid));
+                if (updateEmail && normalizedEmail != null
+                    && !normalizedEmail.equalsIgnoreCase(Objects.requireNonNullElse(existing.email(), ""))
+                    && !emailAvailable(conn, uuid, normalizedEmail)) {
+                    throw new ExternalIdentityConflictException(normalizedEmail);
+                }
+                if (normalizedExternalId != null
+                    && !Objects.equals(normalizedExternalId, normalizeExternalUserId(existing.externalUserId()))
+                    && !externalIdentityAvailable(conn, uuid, normalizedExternalId)) {
+                    throw new ExternalIdentityConflictException(normalizedExternalId);
+                }
+                try (PreparedStatement update = conn.prepareStatement(
+                    "UPDATE starx_users SET email = ?, external_user_id = ?, source_system = ? WHERE uuid = ?")) {
+                    update.setString(1, updateEmail ? normalizedEmail : existing.email());
+                    update.setString(2, normalizedExternalId);
+                    update.setString(3, sourceSystem);
+                    update.setString(4, uuid.toString());
+                    if (update.executeUpdate() != 1) {
+                        throw new IllegalStateException("Profile sync target account is missing: " + uuid);
+                    }
+                }
+                if (!Objects.equals(normalizedExternalId,
+                    normalizeExternalUserId(existing.externalUserId()))) {
+                    try (PreparedStatement delete = conn.prepareStatement(
+                        "DELETE FROM starx_website_bindings WHERE player_uuid = ?")) {
+                        delete.setString(1, uuid.toString());
+                        delete.executeUpdate();
+                    }
+                }
+            });
+        } catch (RuntimeException error) {
+            throw translateExternalIdentityConflict(error, normalizedExternalId);
+        }
     }
 
     public void updateLastLogin(UUID uuid, Instant lastLogin) {
-        this.execute("UPDATE starx_users SET last_login_at = ? WHERE uuid = ?", stmt -> {
+        int updated = this.executeUpdate("UPDATE starx_users SET last_login_at = ? WHERE uuid = ?", stmt -> {
             stmt.setTimestamp(1, Timestamp.from(lastLogin));
             stmt.setString(2, uuid.toString());
         });
+        if (updated != 1) {
+            throw new IllegalStateException("Login metadata target account is missing: " + uuid);
+        }
     }
 
     public void updatePremium(UUID uuid, boolean premium) {
-        this.execute("UPDATE starx_users SET premium = ? WHERE uuid = ?", stmt -> {
+        int updated = this.executeUpdate("UPDATE starx_users SET premium = ? WHERE uuid = ?", stmt -> {
             stmt.setBoolean(1, premium);
             stmt.setString(2, uuid.toString());
         });
+        if (updated != 1) {
+            throw new IllegalStateException("Premium metadata target account is missing: " + uuid);
+        }
+    }
+
+    public boolean restoreLoginMetadataIfCurrent(
+        UUID uuid,
+        Instant expectedLastLogin,
+        boolean expectedPremium,
+        Instant previousLastLogin,
+        boolean previousPremium) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(expectedLastLogin, "expectedLastLogin");
+        String sql = "UPDATE starx_users SET last_login_at = ?, premium = ? "
+            + "WHERE uuid = ? AND premium = ? AND (last_login_at = ? OR last_login_at IS NULL AND ? IS NULL)";
+        return this.executeUpdate(sql, stmt -> {
+            stmt.setTimestamp(1, previousLastLogin == null ? null : Timestamp.from(previousLastLogin));
+            stmt.setBoolean(2, previousPremium);
+            stmt.setString(3, uuid.toString());
+            stmt.setBoolean(4, expectedPremium);
+            stmt.setTimestamp(5, Timestamp.from(expectedLastLogin));
+            stmt.setTimestamp(6, Timestamp.from(expectedLastLogin));
+        }) == 1;
     }
 
     public void updateTrustedDevices(UUID uuid, List<String> trustedDevices) {
@@ -210,6 +333,22 @@ implements UserRepository {
         });
     }
 
+    public boolean replaceTrustedDevicesIfCurrent(
+        UUID uuid, List<String> expected, List<String> replacement) {
+        Objects.requireNonNull(uuid, "uuid");
+        String expectedJson = this.toJson(expected);
+        String replacementJson = this.toJson(replacement);
+        return this.executeUpdate(
+            "UPDATE starx_users SET trusted_devices = ? WHERE uuid = ? "
+                + "AND COALESCE(NULLIF(TRIM(trusted_devices), ''), '[]') = "
+                + "COALESCE(NULLIF(TRIM(?), ''), '[]')",
+            stmt -> {
+                stmt.setString(1, replacementJson);
+                stmt.setString(2, uuid.toString());
+                stmt.setString(3, expectedJson);
+            }) == 1;
+    }
+
     public boolean replaceRecoveryCodes(UUID uuid, String expected, String replacement) {
         return this.executeUpdate(
             "UPDATE starx_users SET recovery_codes = ? WHERE uuid = ? AND recovery_codes = ?",
@@ -217,6 +356,20 @@ implements UserRepository {
                 stmt.setString(1, replacement);
                 stmt.setString(2, uuid.toString());
                 stmt.setString(3, expected);
+            }) == 1;
+    }
+
+    public boolean restoreRecoveryCodesIfCurrent(
+        UUID uuid, String expectedReplacement, String original) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(expectedReplacement, "expectedReplacement");
+        Objects.requireNonNull(original, "original");
+        return this.executeUpdate(
+            "UPDATE starx_users SET recovery_codes = ? WHERE uuid = ? AND recovery_codes = ?",
+            stmt -> {
+                stmt.setString(1, original);
+                stmt.setString(2, uuid.toString());
+                stmt.setString(3, expectedReplacement);
             }) == 1;
     }
 
@@ -378,6 +531,17 @@ implements UserRepository {
         }
     }
 
+    private boolean emailAvailable(Connection conn, UUID uuid, String email) throws SQLException {
+        try (PreparedStatement query = conn.prepareStatement(
+            "SELECT 1 FROM starx_users WHERE LOWER(email) = LOWER(?) AND uuid <> ? LIMIT 1")) {
+            query.setString(1, email);
+            query.setString(2, uuid.toString());
+            try (ResultSet rows = query.executeQuery()) {
+                return !rows.next();
+            }
+        }
+    }
+
     private void ensureExternalIdentityAvailable(
         Connection connection, UUID uuid, String externalUserId) throws SQLException {
         if (externalUserId != null && !externalIdentityAvailable(connection, uuid, externalUserId)) {
@@ -391,20 +555,32 @@ implements UserRepository {
         return normalized.isEmpty() ? null : normalized;
     }
 
-    private static RuntimeException translateExternalIdentityConflict(
+    static RuntimeException translateExternalIdentityConflict(
         RuntimeException error, String externalUserId) {
         if (externalUserId == null) return error;
+        if (isUniqueConstraint(error)) {
+            return new ExternalIdentityConflictException(externalUserId);
+        }
+        return error;
+    }
+
+    static boolean isUniqueConstraint(Throwable error) {
         Throwable current = error;
         while (current != null) {
-            if (current instanceof SQLException sql
-                && (sql.getErrorCode() == 19
-                    || sql.getMessage() != null
-                    && sql.getMessage().toLowerCase(java.util.Locale.ROOT).contains("unique"))) {
-                return new ExternalIdentityConflictException(externalUserId);
+            if (current instanceof SQLException sql) {
+                String state = sql.getSQLState();
+                String message = sql.getMessage();
+                if (sql.getErrorCode() == 19
+                    || state != null && state.startsWith("23")
+                    || message != null && (message.toLowerCase(java.util.Locale.ROOT)
+                        .contains("unique") || message.toLowerCase(java.util.Locale.ROOT)
+                        .contains("duplicate"))) {
+                    return true;
+                }
             }
             current = current.getCause();
         }
-        return error;
+        return false;
     }
 
     public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
@@ -442,6 +618,28 @@ implements UserRepository {
         if (updated != 1) {
             throw new IllegalStateException("Password restore target account is missing: " + uuid);
         }
+    }
+
+    public boolean restorePasswordMigrationIfCurrent(
+        UUID uuid,
+        String expectedPasswordHash,
+        String passwordHash,
+        String migrationState,
+        Instant migratedAt
+    ) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(expectedPasswordHash, "expectedPasswordHash");
+        return this.executeUpdate(
+            "UPDATE starx_users SET password_hash = ?, migration_state = ?, password_migrated_at = ? "
+                + "WHERE uuid = ? AND password_hash = ? AND migration_state = ?",
+            stmt -> {
+                stmt.setString(1, passwordHash);
+                stmt.setString(2, migrationState);
+                stmt.setTimestamp(3, migratedAt == null ? null : Timestamp.from(migratedAt));
+                stmt.setString(4, uuid.toString());
+                stmt.setString(5, expectedPasswordHash);
+                stmt.setString(6, "completed");
+            }) == 1;
     }
 
     public int countByMigrationState(String migrationState) {

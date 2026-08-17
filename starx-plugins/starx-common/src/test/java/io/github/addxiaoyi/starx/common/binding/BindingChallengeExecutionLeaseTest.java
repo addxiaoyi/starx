@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.addxiaoyi.starx.common.binding.BindingState;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Statement;
@@ -40,6 +41,51 @@ final class BindingChallengeExecutionLeaseTest {
     assertFalse(service.consume(first, recoveredAt));
     assertTrue(service.consume(second, recoveredAt));
     assertNull(service.inspectExecutable("QQ", token, recoveredAt.plusSeconds(1)));
+  }
+
+  @Test
+  void challengeIsExpiredAtItsExactDeadline() throws Exception {
+    SQLiteDataSource source = database();
+    BindingChallengeService service = new BindingChallengeService(
+        new JdbcBindingChallengeRepository(source), LEASE);
+    Instant now = Instant.parse("2026-07-28T12:00:00Z");
+    String token = "638402";
+    service.begin("account-1", "QQ", token, now, Duration.ofSeconds(2));
+
+    assertNull(service.inspectExecutable("QQ", token, now.plusSeconds(2)));
+  }
+
+  @Test
+  void executionAcquiredBeforeExpiryCanConsumeAfterTheDeadline() throws Exception {
+    SQLiteDataSource source = database();
+    BindingChallengeService service = new BindingChallengeService(
+        new JdbcBindingChallengeRepository(source), LEASE);
+    Instant now = Instant.parse("2026-07-28T12:00:00Z");
+    String token = "731904";
+    service.begin("account-1", "QQ", token, now, Duration.ofSeconds(2));
+    BindingChallenge stored = service.inspectExecutable("QQ", token, now);
+
+    BindingChallengeService.Execution execution = service.acquire(stored, now);
+
+    assertTrue(service.consume(execution, now.plusSeconds(3)));
+    assertNull(service.inspectExecutable("QQ", token, now.plusSeconds(3)));
+  }
+
+  @Test
+  void executionAcquiredBeforeExpiryCanReleaseThenExpireTheChallenge() throws Exception {
+    SQLiteDataSource source = database();
+    JdbcBindingChallengeRepository repository = new JdbcBindingChallengeRepository(source);
+    BindingChallengeService service = new BindingChallengeService(repository, LEASE);
+    Instant now = Instant.parse("2026-07-28T12:00:00Z");
+    String token = "194027";
+    String id = service.begin("account-1", "QQ", token, now, Duration.ofSeconds(2));
+    BindingChallengeService.Execution execution =
+        service.acquire(service.inspectExecutable("QQ", token, now), now);
+
+    assertTrue(service.release(execution, now.plusSeconds(3)));
+    assertEquals(BindingState.SENT, repository.find(id).orElseThrow().state());
+    assertNull(service.inspectExecutable("QQ", token, now.plusSeconds(3)));
+    assertEquals(BindingState.EXPIRED, repository.find(id).orElseThrow().state());
   }
 
   private SQLiteDataSource database() throws Exception {

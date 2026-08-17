@@ -8,6 +8,7 @@ import io.github.addxiaoyi.starx.common.model.PlayerBinding;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Statement;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -93,6 +94,54 @@ final class JdbcBindingRepositoryTest {
     PlayerBinding stored = this.bindings.findByPlayer(player).orElseThrow();
     assertEquals("10001", stored.qqId());
     assertEquals("discord-1", stored.discordId());
+  }
+
+  @Test
+  void migratesLegacyBindingToCanonicalPlayerUuid() {
+    UUID legacy = UUID.randomUUID();
+    UUID current = UUID.randomUUID();
+    PlayerBinding binding = new PlayerBinding(legacy, "10001", "discord-1", 1L);
+    assertTrue(this.bindings.save(binding));
+
+    assertTrue(this.bindings.migratePlayer(legacy, current));
+
+    assertTrue(this.bindings.findByPlayer(legacy).isEmpty());
+    assertAllFields(
+        new PlayerBinding(current, "10001", "discord-1", 1L),
+        this.bindings.findByPlayer(current).orElseThrow());
+    assertEquals(current, this.bindings.findByQq("10001").orElseThrow().playerUuid());
+    assertEquals(current, this.bindings.findByDiscord("discord-1").orElseThrow().playerUuid());
+  }
+
+  @Test
+  void refusesConflictingMigrationWithoutChangingEitherBinding() {
+    UUID legacy = UUID.randomUUID();
+    UUID current = UUID.randomUUID();
+    assertTrue(this.bindings.save(new PlayerBinding(legacy, "10001", "discord-1", 1L)));
+    assertTrue(this.bindings.save(new PlayerBinding(current, "10002", "discord-2", 2L)));
+
+    assertFalse(this.bindings.migratePlayer(legacy, current));
+
+    assertEquals("10001", this.bindings.findByPlayer(legacy).orElseThrow().qqId());
+    assertEquals("10002", this.bindings.findByPlayer(current).orElseThrow().qqId());
+  }
+
+  @Test
+  void rollsBackLegacyMigrationWhenRequestedIdentityIsAlreadyBound() {
+    UUID legacy = UUID.randomUUID();
+    UUID current = UUID.randomUUID();
+    UUID owner = UUID.randomUUID();
+    assertTrue(this.bindings.save(new PlayerBinding(legacy, "10001", null, 1L)));
+    assertTrue(this.bindings.save(new PlayerBinding(owner, "10002", null, 1L)));
+
+    assertFalse(this.bindings.migrateAndSave(
+        Set.of(legacy), new PlayerBinding(current, "10002", null, 2L)));
+
+    assertAllFields(
+        new PlayerBinding(legacy, "10001", null, 1L),
+        this.bindings.findByPlayer(legacy).orElseThrow());
+    assertTrue(this.bindings.findByPlayer(current).isEmpty());
+    assertEquals(owner, this.bindings.findByQq("10002").orElseThrow().playerUuid());
   }
 
   private static void assertAllFields(PlayerBinding expected, PlayerBinding actual) {

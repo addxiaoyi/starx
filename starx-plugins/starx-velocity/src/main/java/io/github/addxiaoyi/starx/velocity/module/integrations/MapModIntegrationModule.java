@@ -20,6 +20,7 @@ public final class MapModIntegrationModule implements VelocityModule {
   private final StarxVelocityPlugin plugin;
   private final Config config;
   private final ConcurrentHashMap<UUID, Set<String>> detected = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, Player> activePlayers = new ConcurrentHashMap<>();
   private Listener listener;
 
   public MapModIntegrationModule(StarxVelocityPlugin plugin, Config config) {
@@ -40,6 +41,11 @@ public final class MapModIntegrationModule implements VelocityModule {
     Listener current = new Listener();
     this.listener = current;
     this.plugin.proxy().getEventManager().register(this.plugin, current);
+    this.plugin.proxy().getAllPlayers().forEach(player -> {
+      this.activePlayers.put(player.getUniqueId(), player);
+      Set<String> maps = MapIntegrationCatalog.detectClientMaps(ClientModProfile.detect(player));
+      if (!maps.isEmpty()) this.detected.put(player.getUniqueId(), maps);
+    });
     this.plugin.logger().info(
         "Map compatibility catalog active for JourneyMap, Xaero, VoxelMap, BlueMap, Dynmap, "
             + "squaremap, Pl3xMap, OpenPAC and FTB Chunks; plugin channels remain transparent");
@@ -53,12 +59,15 @@ public final class MapModIntegrationModule implements VelocityModule {
       this.plugin.proxy().getEventManager().unregisterListener(this.plugin, current);
     }
     this.detected.clear();
+    this.activePlayers.clear();
   }
 
   void onPostLogin(PostLoginEvent event) {
     Player player = event.getPlayer();
+    this.activePlayers.put(player.getUniqueId(), player);
     Set<String> maps = MapIntegrationCatalog.detectClientMaps(ClientModProfile.detect(player));
     if (maps.isEmpty()) {
+      this.detected.remove(player.getUniqueId());
       return;
     }
     this.detected.put(player.getUniqueId(), maps);
@@ -75,7 +84,23 @@ public final class MapModIntegrationModule implements VelocityModule {
   }
 
   void onDisconnect(DisconnectEvent event) {
-    this.detected.remove(event.getPlayer().getUniqueId());
+    Player player = event.getPlayer();
+    UUID playerId = player.getUniqueId();
+    if (!this.detachActivePlayer(playerId, player)) return;
+    this.detected.remove(playerId);
+  }
+
+  private boolean detachActivePlayer(UUID playerId, Player player) {
+    java.util.concurrent.atomic.AtomicBoolean removed =
+        new java.util.concurrent.atomic.AtomicBoolean();
+    this.activePlayers.compute(playerId, (ignored, current) -> {
+      if (current == player) {
+        removed.set(true);
+        return null;
+      }
+      return current;
+    });
+    return removed.get();
   }
 
   Set<String> detected(UUID playerId) {

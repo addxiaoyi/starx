@@ -25,13 +25,17 @@ import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.github.addxiaoyi.starx.common.database.JdbcVoteRepository;
+import io.github.addxiaoyi.starx.common.database.VoteAlreadyCastException;
 import io.github.addxiaoyi.starx.common.model.StaffVote;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import net.kyori.adventure.text.BuildableComponent;
 import net.kyori.adventure.text.Component;
@@ -44,11 +48,24 @@ implements VelocityModule {
     private static final long VOTE_DURATION_MS = 120000L;
     private final StarxVelocityPlugin plugin;
     private final JdbcVoteRepository voteRepo;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
     private CommandMeta commandMeta;
 
     public VoteModule(StarxVelocityPlugin plugin, JdbcVoteRepository voteRepo) {
+        this(plugin, voteRepo, Function.identity(), Set::of);
+    }
+
+    public VoteModule(
+        StarxVelocityPlugin plugin,
+        JdbcVoteRepository voteRepo,
+        Function<UUID, UUID> canonicalUuidResolver,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.plugin = plugin;
         this.voteRepo = voteRepo;
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     @Override
@@ -109,7 +126,9 @@ implements VelocityModule {
                 inv.source().sendMessage((Component)Component.text((String)"未找到该玩家。", (TextColor)NamedTextColor.RED));
                 return;
             }
-            StaffVote vote = new StaffVote(UUID.randomUUID().toString(), ((Player)target.get()).getUniqueId(), targetName, reason, "STAFF_VOTE", "ACTIVE", staff.getUniqueId(), staff.getUsername(), 0, 0, 3, System.currentTimeMillis() + 120000L, System.currentTimeMillis(), null);
+            UUID targetUuid = VoteModule.this.canonicalUuidResolver.apply(((Player)target.get()).getUniqueId());
+            UUID initiatorUuid = VoteModule.this.canonicalUuidResolver.apply(staff.getUniqueId());
+            StaffVote vote = new StaffVote(UUID.randomUUID().toString(), targetUuid, targetName, reason, "STAFF_VOTE", "ACTIVE", initiatorUuid, staff.getUsername(), 0, 0, 3, System.currentTimeMillis() + 120000L, System.currentTimeMillis(), null);
             VoteModule.this.voteRepo.create(vote);
             BuildableComponent msg = ((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)((TextComponent.Builder)Component.text().append((Component)Component.text((String)"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", (TextColor)NamedTextColor.DARK_GRAY))).append((Component)Component.text((String)"\n[投票] ", (TextColor)NamedTextColor.GOLD))).append((Component)Component.text((String)staff.getUsername(), (TextColor)NamedTextColor.YELLOW))).append((Component)Component.text((String)" 发起了针对 ", (TextColor)NamedTextColor.WHITE))).append((Component)Component.text((String)targetName, (TextColor)NamedTextColor.RED))).append((Component)Component.text((String)" 的投票：", (TextColor)NamedTextColor.WHITE))).append((Component)Component.text((String)reason, (TextColor)NamedTextColor.GRAY))).append((Component)Component.text((String)"\n请输入 ", (TextColor)NamedTextColor.WHITE))).append((Component)Component.text((String)"/sxvote yes", (TextColor)NamedTextColor.GREEN))).append((Component)Component.text((String)" 或 ", (TextColor)NamedTextColor.WHITE))).append((Component)Component.text((String)"/sxvote no", (TextColor)NamedTextColor.RED))).append((Component)Component.text((String)" 参与投票。", (TextColor)NamedTextColor.WHITE))).append((Component)Component.text((String)"\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", (TextColor)NamedTextColor.DARK_GRAY))).build();
             for (Player p : VoteModule.this.plugin.proxy().getAllPlayers()) {
@@ -169,12 +188,24 @@ implements VelocityModule {
                 return;
             }
             StaffVote vote = active.get();
-            if (VoteModule.this.voteRepo.hasVoted(vote.id(), voter.getUniqueId())) {
+            UUID voterUuid = voter.getUniqueId();
+            Set<UUID> knownUuids = Objects.requireNonNull(
+                VoteModule.this.knownMinecraftUuidsResolver.apply(voterUuid),
+                "knownMinecraftUuidsResolver returned null");
+            if (VoteModule.this.voteRepo.hasVoted(vote.id(), knownUuids)) {
                 inv.source().sendMessage((Component)Component.text((String)"你已经投过票了。", (TextColor)NamedTextColor.RED));
                 return;
             }
             boolean yes = "yes".equals(choice);
-            VoteModule.this.voteRepo.castVote(vote.id(), voter.getUniqueId(), yes);
+            UUID canonicalUuid = Objects.requireNonNull(
+                VoteModule.this.canonicalUuidResolver.apply(voterUuid),
+                "canonicalUuidResolver returned null");
+            try {
+                VoteModule.this.voteRepo.castVote(vote.id(), canonicalUuid, yes);
+            } catch (VoteAlreadyCastException error) {
+                inv.source().sendMessage((Component)Component.text((String)"你已经投过票了。", (TextColor)NamedTextColor.RED));
+                return;
+            }
             inv.source().sendMessage((Component)Component.text((String)("投票成功：" + choice.toUpperCase()), (TextColor)NamedTextColor.GREEN));
             int yesCount = VoteModule.this.voteRepo.countYes(vote.id());
             Optional<StaffVote> updated = VoteModule.this.voteRepo.findById(vote.id());

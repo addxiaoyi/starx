@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.velocity.module.uworld;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,5 +53,29 @@ final class UworldRegistryTest {
 
     assertEquals(UworldRegistry.ClaimResult.RUNTIME_STOPPING,
         registry.claim(new Object(), new Object()));
+  }
+
+  @Test
+  void doesNotExposeAnOldConnectionSessionThroughAnEqualReplacement() {
+    UworldRegistry<EqualPlayer, Object, Object> registry = new UworldRegistry<>();
+    EqualPlayer first = new EqualPlayer("same-uuid");
+    EqualPlayer replacement = new EqualPlayer("same-uuid");
+    Object session = new Object();
+
+    assertEquals(UworldRegistry.ClaimResult.ACCEPTED, registry.claim(first, session));
+    assertTrue(registry.session(replacement).isEmpty());
+    assertSame(session, registry.session(first).orElseThrow());
+  }
+
+  private record EqualPlayer(String id) {
+    @Override
+    public boolean equals(Object other) {
+      return other instanceof EqualPlayer player && this.id.equals(player.id);
+    }
+
+    @Override
+    public int hashCode() {
+      return this.id.hashCode();
+    }
   }
 }

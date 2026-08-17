@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collection;
 import javax.sql.DataSource;
 
 public class JdbcStaffNoteRepository {
@@ -35,9 +36,16 @@ public class JdbcStaffNoteRepository {
   }
 
   public List<StaffNote> findByPlayer(UUID targetId) {
+    return findByPlayers(List.of(targetId));
+  }
+
+  public List<StaffNote> findByPlayers(Collection<UUID> targetIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(targetIds);
+    if (ids.isEmpty()) return List.of();
     return this.store.many(
-        "SELECT " + COLUMNS + " FROM starx_staff_notes WHERE target_uuid = ? ORDER BY created_at DESC",
-        statement -> statement.setString(1, targetId.toString()),
+        "SELECT " + COLUMNS + " FROM starx_staff_notes WHERE target_uuid IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ") ORDER BY created_at DESC",
+        statement -> JdbcUuidQuery.bind(statement, ids),
         this::map);
   }
 

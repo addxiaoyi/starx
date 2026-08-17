@@ -22,17 +22,24 @@ public final class AccountDeletionExecutor {
     int completed = 0;
     List<Failure> failed = new ArrayList<>();
     for (JdbcAccountDeletionRepository.DueRequest request : deletions.findDue(now, BATCH_SIZE)) {
-      if (!deletions.claimDue(request.requestId(), now)) continue;
+      String claimToken = deletions.claimDueToken(request.requestId(), now).orElse(null);
+      if (claimToken == null) continue;
       claimed++;
       try {
-        eraser.erase(request.playerUuid(), now);
-        if (!deletions.complete(request.requestId(), now)) {
-          throw new IllegalStateException("Deletion request changed before completion: " + request.requestId());
+        if (eraser instanceof TransactionalEraser transactional) {
+          transactional.eraseAndComplete(request.requestId(), claimToken, request.playerUuid(), now);
+        } else {
+          eraser.erase(request.playerUuid(), now);
+          if (!deletions.complete(request.requestId(), claimToken, now)) {
+            throw new IllegalStateException("Deletion request changed before completion: " + request.requestId());
+          }
         }
         completed++;
       } catch (RuntimeException error) {
-        if (!deletions.releaseClaim(request.requestId())) {
-          throw new IllegalStateException("Deletion request could not be released: " + request.requestId(), error);
+        try {
+          deletions.releaseClaim(request.requestId(), claimToken);
+        } catch (RuntimeException releaseError) {
+          error.addSuppressed(releaseError);
         }
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         failed.add(new Failure(request.requestId(), message));
@@ -44,6 +51,15 @@ public final class AccountDeletionExecutor {
   @FunctionalInterface
   public interface Eraser {
     void erase(UUID playerUuid, long erasedAt);
+  }
+
+  public interface TransactionalEraser extends Eraser {
+    void eraseAndComplete(String requestId, String claimToken, UUID playerUuid, long erasedAt);
+
+    @Override
+    default void erase(UUID playerUuid, long erasedAt) {
+      throw new UnsupportedOperationException("Transactional eraser requires a deletion claim");
+    }
   }
 
   public record ExecutionSummary(int claimed, int completed, List<Failure> failures) {

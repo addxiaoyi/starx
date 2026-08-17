@@ -3,6 +3,7 @@ package io.github.addxiaoyi.starx.velocity.website;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
 import io.github.addxiaoyi.starx.api.dto.UserDto;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
+import io.github.addxiaoyi.starx.common.identity.AccountIdentityResolver;
 import io.github.addxiaoyi.starx.common.platform.NodeHealthStateMachine;
 import io.github.addxiaoyi.starx.common.skin.SkinsRestorerSkinRepository;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
@@ -26,8 +27,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 public final class VelocityWebsiteSync implements AutoCloseable {
   static final Duration CHILD_OFFLINE_AFTER = Duration.ofSeconds(90);
@@ -41,7 +45,8 @@ public final class VelocityWebsiteSync implements AutoCloseable {
       StarxVelocityPlugin plugin,
       VelocityBackendBridge bridge,
       MaintenanceModule maintenance,
-      JdbcUserRepository userRepository
+      JdbcUserRepository userRepository,
+      AccountIdentityResolver accountIdentities
   ) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
@@ -52,7 +57,11 @@ public final class VelocityWebsiteSync implements AutoCloseable {
         new WebsiteSyncHttpClient(config),
         new YamlWebsiteCredentialStore(plugin.dataDirectory().resolve("config.yml")),
         this::currentSnapshot,
-        textureSource(plugin, config, Objects.requireNonNull(userRepository, "userRepository")),
+        textureSource(
+            plugin,
+            config,
+            Objects.requireNonNull(userRepository, "userRepository"),
+            Objects.requireNonNull(accountIdentities, "accountIdentities")),
         List.of(
             NodeCapabilities.NETWORK_STATUS,
             NodeCapabilities.PUBLIC_PLAYER_COUNT,
@@ -66,7 +75,8 @@ public final class VelocityWebsiteSync implements AutoCloseable {
   private static TextureSource textureSource(
       StarxVelocityPlugin plugin,
       WebsiteSyncConfig config,
-      JdbcUserRepository userRepository
+      JdbcUserRepository userRepository,
+      AccountIdentityResolver accountIdentities
   ) {
     if (!config.textures().enabled()) {
       return TextureSource.empty();
@@ -78,7 +88,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
     Consumer<String> logger = plugin.logger()::info;
     return new SkinsRestorerTextureSource(
         () -> SkinsRestorerTextureSource.mergePlayers(
-            historicalPlayers(userRepository, logger),
+            historicalPlayers(userRepository, accountIdentities::knownMinecraftUuids, logger),
             plugin.proxy().getAllPlayers().stream()
                 .map(player -> new SkinsRestorerTextureSource.PlayerRef(
                     player.getUniqueId(), player.getUsername()))
@@ -88,14 +98,15 @@ public final class VelocityWebsiteSync implements AutoCloseable {
         logger);
   }
 
-  private static List<SkinsRestorerTextureSource.PlayerRef> historicalPlayers(
+  static List<SkinsRestorerTextureSource.PlayerRef> historicalPlayers(
       JdbcUserRepository userRepository,
+      Function<UUID, Set<UUID>> knownMinecraftUuids,
       Consumer<String> logger
   ) {
     try {
       return userRepository.findAll().stream()
-          .map(user -> new SkinsRestorerTextureSource.PlayerRef(
-              user.uuid(), user.username()))
+          .flatMap(user -> knownMinecraftUuids.apply(user.uuid()).stream()
+              .map(uuid -> new SkinsRestorerTextureSource.PlayerRef(uuid, user.username())))
           .toList();
     } catch (RuntimeException error) {
       logger.accept("StarX website texture history lookup failed; using online players only: "

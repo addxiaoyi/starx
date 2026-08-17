@@ -24,6 +24,7 @@ public final class ForgeCompatModule implements VelocityModule {
   private final Config config;
   private final ModCompatibilityPolicy policy;
   private final ConcurrentHashMap<UUID, ClientModProfile> profiles = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, Player> activePlayers = new ConcurrentHashMap<>();
   private Listener listener;
 
   public ForgeCompatModule(StarxVelocityPlugin plugin, Config config) {
@@ -49,6 +50,10 @@ public final class ForgeCompatModule implements VelocityModule {
     Listener current = new Listener();
     this.listener = current;
     this.plugin.proxy().getEventManager().register(this.plugin, current);
+    this.plugin.proxy().getAllPlayers().forEach(player -> {
+      this.activePlayers.put(player.getUniqueId(), player);
+      this.profiles.put(player.getUniqueId(), ClientModProfile.detect(player));
+    });
     this.plugin.logger().info(
         "Mod compatibility active: Forge/NeoForge/Fabric detection, vanilla guard="
             + this.config.guardEnabled() + ", unknown-action=" + this.config.unknownAction());
@@ -62,10 +67,12 @@ public final class ForgeCompatModule implements VelocityModule {
       this.plugin.proxy().getEventManager().unregisterListener(this.plugin, current);
     }
     this.profiles.clear();
+    this.activePlayers.clear();
   }
 
   void onPostLogin(PostLoginEvent event) {
     Player player = event.getPlayer();
+    this.activePlayers.put(player.getUniqueId(), player);
     ClientModProfile profile = ClientModProfile.detect(player);
     this.profiles.put(player.getUniqueId(), profile);
     if (this.config.debug()) {
@@ -109,7 +116,23 @@ public final class ForgeCompatModule implements VelocityModule {
   }
 
   void onDisconnect(DisconnectEvent event) {
-    this.profiles.remove(event.getPlayer().getUniqueId());
+    Player player = event.getPlayer();
+    UUID playerId = player.getUniqueId();
+    if (!this.detachActivePlayer(playerId, player)) return;
+    this.profiles.remove(playerId);
+  }
+
+  private boolean detachActivePlayer(UUID playerId, Player player) {
+    java.util.concurrent.atomic.AtomicBoolean removed =
+        new java.util.concurrent.atomic.AtomicBoolean();
+    this.activePlayers.compute(playerId, (ignored, current) -> {
+      if (current == player) {
+        removed.set(true);
+        return null;
+      }
+      return current;
+    });
+    return removed.get();
   }
 
   public static final class Config {

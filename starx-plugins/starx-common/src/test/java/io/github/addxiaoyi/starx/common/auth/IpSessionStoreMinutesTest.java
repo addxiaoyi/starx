@@ -36,6 +36,21 @@ class IpSessionStoreMinutesTest {
     assertFalse(store.hasRecentSessionMinutes(PLAYER_ID, ADDRESS, "device-a", 30));
   }
 
+  @Test
+  void futureDatedSessionsCannotSeedPasswordBypass() {
+    InMemoryIpSessionStore store = new InMemoryIpSessionStore();
+    store.save(new IpSession(
+        PLAYER_ID,
+        ADDRESS,
+        null,
+        null,
+        Instant.now().plusSeconds(60).toEpochMilli(),
+        "local",
+        "device-a"));
+
+    assertFalse(store.hasRecentSessionMinutes(PLAYER_ID, ADDRESS, "device-a", 30));
+  }
+
   private static IpSession session(Duration age, String deviceFingerprint) {
     return new IpSession(
         PLAYER_ID,

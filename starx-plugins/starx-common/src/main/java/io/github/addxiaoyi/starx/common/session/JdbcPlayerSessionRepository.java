@@ -1,10 +1,13 @@
 package io.github.addxiaoyi.starx.common.session;
 
+import io.github.addxiaoyi.starx.common.database.JdbcUuidQuery;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Optional;
+import java.util.Collection;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -55,18 +58,59 @@ public final class JdbcPlayerSessionRepository {
     } catch (SQLException error) { throw failure("finish", error); }
   }
 
+  public int finishActive(long at, DisconnectReason reason) {
+    if (reason == null) throw new IllegalArgumentException("reason is required");
+    try (Connection connection = dataSource.getConnection()) {
+      connection.setAutoCommit(false);
+      try {
+        execute(
+            connection,
+            "UPDATE starx_player_server_segments SET ended_at = ? WHERE ended_at IS NULL "
+                + "AND session_id IN (SELECT session_id FROM starx_player_sessions WHERE ended_at IS NULL)",
+            at);
+        try (PreparedStatement update = connection.prepareStatement(
+            "UPDATE starx_player_sessions SET ended_at = ?, disconnect_reason = ? WHERE ended_at IS NULL")) {
+          update.setLong(1, at);
+          update.setString(2, reason.name());
+          int closed = update.executeUpdate();
+          connection.commit();
+          return closed;
+        }
+      } catch (SQLException error) {
+        connection.rollback();
+        throw error;
+      }
+    } catch (SQLException error) {
+      throw failure("finish active", error);
+    }
+  }
+
   public Optional<String> activeSession(UUID player) {
+    return activeSession(List.of(player));
+  }
+
+  public Optional<String> activeSession(Collection<UUID> players) {
+    List<UUID> ids = distinct(players);
+    if (ids.isEmpty()) return Optional.empty();
     try (Connection connection = dataSource.getConnection(); PreparedStatement query = connection.prepareStatement(
-        "SELECT session_id FROM starx_player_sessions WHERE player_uuid = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1")) {
-      query.setString(1, player.toString());
+        "SELECT session_id FROM starx_player_sessions WHERE player_uuid IN (" + placeholders(ids.size())
+            + ") AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1")) {
+      bind(query, ids);
       try (ResultSet row = query.executeQuery()) { return row.next() ? Optional.of(row.getString(1)) : Optional.empty(); }
     } catch (SQLException error) { throw failure("find active", error); }
   }
 
   public Optional<PlayerSessionSummary> summary(UUID player) {
-    String sql = "SELECT COALESCE(SUM(CASE WHEN ended_at IS NOT NULL THEN ended_at-started_at ELSE 0 END),0), COUNT(*), MAX(last_server), MAX(disconnect_reason) FROM starx_player_sessions WHERE player_uuid = ?";
+    return summary(List.of(player));
+  }
+
+  public Optional<PlayerSessionSummary> summary(Collection<UUID> players) {
+    List<UUID> ids = distinct(players);
+    if (ids.isEmpty()) return Optional.empty();
+    String sql = "SELECT COALESCE(SUM(CASE WHEN ended_at IS NOT NULL THEN ended_at-started_at ELSE 0 END),0), COUNT(*), MAX(last_server), MAX(disconnect_reason) FROM starx_player_sessions WHERE player_uuid IN ("
+        + placeholders(ids.size()) + ")";
     try (Connection connection = dataSource.getConnection(); PreparedStatement query = connection.prepareStatement(sql)) {
-      query.setString(1, player.toString());
+      bind(query, ids);
       try (ResultSet row = query.executeQuery()) {
         if (!row.next() || row.getInt(2) == 0) return Optional.empty();
         String reason = row.getString(4);
@@ -76,17 +120,31 @@ public final class JdbcPlayerSessionRepository {
   }
 
   public long playtime(UUID player, String server) {
-    String sql = "SELECT COALESCE(SUM(CASE WHEN ended_at IS NOT NULL THEN ended_at-started_at ELSE 0 END),0) FROM starx_player_server_segments WHERE player_uuid = ? AND server_name = ?";
+    return playtime(List.of(player), server);
+  }
+
+  public long playtime(Collection<UUID> players, String server) {
+    List<UUID> ids = distinct(players);
+    if (ids.isEmpty()) return 0L;
+    String sql = "SELECT COALESCE(SUM(CASE WHEN ended_at IS NOT NULL THEN ended_at-started_at ELSE 0 END),0) FROM starx_player_server_segments WHERE player_uuid IN ("
+        + placeholders(ids.size()) + ") AND server_name = ?";
     try (Connection connection = dataSource.getConnection(); PreparedStatement query = connection.prepareStatement(sql)) {
-      query.setString(1, player.toString()); query.setString(2, server);
+      bind(query, ids); query.setString(ids.size() + 1, server);
       try (ResultSet row = query.executeQuery()) { return row.next() ? row.getLong(1) : 0L; }
     } catch (SQLException error) { throw failure("read playtime", error); }
   }
 
   public Map<String, Long> playtimeByServer(UUID player) {
-    String sql = "SELECT server_name, COALESCE(SUM(CASE WHEN ended_at IS NOT NULL THEN ended_at-started_at ELSE 0 END),0) FROM starx_player_server_segments WHERE player_uuid = ? GROUP BY server_name ORDER BY server_name";
+    return playtimeByServer(List.of(player));
+  }
+
+  public Map<String, Long> playtimeByServer(Collection<UUID> players) {
+    List<UUID> ids = distinct(players);
+    if (ids.isEmpty()) return Map.of();
+    String sql = "SELECT server_name, COALESCE(SUM(CASE WHEN ended_at IS NOT NULL THEN ended_at-started_at ELSE 0 END),0) FROM starx_player_server_segments WHERE player_uuid IN ("
+        + placeholders(ids.size()) + ") GROUP BY server_name ORDER BY server_name";
     try (Connection connection = dataSource.getConnection(); PreparedStatement query = connection.prepareStatement(sql)) {
-      query.setString(1, player.toString());
+      bind(query, ids);
       try (ResultSet rows = query.executeQuery()) {
         Map<String, Long> totals = new LinkedHashMap<>();
         while (rows.next()) totals.put(rows.getString(1), rows.getLong(2));
@@ -116,4 +174,16 @@ public final class JdbcPlayerSessionRepository {
     }
   }
   private IllegalStateException failure(String action, SQLException error) { return new IllegalStateException("Failed to " + action + " player session", error); }
+
+  private static List<UUID> distinct(Collection<UUID> players) {
+    return JdbcUuidQuery.distinct(players);
+  }
+
+  private static String placeholders(int count) {
+    return JdbcUuidQuery.placeholders(count);
+  }
+
+  private static void bind(PreparedStatement statement, Collection<UUID> players) throws SQLException {
+    JdbcUuidQuery.bind(statement, players);
+  }
 }

@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.velocity.http.admin;
 
+import io.github.addxiaoyi.starx.api.dto.UserDto;
 import io.github.addxiaoyi.starx.common.account.JdbcAccountDeletionRepository;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 import io.github.addxiaoyi.starx.velocity.http.JsonHttpExchange;
@@ -9,23 +10,62 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Set;
+import java.util.Optional;
+import java.util.function.Function;
 
 public final class AccountDeletionHandler implements AdminHandler {
   private static final Duration COOLING_OFF = Duration.ofDays(7);
   private final JdbcAccountDeletionRepository deletions;
-  private final JdbcUserRepository users;
   private final Clock clock;
+  private final Function<UUID, Optional<UserDto>> identityAwareUserLookup;
+  private final Function<UUID, UUID> canonicalUuidResolver;
+  private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
   public AccountDeletionHandler(JdbcAccountDeletionRepository deletions, JdbcUserRepository users) {
-    this(deletions, users, Clock.systemUTC());
+    this(deletions, users, Clock.systemUTC(), users::findByUuid, Function.identity(), uuid -> Set.of(uuid));
   }
 
   AccountDeletionHandler(JdbcAccountDeletionRepository deletions, JdbcUserRepository users, Clock clock) {
+    this(deletions, users, clock, users::findByUuid, Function.identity(), uuid -> Set.of(uuid));
+  }
+
+  public AccountDeletionHandler(
+      JdbcAccountDeletionRepository deletions,
+      JdbcUserRepository users,
+      Function<UUID, Optional<UserDto>> identityAwareUserLookup,
+      Function<UUID, UUID> canonicalUuidResolver) {
+    this(deletions, users, Clock.systemUTC(), identityAwareUserLookup, canonicalUuidResolver,
+        uuid -> Set.of(uuid));
+  }
+
+  public AccountDeletionHandler(
+      JdbcAccountDeletionRepository deletions,
+      JdbcUserRepository users,
+      Function<UUID, Optional<UserDto>> identityAwareUserLookup,
+      Function<UUID, UUID> canonicalUuidResolver,
+      Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
+    this(deletions, users, Clock.systemUTC(), identityAwareUserLookup, canonicalUuidResolver,
+        knownMinecraftUuidsResolver);
+  }
+
+  AccountDeletionHandler(
+      JdbcAccountDeletionRepository deletions,
+      JdbcUserRepository users,
+      Clock clock,
+      Function<UUID, Optional<UserDto>> identityAwareUserLookup,
+      Function<UUID, UUID> canonicalUuidResolver,
+      Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
     this.deletions = Objects.requireNonNull(deletions, "deletions");
-    this.users = Objects.requireNonNull(users, "users");
+    Objects.requireNonNull(users, "users");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.identityAwareUserLookup = Objects.requireNonNull(identityAwareUserLookup, "identityAwareUserLookup");
+    this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+    this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+        knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
   }
 
   @Override public void register(RouteRegistrar routes, RouteRegistrar.RouteHandler... authFilters) {
@@ -43,7 +83,8 @@ public final class AccountDeletionHandler implements AdminHandler {
       context.status(400).json(Map.of("ok", false, "error", "valid playerUuid is required"));
       return;
     }
-    var latest = deletions.latest(playerUuid);
+    Set<UUID> knownUuids = knownUuids(playerUuid);
+    var latest = deletions.latest(knownUuids);
     if (latest.isEmpty()) {
       context.status(200).json(Map.of("ok", true, "requested", false));
       return;
@@ -72,13 +113,19 @@ public final class AccountDeletionHandler implements AdminHandler {
 
   private void request(JsonHttpExchange context) throws Exception {
     PlayerRequest request = context.bodyAsClass(PlayerRequest.class);
-    if (request.playerUuid == null || !users.existsByUuid(request.playerUuid)) {
+    if (request.playerUuid == null) {
+      context.status(404).json(Map.of("ok", false, "error", "player_not_found"));
+      return;
+    }
+    UUID playerUuid = canonicalUuidResolver.apply(request.playerUuid);
+    Set<UUID> knownUuids = knownUuids(request.playerUuid);
+    if (identityAwareUserLookup.apply(playerUuid).isEmpty()) {
       context.status(404).json(Map.of("ok", false, "error", "player_not_found"));
       return;
     }
     long now = clock.millis();
     long executeAfter = now + COOLING_OFF.toMillis();
-    String requestId = deletions.request(request.playerUuid, now, executeAfter);
+    String requestId = deletions.request(playerUuid, knownUuids, now, executeAfter);
     context.status(202).json(Map.of(
         "ok", true,
         "requestId", requestId,
@@ -92,9 +139,21 @@ public final class AccountDeletionHandler implements AdminHandler {
       context.status(400).json(Map.of("ok", false, "error", "requestId and playerUuid are required"));
       return;
     }
+    Set<UUID> knownUuids = knownUuids(request.playerUuid);
     context.status(200).json(Map.of(
         "ok", true,
-        "changed", deletions.cancel(request.requestId.trim(), request.playerUuid, clock.millis())));
+        "changed", deletions.cancel(request.requestId.trim(), knownUuids, clock.millis())));
+  }
+
+  private Set<UUID> knownUuids(UUID requested) {
+    UUID canonical = canonicalUuidResolver.apply(requested);
+    LinkedHashSet<UUID> known = new LinkedHashSet<>();
+    known.add(canonical);
+    known.addAll(Objects.requireNonNull(
+        knownMinecraftUuidsResolver.apply(requested),
+        "knownMinecraftUuidsResolver returned null"));
+    known.remove(null);
+    return Set.copyOf(known);
   }
 
   static final class PlayerRequest { public UUID playerUuid; PlayerRequest() {} }

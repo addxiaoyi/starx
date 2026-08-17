@@ -19,6 +19,7 @@ import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
+import io.github.addxiaoyi.starx.api.dto.UserDto;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.api.event.StarxEvent;
 import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
@@ -124,6 +125,7 @@ import java.time.Clock;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -291,12 +293,26 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         JdbcAccountErasureRepository accountEraser = new JdbcAccountErasureRepository(defaultDataSource);
         java.util.concurrent.atomic.AtomicReference<AuthService> deletionAuth =
             new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<java.util.function.Function<UUID, Set<UUID>>>
+            deletionKnownMinecraftUuids = new java.util.concurrent.atomic.AtomicReference<>(uuid -> Set.of(uuid));
         AccountDeletionExecutor accountDeletionExecutor = new AccountDeletionExecutor(
             accountDeletions,
-            (playerUuid, erasedAt) -> {
-                accountEraser.erase(playerUuid, erasedAt);
+            (AccountDeletionExecutor.TransactionalEraser) (requestId, claimToken, playerUuid, erasedAt) -> {
+                Set<UUID> knownUuids = deletionKnownMinecraftUuids.get().apply(playerUuid);
+                accountEraser.eraseAndComplete(
+                    accountDeletions, requestId, claimToken, playerUuid, erasedAt);
                 AuthService auth = deletionAuth.get();
-                if (auth != null) auth.logout(playerUuid);
+                Set<UUID> affectedUuids = new java.util.LinkedHashSet<>(knownUuids);
+                affectedUuids.add(playerUuid);
+                for (UUID sessionUuid : affectedUuids) {
+                    if (sessionUuid == null) continue;
+                    if (auth != null) {
+                        auth.logout(sessionUuid);
+                    }
+                    this.proxy.getPlayer(sessionUuid).ifPresent(player -> player.disconnect(
+                        net.kyori.adventure.text.Component.text(
+                            "账号已删除，请重新连接。")));
+                }
             });
         ScheduledTask accountDeletionTask = this.proxy.getScheduler()
             .buildTask(this, () -> {
@@ -318,17 +334,34 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         JdbcBindingRepository bindingRepo = new JdbcBindingRepository(defaultDataSource);
         AccountIdentityResolver accountIdentities = new AccountIdentityResolver(
             new JdbcAccountIdentityRepository(defaultDataSource), userRepository);
+        java.util.function.BiFunction<UUID, String, String> accountByPlayerWithName =
+            accountIdentities::accountId;
+        java.util.function.Function<UUID, String> accountByConnectedPlayer = playerId ->
+            this.proxy.getPlayer(playerId)
+                .map(player -> accountIdentities.accountId(playerId, player.getUsername()))
+                .orElseGet(() -> accountIdentities.accountId(playerId));
+        java.util.function.Function<UUID, java.util.Optional<UserDto>> identityAwareUserResolver =
+            accountIdentities::resolveUser;
+        java.util.function.Function<String, java.util.Optional<UserDto>> identityAwareUsernameResolver =
+            accountIdentities::resolveUserByName;
+        java.util.function.Function<String, java.util.Optional<io.github.addxiaoyi.starx.common.model.StarxUser>>
+            identityAwareFullUsernameResolver = accountIdentities::resolveFullUserByName;
+        java.util.function.Function<UUID, UUID> canonicalUuidResolver =
+            accountIdentities::resolveMinecraftUuid;
+        java.util.function.Function<UUID, java.util.Set<UUID>> knownMinecraftUuidsResolver =
+            accountIdentities::knownMinecraftUuids;
+        deletionKnownMinecraftUuids.set(knownMinecraftUuidsResolver);
         BindingChallengeService bindingChallenges =
             new BindingChallengeService(new JdbcBindingChallengeRepository(defaultDataSource));
         BindingVerificationService bindingVerification = new BindingVerificationService(
             bindingChallenges,
-            accountIdentities::accountId,
+            accountByConnectedPlayer,
             accountIdentities::minecraftUuid,
             Clock.systemUTC(),
             Duration.ofMinutes(5));
         CrossDeviceApprovalService crossDeviceApprovals = new CrossDeviceApprovalService(
             bindingChallenges,
-            accountIdentities::accountId,
+            accountByPlayerWithName,
             accountIdentities::minecraftUuid,
             accountIdentities::username);
         UniAuthClient uniAuthClient = null;
@@ -339,7 +372,8 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager = new ModuleManager(this.config);
         this.lifecycle.own("modules", this.moduleManager::disableAll);
         VelocityBackendBridge backendBridge = new VelocityBackendBridge(this);
-        SkinBridgeModule skinBridge = new SkinBridgeModule(this, this.eventBus, backendBridge);
+        SkinBridgeModule skinBridge = new SkinBridgeModule(
+            this, this.eventBus, backendBridge, knownMinecraftUuidsResolver);
         UworldModule uworldModule = new UworldModule(this, this.config.uworld());
         this.uworld = uworldModule;
         AuthModule authModule = new AuthModule(
@@ -355,6 +389,18 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             ipSessionStore,
             externalHandshake
         );
+        authModule.authService().bindMinecraftIdentityResolver(knownMinecraftUuidsResolver);
+        authModule.authService().bindUsernameResolver(identityAwareFullUsernameResolver);
+        authModule.authService().bindAccountErasure(
+            playerUuid -> accountEraser.eraseAndCompletePending(
+                accountDeletions,
+                playerUuid,
+                knownMinecraftUuidsResolver.apply(playerUuid),
+                System.currentTimeMillis()));
+        authModule.authService().bindMinecraftIdentityObserver(
+            (uuid, username, trustedSource) ->
+                accountIdentities.accountId(uuid, username, trustedSource));
+        authModule.authService().bindMinecraftIdentityRollback(accountIdentities::remove);
         try {
             authModule.authService().bindWebLoginApprovalGateway(
                 new CrossDeviceLoginApprovalGateway(
@@ -394,14 +440,17 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             authModule,
             this.config.playerList(),
             new PlayerListRenderer(variables),
-            playerContexts);
+            playerContexts,
+            canonicalUuidResolver,
+            knownMinecraftUuidsResolver);
         VelocityMessageBridge messageBridge = new VelocityMessageBridge(this, this.proxy, this.eventBus);
         this.moduleManager.register(uworldModule);
         this.moduleManager.register(floodgate);
         this.moduleManager.register(authModule);
         this.moduleManager.register(new UworldDiagnostics(this, uworldModule, this.config.uworld()));
         this.moduleManager.register(backendBridge);
-        this.moduleManager.register(new PlayerSessionModule(this, playerSessions));
+        this.moduleManager.register(new PlayerSessionModule(
+            this, playerSessions, knownMinecraftUuidsResolver));
         this.moduleManager.register(skinBridge);
         this.moduleManager.register(messageBridge);
         this.moduleManager.register(new YggdrasilModule(this, this.eventBus, YggdrasilModule.Config.defaultConfig()));
@@ -423,7 +472,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             new MaintenanceStateService(new JdbcRuntimeSettingRepository(defaultDataSource)));
         this.moduleManager.register(maintenanceModule);
         VelocityWebsiteSync websiteSync = new VelocityWebsiteSync(
-            this, backendBridge, maintenanceModule, userRepository);
+            this, backendBridge, maintenanceModule, userRepository, accountIdentities);
         this.lifecycle.own("website synchronization", websiteSync::close);
         this.moduleManager.register(new ChatModule(this, messageBridge, ChatModule.Config.defaultConfig()));
         this.moduleManager.register(new RedirectModule(this, RedirectModule.Config.defaultConfig()));
@@ -436,7 +485,9 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager.register(new TutorialModule(
             this,
             TutorialModule.Config.defaultConfig(),
-            new JdbcTutorialProgressRepository(defaultDataSource)));
+            new JdbcTutorialProgressRepository(defaultDataSource),
+            canonicalUuidResolver,
+            knownMinecraftUuidsResolver));
         this.moduleManager.register(new HubCommandModule(
             this,
             HubCommandModule.Config.enabled(this.config.uworld().auth().targetServer())));
@@ -470,15 +521,19 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager.register(planIntegration);
         this.moduleManager.register(new MapModIntegrationModule(this, MapModIntegrationModule.Config.from(
             this.config.modules().get("starx.integrations.mapmod"))));
-        this.moduleManager.register(new LuckPermsContextModule(this, bindingRepo));
+        this.moduleManager.register(new LuckPermsContextModule(
+            this, bindingRepo, canonicalUuidResolver, knownMinecraftUuidsResolver));
         this.moduleManager.register(new WelcomeModule(this, userRepository, authModule.authService()));
         JdbcPunishmentRepository punishmentRepo = new JdbcPunishmentRepository(defaultDataSource);
         JdbcStaffNoteRepository staffNoteRepo = new JdbcStaffNoteRepository(defaultDataSource);
         JdbcReportRepository reportRepo = new JdbcReportRepository(defaultDataSource);
         JdbcAnnouncementRepository announcementRepo = new JdbcAnnouncementRepository(defaultDataSource);
         JdbcVoteRepository voteRepo = new JdbcVoteRepository(defaultDataSource);
-        this.moduleManager.register(new NapCatModule(this, bindingRepo, bindingVerification, this.config.napcat()));
-        this.moduleManager.register(new VoteModule(this, voteRepo));
+        this.moduleManager.register(new NapCatModule(
+            this, bindingRepo, bindingVerification, this.config.napcat(),
+            canonicalUuidResolver, knownMinecraftUuidsResolver));
+        this.moduleManager.register(new VoteModule(
+            this, voteRepo, canonicalUuidResolver, knownMinecraftUuidsResolver));
         this.httpApiServer = new HttpApiServer(this.config, this.eventBus, this.proxy,
             backendBridge.registry(), userRepository, authModule.authService(),
             authModule::approveWebLogin, skinBridge, punishmentRepo, staffNoteRepo,
@@ -492,9 +547,15 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
                 : this.networkAutomationService.snapshot());
             return Map.copyOf(metrics);
         }, backendBridge.commandMailbox(), backendBridge::acceptHttpMessage, incidentTimeline, playerSessions,
-            accountDeletions, accountEraser, crossDeviceApprovals, bindingChallenges, accountIdentities::accountId);
+            accountDeletions, accountEraser, crossDeviceApprovals, bindingChallenges,
+            accountByConnectedPlayer, identityAwareUserResolver,
+            identityAwareUsernameResolver, identityAwareFullUsernameResolver,
+            canonicalUuidResolver, knownMinecraftUuidsResolver);
         this.lifecycle.own("HTTP API", this.httpApiServer::stop);
-        this.moduleManager.register(new AdminCommandsModule(this, userRepository, punishmentRepo, staffNoteRepo, reportRepo, announcementRepo, bindingRepo, bindingVerification, authModule.authService()));
+        this.moduleManager.register(new AdminCommandsModule(
+            this, userRepository, punishmentRepo, staffNoteRepo, reportRepo, announcementRepo,
+            bindingRepo, bindingVerification, authModule.authService(),
+            knownMinecraftUuidsResolver, canonicalUuidResolver));
         WebhookEventPublisher webhookPublisher = new WebhookEventPublisher(this.eventBus, this.webhookClient);
         webhookPublisher.register();
         this.webhookClient.replayPending().whenComplete((ignored, error) -> {

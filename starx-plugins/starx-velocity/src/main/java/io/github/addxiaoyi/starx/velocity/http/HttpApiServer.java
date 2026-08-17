@@ -3,6 +3,7 @@ package io.github.addxiaoyi.starx.velocity.http;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.velocitypowered.api.proxy.ProxyServer;
+import io.github.addxiaoyi.starx.api.dto.UserDto;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.common.auth.AuthService;
 import io.github.addxiaoyi.starx.common.auth.AuthLease;
@@ -21,6 +22,7 @@ import io.github.addxiaoyi.starx.common.database.JdbcVoteRepository;
 import io.github.addxiaoyi.starx.common.session.JdbcPlayerSessionRepository;
 import io.github.addxiaoyi.starx.common.account.JdbcAccountDeletionRepository;
 import io.github.addxiaoyi.starx.common.account.JdbcAccountErasureRepository;
+import io.github.addxiaoyi.starx.common.model.StarxUser;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendNodeRegistry;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendCommandMailbox;
@@ -37,6 +39,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -89,6 +92,11 @@ public final class HttpApiServer implements RouteRegistrar {
     private final CrossDeviceApprovalService crossDeviceApprovals;
     private final BindingChallengeService bindingChallenges;
     private final Function<UUID, String> accountIdResolver;
+    private final Function<UUID, Optional<UserDto>> identityAwareUserResolver;
+    private final Function<String, Optional<UserDto>> identityAwareUsernameResolver;
+    private final Function<String, Optional<StarxUser>> identityAwareFullUsernameResolver;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
     private final Map<String, Map<String, RouteHandler>> routes = new HashMap<>();
     private final BoundedRateLimitRegistry rateLimits = new BoundedRateLimitRegistry(
             4096, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS, Clock.systemUTC());
@@ -129,7 +137,12 @@ public final class HttpApiServer implements RouteRegistrar {
             JdbcAccountErasureRepository accountEraser,
             CrossDeviceApprovalService crossDeviceApprovals,
             BindingChallengeService bindingChallenges,
-            Function<UUID, String> accountIdResolver) {
+            Function<UUID, String> accountIdResolver,
+            Function<UUID, Optional<UserDto>> identityAwareUserResolver,
+            Function<String, Optional<UserDto>> identityAwareUsernameResolver,
+            Function<String, Optional<StarxUser>> identityAwareFullUsernameResolver,
+            Function<UUID, UUID> canonicalUuidResolver,
+            Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.config = Objects.requireNonNull(config, "config");
         this.effectiveHttp = this.config.http();
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
@@ -156,9 +169,18 @@ public final class HttpApiServer implements RouteRegistrar {
         this.accountDeletions = Objects.requireNonNull(accountDeletions, "accountDeletions");
         this.accountEraser = Objects.requireNonNull(accountEraser, "accountEraser");
         this.crossDeviceApprovals = Objects.requireNonNull(
-                crossDeviceApprovals, "crossDeviceApprovals");
+            crossDeviceApprovals, "crossDeviceApprovals");
         this.bindingChallenges = Objects.requireNonNull(bindingChallenges, "bindingChallenges");
         this.accountIdResolver = Objects.requireNonNull(accountIdResolver, "accountIdResolver");
+        this.identityAwareUserResolver = Objects.requireNonNull(
+            identityAwareUserResolver, "identityAwareUserResolver");
+        this.identityAwareUsernameResolver = Objects.requireNonNull(
+            identityAwareUsernameResolver, "identityAwareUsernameResolver");
+        this.identityAwareFullUsernameResolver = Objects.requireNonNull(
+            identityAwareFullUsernameResolver, "identityAwareFullUsernameResolver");
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     public TcpPortAllocator.Selection start() throws IOException {
@@ -191,10 +213,16 @@ public final class HttpApiServer implements RouteRegistrar {
         this.server.setExecutor(this.executor);
         this.get("/v1/health", this::health);
         RouteHandler requireAuth = this.requireApiKey();
-        new UserQueryHandler(this.userRepository).register(this, requireAuth);
-        new UserOverviewHandler(this.userRepository, this.bindingRepo, this.playerSessions)
+        new UserQueryHandler(this.userRepository, this.identityAwareUsernameResolver)
+            .register(this, requireAuth);
+        new UserOverviewHandler(
+            this.userRepository, this.bindingRepo, this.playerSessions,
+            this.canonicalUuidResolver, this.knownMinecraftUuidsResolver,
+            this.identityAwareFullUsernameResolver)
                 .register(this, requireAuth);
-        new SkinRefreshHandler(this.skinBridge, this.userRepository).register(this, requireAuth);
+        new SkinRefreshHandler(
+            this.skinBridge, this.userRepository, this.identityAwareFullUsernameResolver)
+            .register(this, requireAuth);
         if (this.authService != null) {
             RouteHandler sensitiveAuth = this.requireSensitiveAuth();
             new PasswordResetHandler(this.authService).register(this, sensitiveAuth);
@@ -227,21 +255,57 @@ public final class HttpApiServer implements RouteRegistrar {
             } catch (IllegalArgumentException error) {
                 log.info("Cross-device approval disabled because no public website origin is configured: {}", error.getMessage());
             }
-            new DeleteUserHandler(this.authService, this.userRepository, this.accountEraser)
+            new DeleteUserHandler(
+                this.authService, this.userRepository, this.accountEraser, this.accountDeletions,
+                this.canonicalUuidResolver, this.identityAwareFullUsernameResolver,
+                this.knownMinecraftUuidsResolver,
+                playerId -> this.proxy.getPlayer(playerId).ifPresent(player -> player.disconnect(
+                    net.kyori.adventure.text.Component.text("账号已删除，请重新连接。"))))
                     .register(this, sensitiveAuth);
-            new BindingUnlinkHandler(this.bindingRepo).register(this, sensitiveAuth);
-            new AccountDeletionHandler(this.accountDeletions, this.userRepository)
+            new BindingUnlinkHandler(
+                this.bindingRepo, this.canonicalUuidResolver, this.knownMinecraftUuidsResolver)
+                    .register(this, sensitiveAuth);
+            new AccountDeletionHandler(
+                this.accountDeletions,
+                this.userRepository,
+                this.identityAwareUserResolver,
+                this.canonicalUuidResolver,
+                this.knownMinecraftUuidsResolver)
                     .register(this, sensitiveAuth);
         }
-        new BanHandler(this.userRepository, this.eventBus, this.punishmentRepo).register(this, requireAuth);
+        new BanHandler(
+            this.userRepository,
+            this.eventBus,
+            this.punishmentRepo,
+            this.identityAwareUserResolver,
+            this.identityAwareUsernameResolver,
+            this.canonicalUuidResolver,
+            this.knownMinecraftUuidsResolver).register(this, requireAuth);
         new KickHandler(this.proxy, this.eventBus).register(this, requireAuth);
-        new LinkExternalUserHandler(this.userRepository, this.eventBus).register(this, requireAuth);
-        new PunishmentHandler(this.punishmentRepo).register(this, requireAuth);
-        new StaffNoteHandler(this.staffNoteRepo).register(this, requireAuth);
-        new ReportHandler(this.reportRepo).register(this, requireAuth);
-        new AnnouncementHandler(this.announcementRepo).register(this, requireAuth);
-        new BindingHandler(this.bindingRepo, this.userRepository, this.bindingVerification).register(this, requireAuth);
-        new VoteHandler(this.voteRepo).register(this, requireAuth);
+        new LinkExternalUserHandler(
+            this.userRepository, this.eventBus, this.canonicalUuidResolver,
+            this.identityAwareUsernameResolver)
+                .register(this, requireAuth);
+        new PunishmentHandler(
+            this.punishmentRepo, this.canonicalUuidResolver, this.knownMinecraftUuidsResolver)
+                .register(this, requireAuth);
+        new StaffNoteHandler(
+            this.staffNoteRepo, this.canonicalUuidResolver, this.knownMinecraftUuidsResolver)
+                .register(this, requireAuth);
+        new ReportHandler(this.reportRepo, this.canonicalUuidResolver).register(this, requireAuth);
+        new AnnouncementHandler(
+            this.announcementRepo, this.canonicalUuidResolver, this.knownMinecraftUuidsResolver)
+            .register(this, requireAuth);
+        new BindingHandler(
+            this.bindingRepo,
+            this.userRepository,
+            this.bindingVerification,
+            this.identityAwareUserResolver,
+            this.canonicalUuidResolver,
+            this.knownMinecraftUuidsResolver).register(this, requireAuth);
+        new VoteHandler(
+            this.voteRepo, this.canonicalUuidResolver, this.knownMinecraftUuidsResolver)
+            .register(this, requireAuth);
         new BackendProbeHandler(
                 name -> this.proxy.getServer(name).isPresent(),
                 this.backendCommands).register(this, requireAuth);

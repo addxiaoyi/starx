@@ -6,11 +6,12 @@ import java.util.concurrent.ConcurrentMap;
 
 final class UworldDiagnosticsState<P, S, F> {
 
-  private final ConcurrentMap<P, Entry<S, F>> entries = new ConcurrentHashMap<>();
+  private final ConcurrentMap<IdentityKey<P>, Entry<S, F>> entries = new ConcurrentHashMap<>();
 
   void begin(P player, S previousServer) {
+    P checkedPlayer = Objects.requireNonNull(player, "player");
     this.entries.put(
-        Objects.requireNonNull(player, "player"),
+        new IdentityKey<>(checkedPlayer),
         new Entry<>(previousServer, null));
   }
 
@@ -18,7 +19,7 @@ final class UworldDiagnosticsState<P, S, F> {
     Objects.requireNonNull(player, "player");
     Objects.requireNonNull(flow, "flow");
     boolean[] bound = {false};
-    this.entries.computeIfPresent(player, (key, current) -> {
+    this.entries.computeIfPresent(new IdentityKey<>(player), (key, current) -> {
       if (current.flow() != null) {
         return current;
       }
@@ -31,12 +32,13 @@ final class UworldDiagnosticsState<P, S, F> {
   boolean owns(P player, F flow) {
     Objects.requireNonNull(player, "player");
     Objects.requireNonNull(flow, "flow");
-    Entry<S, F> current = this.entries.get(player);
+    Entry<S, F> current = this.entries.get(new IdentityKey<>(player));
     return current != null && current.flow() == flow;
   }
 
   S returnTarget(P player, S fallback) {
-    Entry<S, F> current = this.entries.get(Objects.requireNonNull(player, "player"));
+    Entry<S, F> current = this.entries.get(new IdentityKey<>(
+        Objects.requireNonNull(player, "player")));
     return current == null || current.previousServer() == null
         ? fallback
         : current.previousServer();
@@ -46,7 +48,7 @@ final class UworldDiagnosticsState<P, S, F> {
     Objects.requireNonNull(player, "player");
     Objects.requireNonNull(flow, "flow");
     boolean[] removed = {false};
-    this.entries.computeIfPresent(player, (key, current) -> {
+    this.entries.computeIfPresent(new IdentityKey<>(player), (key, current) -> {
       if (current.flow() != flow) {
         return current;
       }
@@ -57,7 +59,7 @@ final class UworldDiagnosticsState<P, S, F> {
   }
 
   void remove(P player) {
-    this.entries.remove(Objects.requireNonNull(player, "player"));
+    this.entries.remove(new IdentityKey<>(Objects.requireNonNull(player, "player")));
   }
 
   void clear() {
@@ -65,5 +67,25 @@ final class UworldDiagnosticsState<P, S, F> {
   }
 
   private record Entry<S, F>(S previousServer, F flow) {
+  }
+
+  private static final class IdentityKey<P> {
+    private final P value;
+    private final int hash;
+
+    private IdentityKey(P value) {
+      this.value = Objects.requireNonNull(value, "value");
+      this.hash = System.identityHashCode(value);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      return other instanceof IdentityKey<?> key && this.value == key.value;
+    }
+
+    @Override
+    public int hashCode() {
+      return this.hash;
+    }
   }
 }

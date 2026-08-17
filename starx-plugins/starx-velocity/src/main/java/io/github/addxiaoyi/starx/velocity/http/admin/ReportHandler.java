@@ -14,15 +14,24 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 public final class ReportHandler
 implements AdminHandler {
     private static final Set<String> VALID_CATEGORIES = Set.of("BUG_ABUSE", "CHEATING", "HARASSMENT", "OTHER", "SCAM", "SPAM");
     private static final Set<String> VALID_STATUSES = Set.of("DISMISSED", "PENDING", "RESOLVED");
     private final JdbcReportRepository repo;
+    private final Function<UUID, UUID> canonicalUuidResolver;
 
     public ReportHandler(JdbcReportRepository repo) {
+        this(repo, uuid -> uuid);
+    }
+
+    public ReportHandler(
+        JdbcReportRepository repo,
+        Function<UUID, UUID> canonicalUuidResolver) {
         this.repo = Objects.requireNonNull(repo, "repo");
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
     }
 
     @Override
@@ -83,7 +92,7 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", e.getMessage()));
             return;
         }
-        Report r = new Report(UUID.randomUUID().toString(), req.reporterUuid, req.targetUuid, normalizedCategory, details != null ? this.sanitizeInput(details) : null, "PENDING", null, null);
+        Report r = new Report(UUID.randomUUID().toString(), this.canonicalUuidResolver.apply(req.reporterUuid), this.canonicalUuidResolver.apply(req.targetUuid), normalizedCategory, details != null ? this.sanitizeInput(details) : null, "PENDING", null, null);
         this.repo.create(r);
         ctx.status(201).json(Map.of("id", r.id(), "success", true));
     }
@@ -100,7 +109,14 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", e.getMessage()));
             return;
         }
-        this.repo.resolve(id, this.sanitizeInput(resolvedBy));
+        if (this.repo.findById(id).isEmpty()) {
+            ctx.status(404).json(Map.of("error", "report not found"));
+            return;
+        }
+        if (!this.repo.resolve(id, this.sanitizeInput(resolvedBy))) {
+            ctx.status(409).json(Map.of("error", "report is already closed"));
+            return;
+        }
         ctx.status(200).json(Map.of("success", true));
     }
 
@@ -116,7 +132,14 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", e.getMessage()));
             return;
         }
-        this.repo.dismiss(id, this.sanitizeInput(resolvedBy));
+        if (this.repo.findById(id).isEmpty()) {
+            ctx.status(404).json(Map.of("error", "report not found"));
+            return;
+        }
+        if (!this.repo.dismiss(id, this.sanitizeInput(resolvedBy))) {
+            ctx.status(409).json(Map.of("error", "report is already closed"));
+            return;
+        }
         ctx.status(200).json(Map.of("success", true));
     }
 

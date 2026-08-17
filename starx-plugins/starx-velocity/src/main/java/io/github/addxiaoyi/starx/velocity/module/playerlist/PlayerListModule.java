@@ -21,6 +21,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.function.Function;
 import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 
@@ -34,6 +37,8 @@ public final class PlayerListModule implements VelocityModule {
   private final StarxConfig.PlayerListConfig config;
   private final PlayerListRenderer renderer;
   private final StarxPlayerContextFactory contextFactory;
+  private final Function<UUID, UUID> canonicalUuidResolver;
+  private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
   private Listener listener;
   private ScheduledTask refreshTask;
@@ -47,6 +52,34 @@ public final class PlayerListModule implements VelocityModule {
       StarxConfig.PlayerListConfig config,
       PlayerListRenderer renderer,
       StarxPlayerContextFactory contextFactory) {
+    this(plugin, users, bindings, sessions, authentication, config, renderer, contextFactory, uuid -> uuid);
+  }
+
+  public PlayerListModule(
+      StarxVelocityPlugin plugin,
+      JdbcUserRepository users,
+      JdbcBindingRepository bindings,
+      JdbcPlayerSessionRepository sessions,
+      AuthModule authentication,
+      StarxConfig.PlayerListConfig config,
+      PlayerListRenderer renderer,
+      StarxPlayerContextFactory contextFactory,
+      Function<UUID, UUID> canonicalUuidResolver) {
+    this(plugin, users, bindings, sessions, authentication, config, renderer, contextFactory,
+        canonicalUuidResolver, uuid -> Set.of(uuid));
+  }
+
+  public PlayerListModule(
+      StarxVelocityPlugin plugin,
+      JdbcUserRepository users,
+      JdbcBindingRepository bindings,
+      JdbcPlayerSessionRepository sessions,
+      AuthModule authentication,
+      StarxConfig.PlayerListConfig config,
+      PlayerListRenderer renderer,
+      StarxPlayerContextFactory contextFactory,
+      Function<UUID, UUID> canonicalUuidResolver,
+      Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.users = Objects.requireNonNull(users, "users");
     this.bindings = Objects.requireNonNull(bindings, "bindings");
@@ -55,6 +88,9 @@ public final class PlayerListModule implements VelocityModule {
     this.config = Objects.requireNonNull(config, "config");
     this.renderer = Objects.requireNonNull(renderer, "renderer");
     this.contextFactory = Objects.requireNonNull(contextFactory, "contextFactory");
+    this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+    this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+        knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
   }
 
   @Override
@@ -115,8 +151,19 @@ public final class PlayerListModule implements VelocityModule {
     StarxUser user = this.authentication.authService()
         .findConnectedUser(player.getUniqueId())
         .orElse(null);
-    UUID accountUuid = user == null ? player.getUniqueId() : user.uuid();
-    PlayerBinding binding = this.bindings.findByPlayer(accountUuid).orElse(null);
+    UUID legacyUuid = user == null ? null : user.uuid();
+    UUID accountUuid = this.canonicalUuidResolver.apply(
+        legacyUuid == null ? player.getUniqueId() : legacyUuid);
+    Set<UUID> knownUuids = new LinkedHashSet<>(
+        this.knownMinecraftUuidsResolver.apply(player.getUniqueId()));
+    if (legacyUuid != null) knownUuids.addAll(this.knownMinecraftUuidsResolver.apply(legacyUuid));
+    PlayerBinding binding = null;
+    for (UUID knownUuid : knownUuids) {
+      binding = this.bindings.findByPlayer(knownUuid).orElse(null);
+      if (binding != null) break;
+    }
+    var session = this.sessions.summary(knownUuids).orElse(null);
+    var playtime = this.sessions.playtimeByServer(knownUuids);
     String serverName = player.getCurrentServer()
         .map(connection -> connection.getServerInfo().getName())
         .orElse(null);
@@ -126,8 +173,8 @@ public final class PlayerListModule implements VelocityModule {
     PlayerIdentityMetrics metrics = PlayerIdentityMetrics.from(
         user,
         binding,
-        this.sessions.summary(accountUuid).orElse(null),
-        this.sessions.playtimeByServer(accountUuid),
+        session,
+        playtime,
         Instant.now());
     return this.contextFactory.create(
         player.getUniqueId(),

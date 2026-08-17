@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 final class BindingCodeResolver {
 
@@ -14,24 +15,53 @@ final class BindingCodeResolver {
   }
 
   private final BindingVerificationService codes;
-  private final JdbcUserRepository users;
+  private final Function<UUID, Optional<UserDto>> userLookup;
 
   BindingCodeResolver(BindingVerificationService codes, JdbcUserRepository users) {
+    this(codes, exactLookup(users));
+  }
+
+  BindingCodeResolver(
+      BindingVerificationService codes,
+      JdbcUserRepository users,
+      Function<UUID, Optional<UserDto>> identityAwareLookup) {
+    this(codes, composeLookup(users, identityAwareLookup));
+  }
+
+  private BindingCodeResolver(
+      BindingVerificationService codes,
+      Function<UUID, Optional<UserDto>> userLookup) {
     this.codes = Objects.requireNonNull(codes, "codes");
-    this.users = Objects.requireNonNull(users, "users");
+    this.userLookup = Objects.requireNonNull(userLookup, "userLookup");
   }
 
   Optional<Identity> resolve(String code) {
-    AtomicReference<UserDto> resolved = new AtomicReference<>();
+    AtomicReference<Identity> resolved = new AtomicReference<>();
     UUID uuid = this.codes.verifyCodeIf(code, candidate -> {
-      Optional<UserDto> user = this.users.findByUuid(candidate);
-      user.ifPresent(resolved::set);
+      Optional<UserDto> user = this.userLookup.apply(candidate);
+      user.ifPresent(value -> resolved.set(new Identity(candidate, value.username())));
       return user.isPresent();
     });
     if (uuid == null) {
       return Optional.empty();
     }
-    UserDto user = resolved.get();
-    return Optional.of(new Identity(user.uuid(), user.username()));
+    return Optional.ofNullable(resolved.get());
+  }
+
+  private static Function<UUID, Optional<UserDto>> exactLookup(JdbcUserRepository users) {
+    JdbcUserRepository repository = Objects.requireNonNull(users, "users");
+    return repository::findByUuid;
+  }
+
+  private static Function<UUID, Optional<UserDto>> composeLookup(
+      JdbcUserRepository users,
+      Function<UUID, Optional<UserDto>> identityAwareLookup) {
+    JdbcUserRepository repository = Objects.requireNonNull(users, "users");
+    Function<UUID, Optional<UserDto>> fallback = Objects.requireNonNull(
+        identityAwareLookup, "identityAwareLookup");
+    return candidate -> {
+      Optional<UserDto> exact = repository.findByUuid(candidate);
+      return exact.isPresent() ? exact : fallback.apply(candidate);
+    };
   }
 }

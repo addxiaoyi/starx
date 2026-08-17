@@ -5,7 +5,6 @@ import com.velocitypowered.api.proxy.server.RegisteredServer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -23,7 +22,7 @@ public final class SmartQueueService {
           .thenComparingLong(SmartQueueEntry::enqueueTimeMs);
 
   private final Map<String, Bucket> queues = new ConcurrentHashMap<>();
-  private final Map<UUID, Long> joinTimestamps = new ConcurrentHashMap<>();
+  private final Map<UUID, JoinRecord> joinRecords = new ConcurrentHashMap<>();
   private final AtomicBoolean dispatching = new AtomicBoolean();
 
   public void enqueue(RegisteredServer server, Player player, int baseScore) {
@@ -53,7 +52,7 @@ public final class SmartQueueService {
 
   public void clear() {
     queues.clear();
-    joinTimestamps.clear();
+    joinRecords.clear();
   }
 
   public int position(RegisteredServer server, Player player) {
@@ -73,23 +72,30 @@ public final class SmartQueueService {
 
   public boolean removeFromQueue(RegisteredServer server, Player player) {
     Bucket queue = queues.get(server.getServerInfo().getName());
-    return queue != null && queue.remove(player.getUniqueId());
+    return queue != null && queue.remove(player);
   }
 
   public int removeFromAllQueues(Player player) {
     int removed = 0;
     for (Bucket queue : queues.values()) {
-      if (queue.remove(player.getUniqueId())) removed++;
+      if (queue.remove(player)) removed++;
     }
     return removed;
   }
 
   public void recordJoin(Player player) {
-    joinTimestamps.putIfAbsent(player.getUniqueId(), System.currentTimeMillis());
+    joinRecords.compute(player.getUniqueId(), (ignored, current) -> {
+      if (current != null && current.player() == player) return current;
+      return new JoinRecord(player, System.currentTimeMillis());
+    });
   }
 
   public void recordQuit(Player player) {
-    joinTimestamps.remove(player.getUniqueId());
+    // A late disconnect must not erase the replacement connection's activity clock.
+    JoinRecord current = this.joinRecords.get(player.getUniqueId());
+    if (current != null && current.player() == player) {
+      this.joinRecords.remove(player.getUniqueId(), current);
+    }
     removeFromAllQueues(player);
   }
 
@@ -106,21 +112,20 @@ public final class SmartQueueService {
         List<SmartQueueEntry> claims = queue.getValue().claim(remaining);
         remaining -= claims.size();
         for (SmartQueueEntry entry : claims) {
-          UUID playerId = entry.player().getUniqueId();
           CompletionStage<Boolean> result;
           try {
             result = connector.connect(entry.player(), queue.getKey());
           } catch (RuntimeException error) {
-            queue.getValue().complete(playerId, false);
+            queue.getValue().complete(entry.player(), false);
             continue;
           }
           if (result == null) {
-            queue.getValue().complete(playerId, false);
+            queue.getValue().complete(entry.player(), false);
             continue;
           }
           dispatched++;
           result.whenComplete((success, error) -> queue.getValue().complete(
-              playerId, error == null && Boolean.TRUE.equals(success)));
+              entry.player(), error == null && Boolean.TRUE.equals(success)));
         }
       }
     } finally {
@@ -136,12 +141,14 @@ public final class SmartQueueService {
   }
 
   private int computeActivityScore(Player player, long now) {
-    Long joinedAt = joinTimestamps.get(player.getUniqueId());
-    if (joinedAt == null) return 0;
-    return (int) Math.min(100L, Math.max(0L, now - joinedAt) / MILLIS_PER_MINUTE);
+    JoinRecord joined = joinRecords.get(player.getUniqueId());
+    if (joined == null || joined.player() != player) return 0;
+    return (int) Math.min(100L, Math.max(0L, now - joined.joinedAtMs()) / MILLIS_PER_MINUTE);
   }
 
   public record SmartQueueEntry(Player player, long score, long enqueueTimeMs) { }
+
+  private record JoinRecord(Player player, long joinedAtMs) { }
 
   @FunctionalInterface
   public interface PlayerConnector {
@@ -151,11 +158,16 @@ public final class SmartQueueService {
   private static final class Bucket {
     private final PriorityQueue<SmartQueueEntry> ordered = new PriorityQueue<>(PRIORITY);
     private final Map<UUID, SmartQueueEntry> byPlayer = new HashMap<>();
-    private final Set<UUID> inFlight = new HashSet<>();
+    private final Map<UUID, Player> inFlight = new HashMap<>();
 
     synchronized void add(SmartQueueEntry entry) {
       UUID playerId = entry.player().getUniqueId();
-      if (byPlayer.containsKey(playerId)) return;
+      SmartQueueEntry current = byPlayer.get(playerId);
+      if (current != null && current.player() == entry.player()) return;
+      if (current != null) {
+        ordered.remove(current);
+        if (inFlight.get(playerId) == current.player()) inFlight.remove(playerId);
+      }
       byPlayer.put(playerId, entry);
       ordered.add(entry);
     }
@@ -181,7 +193,8 @@ public final class SmartQueueService {
           removeInternal(playerId);
           continue;
         }
-        if (inFlight.add(playerId)) {
+        if (!inFlight.containsKey(playerId)) {
+          inFlight.put(playerId, entry.player());
           claimed.add(entry);
           if (claimed.size() == limit) break;
         }
@@ -189,13 +202,18 @@ public final class SmartQueueService {
       return List.copyOf(claimed);
     }
 
-    synchronized void complete(UUID playerId, boolean success) {
-      if (!inFlight.remove(playerId)) return;
+    synchronized void complete(Player player, boolean success) {
+      UUID playerId = player.getUniqueId();
+      if (inFlight.get(playerId) != player) return;
+      inFlight.remove(playerId);
       if (success) removeInternal(playerId);
     }
 
-    synchronized boolean remove(UUID playerId) {
-      inFlight.remove(playerId);
+    synchronized boolean remove(Player player) {
+      UUID playerId = player.getUniqueId();
+      SmartQueueEntry entry = byPlayer.get(playerId);
+      if (entry == null || entry.player() != player) return false;
+      if (inFlight.get(playerId) == player) inFlight.remove(playerId);
       return removeInternal(playerId);
     }
 

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collection;
 import javax.sql.DataSource;
 
 public class JdbcReportRepository {
@@ -42,11 +43,15 @@ public class JdbcReportRepository {
   }
 
   public List<Report> findByTarget(UUID targetId) {
-    return byUuid("target_uuid", targetId);
+    return findByTargets(List.of(targetId));
+  }
+
+  public List<Report> findByTargets(Collection<UUID> targetIds) {
+    return byUuids("target_uuid", targetIds);
   }
 
   public List<Report> findByReporter(UUID reporterId) {
-    return byUuid("reporter_uuid", reporterId);
+    return byUuids("reporter_uuid", List.of(reporterId));
   }
 
   public Optional<Report> findById(String id) {
@@ -63,30 +68,34 @@ public class JdbcReportRepository {
         this::map);
   }
 
-  public void resolve(String id, String resolvedBy) {
-    setStatus(id, "RESOLVED", resolvedBy);
+  public boolean resolve(String id, String resolvedBy) {
+    return setStatus(id, "RESOLVED", resolvedBy);
   }
 
-  public void dismiss(String id, String resolvedBy) {
-    setStatus(id, "DISMISSED", resolvedBy);
+  public boolean dismiss(String id, String resolvedBy) {
+    return setStatus(id, "DISMISSED", resolvedBy);
   }
 
-  private List<Report> byUuid(String column, UUID playerId) {
+  private List<Report> byUuids(String column, Collection<UUID> playerIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(playerIds);
+    if (ids.isEmpty()) return List.of();
     return this.store.many(
-        "SELECT " + COLUMNS + " FROM starx_reports WHERE " + column + " = ? ORDER BY id DESC",
-        statement -> statement.setString(1, playerId.toString()),
+        "SELECT " + COLUMNS + " FROM starx_reports WHERE " + column + " IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ") ORDER BY id DESC",
+        statement -> JdbcUuidQuery.bind(statement, ids),
         this::map);
   }
 
-  private void setStatus(String id, String status, String resolvedBy) {
-    this.store.execute(
-        "UPDATE starx_reports SET status = ?, resolved_by = ?, resolved_at = ? WHERE id = ?",
+  private boolean setStatus(String id, String status, String resolvedBy) {
+    return this.store.execute(
+        "UPDATE starx_reports SET status = ?, resolved_by = ?, resolved_at = ? "
+            + "WHERE id = ? AND status = 'PENDING'",
         statement -> {
           statement.setString(1, status);
           statement.setString(2, resolvedBy);
           statement.setLong(3, System.currentTimeMillis());
           statement.setString(4, id);
-        });
+        }) == 1;
   }
 
   private Report map(ResultSet rows) throws SQLException {

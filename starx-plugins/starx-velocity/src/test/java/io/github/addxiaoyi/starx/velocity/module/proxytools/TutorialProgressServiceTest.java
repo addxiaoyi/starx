@@ -2,6 +2,8 @@ package io.github.addxiaoyi.starx.velocity.module.proxytools;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class TutorialProgressServiceTest {
@@ -31,5 +33,25 @@ class TutorialProgressServiceTest {
 
     assertEquals(8, service.complete("uuid"));
     assertTrue(service.completed("uuid"));
+  }
+
+  @Test
+  void identityResolversAlwaysRetainTheCurrentUuid() {
+    UUID current = UUID.randomUUID();
+    UUID legacy = UUID.randomUUID();
+
+    assertEquals(
+        Set.of(current),
+        TutorialProgressService.normalizeKnownMinecraftUuids(current, Set.of()));
+    assertEquals(
+        Set.of(current, legacy),
+        TutorialProgressService.normalizeKnownMinecraftUuids(current, Set.of(legacy)));
+  }
+
+  @Test
+  void missingCanonicalUuidFallsBackToTheCurrentUuid() {
+    UUID current = UUID.randomUUID();
+
+    assertEquals(current, TutorialProgressService.normalizeCanonicalUuid(current, null));
   }
 }

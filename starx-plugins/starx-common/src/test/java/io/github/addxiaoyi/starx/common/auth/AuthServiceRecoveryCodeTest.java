@@ -16,6 +16,7 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -119,7 +120,7 @@ final class AuthServiceRecoveryCodeTest {
   }
 
   @Test
-  void consumesOnlyTheMatchingRecoveryCode() {
+  void consumesOnlyTheMatchingRecoveryCode() throws InterruptedException {
     AuthLease firstLease = this.openAuthenticatingSession();
 
     assertTrue(this.auth.verifyRecoveryCode(
@@ -128,6 +129,7 @@ final class AuthServiceRecoveryCodeTest {
     AuthLease secondLease = this.openAuthenticatingSession();
     assertFalse(this.auth.verifyRecoveryCode(
         secondLease, this.playerId, this.recoveryCodes.get(0)).success());
+    Thread.sleep(1_100L);
     assertTrue(this.auth.verifyRecoveryCode(
         secondLease, this.playerId, this.recoveryCodes.get(1)).success());
   }
@@ -159,8 +161,21 @@ final class AuthServiceRecoveryCodeTest {
   }
 
   @Test
+  void invalidTotpAttemptIsRateLimitedBeforeAValidRetry() {
+    AuthLease lease = this.openAuthenticatingSession();
+    String validCode = TotpGenerator.generate(this.totpSecret, Instant.now());
+    char replacement = validCode.charAt(5) == '0' ? '1' : '0';
+    String invalidCode = validCode.substring(0, 5) + replacement;
+
+    assertFalse(this.auth.verifyTotp(lease, this.playerId, invalidCode).success());
+    assertEquals(1, this.auth.bruteForceProtector().getAttemptCount(this.playerId));
+    assertFalse(this.auth.verifyTotp(lease, this.playerId, validCode).success());
+  }
+
+  @Test
   void totpVerificationResolvesTheStoredAccountFromTheCurrentConnectionUsername() {
-    UUID connectionUuid = UUID.randomUUID();
+    UUID connectionUuid = this.playerId;
+    this.auth.bindMinecraftIdentityResolver(ignored -> Set.of(connectionUuid));
     AuthLease lease = AuthLease.create();
     assertNotNull(this.sessions.open(connectionUuid, "player", null, lease));
     assertTrue(this.sessions.transition(
@@ -175,8 +190,26 @@ final class AuthServiceRecoveryCodeTest {
   }
 
   @Test
+  void totpVerificationResolvesAStoredAccountThroughArenamedUuidAlias() {
+    UUID connectionUuid = this.playerId;
+    this.auth.bindMinecraftIdentityResolver(ignored -> Set.of(connectionUuid));
+    AuthLease lease = AuthLease.create();
+    assertNotNull(this.sessions.open(connectionUuid, "renamed-player", null, lease));
+    assertTrue(this.sessions.transition(
+        connectionUuid, lease, AuthSession.State.GUEST, AuthSession.State.AUTHENTICATING));
+
+    AuthResult result = this.auth.verifyTotp(
+        lease, connectionUuid, TotpGenerator.generate(this.totpSecret, Instant.now()));
+
+    assertTrue(result.success());
+    assertTrue(this.sessions.isState(
+        connectionUuid, lease, AuthSession.State.AUTHENTICATED));
+  }
+
+  @Test
   void recoveryCodeResolvesTheStoredAccountFromTheCurrentConnectionUsername() {
     UUID connectionUuid = UUID.randomUUID();
+    this.auth.bindMinecraftIdentityResolver(ignored -> Set.of(connectionUuid, this.playerId));
     AuthLease lease = AuthLease.create();
     assertNotNull(this.sessions.open(connectionUuid, "player", null, lease));
     assertTrue(this.sessions.transition(
@@ -231,6 +264,35 @@ final class AuthServiceRecoveryCodeTest {
 
     assertTrue(this.users.replaceRecoveryCodes(this.playerId, stored, "[]"));
     assertFalse(this.users.replaceRecoveryCodes(this.playerId, stored, "[]"));
+  }
+
+  @Test
+  void failedAuthenticationRestoresTheConsumedRecoveryCode() {
+    UUID connectionUuid = this.playerId;
+    java.util.concurrent.atomic.AtomicBoolean failIdentityPersistence =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    this.auth.bindMinecraftIdentityObserver((uuid, username, source) -> {
+      if (failIdentityPersistence.getAndSet(false)) {
+        throw new IllegalStateException("identity persistence unavailable");
+      }
+    });
+    AuthLease lease = AuthLease.create();
+    assertNotNull(this.sessions.open(connectionUuid, "player", null, lease));
+    assertTrue(this.sessions.transition(
+        connectionUuid, lease, AuthSession.State.GUEST, AuthSession.State.AUTHENTICATING));
+
+    AuthResult failed = this.auth.verifyRecoveryCode(
+        lease, connectionUuid, this.recoveryCodes.get(0));
+
+    assertFalse(failed.success(), failed.message());
+    AuthLease retryLease = AuthLease.create();
+    assertNotNull(this.sessions.open(connectionUuid, "player", null, retryLease));
+    assertTrue(this.sessions.transition(
+        connectionUuid, retryLease, AuthSession.State.GUEST, AuthSession.State.AUTHENTICATING),
+        String.valueOf(this.sessions.get(connectionUuid).map(AuthSession::state).orElse(null)));
+    AuthResult retry = this.auth.verifyRecoveryCode(
+        retryLease, connectionUuid, this.recoveryCodes.get(0));
+    assertTrue(retry.success(), retry.message());
   }
 
   private AuthLease openAuthenticatingSession() {

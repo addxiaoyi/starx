@@ -19,6 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 final class SessionManagerTest {
@@ -144,6 +145,26 @@ final class SessionManagerTest {
           lease,
           AuthSession.State.AUTHENTICATING,
           AuthSession.State.AUTHENTICATED));
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void expiredTransitionNotifiesCleanupListeners() {
+    AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), now::get);
+    UUID playerId = UUID.randomUUID();
+    AuthLease lease = AuthLease.create();
+    AtomicReference<AuthSession> expired = new AtomicReference<>();
+    sessions.addExpirationListener(expired::set);
+    try {
+      sessions.open(playerId, "player", null, lease);
+      now.set(now.get().plus(Duration.ofMinutes(6)));
+
+      assertFalse(sessions.transition(
+          playerId, lease, AuthSession.State.GUEST, AuthSession.State.AUTHENTICATED));
+      assertEquals(playerId, expired.get().uuid());
     } finally {
       sessions.shutdown();
     }
