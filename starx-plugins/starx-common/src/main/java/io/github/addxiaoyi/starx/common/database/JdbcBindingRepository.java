@@ -8,7 +8,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 import javax.sql.DataSource;
 
@@ -24,6 +27,17 @@ public class JdbcBindingRepository {
         return this.queryOne("SELECT player_uuid, qq_id, discord_id, created_at FROM starx_player_bindings WHERE player_uuid = ?", ps -> ps.setString(1, playerUuid.toString()), this::map);
     }
 
+    public boolean migratePlayer(UUID legacyUuid, UUID currentUuid) {
+        Objects.requireNonNull(legacyUuid, "legacyUuid");
+        Objects.requireNonNull(currentUuid, "currentUuid");
+        if (legacyUuid.equals(currentUuid)) return true;
+        final boolean[] migrated = {false};
+        this.withTransaction(connection -> {
+            migrated[0] = migratePlayer(connection, legacyUuid, currentUuid);
+        });
+        return migrated[0];
+    }
+
     public Optional<PlayerBinding> findByQq(String qqId) {
         return this.queryOne("SELECT player_uuid, qq_id, discord_id, created_at FROM starx_player_bindings WHERE qq_id = ?", ps -> ps.setString(1, qqId), this::map);
     }
@@ -36,42 +50,119 @@ public class JdbcBindingRepository {
         final boolean[] saved = {false};
         try {
           this.withTransaction(conn -> {
-            if (ownedByAnother(conn, "qq_id", binding.qqId(), binding.playerUuid())
-                || ownedByAnother(conn, "discord_id", binding.discordId(), binding.playerUuid())) {
-              return;
-            }
-            block25: {
-                try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM starx_player_bindings WHERE player_uuid = ?");){
-                    ps.setString(1, binding.playerUuid().toString());
-                    try (ResultSet rs = ps.executeQuery();){
-                        if (rs.next()) {
-                            try (PreparedStatement update = conn.prepareStatement(
-                                    "UPDATE starx_player_bindings SET qq_id = COALESCE(?, qq_id), "
-                                        + "discord_id = COALESCE(?, discord_id) WHERE player_uuid = ?")) {
-                                update.setString(1, binding.qqId());
-                                update.setString(2, binding.discordId());
-                                update.setString(3, binding.playerUuid().toString());
-                                update.executeUpdate();
-                                saved[0] = true;
-                                break block25;
-                            }
-                        }
-                        try (PreparedStatement insert = conn.prepareStatement("INSERT INTO starx_player_bindings (player_uuid, qq_id, discord_id, created_at) VALUES (?, ?, ?, ?)");){
-                            insert.setString(1, binding.playerUuid().toString());
-                            insert.setString(2, binding.qqId());
-                            insert.setString(3, binding.discordId());
-                            insert.setLong(4, binding.createdAt());
-                            insert.executeUpdate();
-                            saved[0] = true;
-                        }
-                    }
-                }
-            }
+            saved[0] = save(conn, binding);
           });
           return saved[0];
         } catch (RuntimeException error) {
           if (isConstraintViolation(error)) return false;
           throw error;
+        }
+    }
+
+    public boolean migrateAndSave(Set<UUID> legacyUuids, PlayerBinding binding) {
+        Objects.requireNonNull(legacyUuids, "legacyUuids");
+        Objects.requireNonNull(binding, "binding");
+        LinkedHashSet<UUID> aliases = new LinkedHashSet<>();
+        for (UUID legacyUuid : legacyUuids) {
+            aliases.add(Objects.requireNonNull(legacyUuid, "legacyUuid"));
+        }
+        aliases.remove(binding.playerUuid());
+
+        final boolean[] saved = {false};
+        try {
+            this.withTransaction(connection -> {
+                if (ownedByOutsidePlayers(connection, "qq_id", binding.qqId(), binding.playerUuid(), aliases)
+                    || ownedByOutsidePlayers(connection, "discord_id", binding.discordId(), binding.playerUuid(), aliases)) {
+                    throw new TransactionRejected();
+                }
+                for (UUID legacyUuid : aliases) {
+                    if (!migratePlayer(connection, legacyUuid, binding.playerUuid())) {
+                        throw new TransactionRejected();
+                    }
+                }
+                if (!save(connection, binding)) {
+                    throw new TransactionRejected();
+                }
+                saved[0] = true;
+            });
+            return saved[0];
+        } catch (RuntimeException error) {
+            if (isTransactionRejected(error)) return false;
+            throw error;
+        }
+    }
+
+    private boolean migratePlayer(Connection connection, UUID legacyUuid, UUID currentUuid)
+        throws SQLException {
+        PlayerBinding legacy = findByPlayer(connection, legacyUuid);
+        if (legacy == null) return true;
+        PlayerBinding current = findByPlayer(connection, currentUuid);
+        if (current != null) {
+            if (conflicts(legacy, current)) return false;
+            try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE starx_player_bindings SET qq_id = COALESCE(qq_id, ?), "
+                    + "discord_id = COALESCE(discord_id, ?) WHERE player_uuid = ?")) {
+                update.setString(1, legacy.qqId());
+                update.setString(2, legacy.discordId());
+                update.setString(3, currentUuid.toString());
+                update.executeUpdate();
+            }
+            deletePlayer(connection, legacyUuid);
+            return true;
+        }
+        try (PreparedStatement update = connection.prepareStatement(
+            "UPDATE starx_player_bindings SET player_uuid = ? WHERE player_uuid = ?")) {
+            update.setString(1, currentUuid.toString());
+            update.setString(2, legacyUuid.toString());
+            return update.executeUpdate() == 1;
+        }
+    }
+
+    private static boolean save(Connection connection, PlayerBinding binding) throws SQLException {
+        if (ownedByAnother(connection, "qq_id", binding.qqId(), binding.playerUuid())
+            || ownedByAnother(connection, "discord_id", binding.discordId(), binding.playerUuid())) {
+            return false;
+        }
+        try (PreparedStatement query = connection.prepareStatement(
+            "SELECT 1 FROM starx_player_bindings WHERE player_uuid = ?")) {
+            query.setString(1, binding.playerUuid().toString());
+            try (ResultSet rows = query.executeQuery()) {
+                if (rows.next()) {
+                    try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE starx_player_bindings SET qq_id = COALESCE(?, qq_id), "
+                            + "discord_id = COALESCE(?, discord_id) WHERE player_uuid = ?")) {
+                        update.setString(1, binding.qqId());
+                        update.setString(2, binding.discordId());
+                        update.setString(3, binding.playerUuid().toString());
+                        update.executeUpdate();
+                        return true;
+                    }
+                }
+            }
+        }
+        try (PreparedStatement insert = connection.prepareStatement(
+            "INSERT INTO starx_player_bindings (player_uuid, qq_id, discord_id, created_at) VALUES (?, ?, ?, ?)")) {
+            insert.setString(1, binding.playerUuid().toString());
+            insert.setString(2, binding.qqId());
+            insert.setString(3, binding.discordId());
+            insert.setLong(4, binding.createdAt());
+            insert.executeUpdate();
+            return true;
+        }
+    }
+
+    private static boolean ownedByOutsidePlayers(
+        Connection connection, String column, String value, UUID playerUuid, Set<UUID> aliases)
+        throws SQLException {
+        if (value == null || value.isBlank()) return false;
+        try (PreparedStatement query = connection.prepareStatement(
+            "SELECT player_uuid FROM starx_player_bindings WHERE " + column + " = ?")) {
+            query.setString(1, value);
+            try (ResultSet rows = query.executeQuery()) {
+                if (!rows.next()) return false;
+                UUID owner = UUID.fromString(rows.getString(1));
+                return !playerUuid.equals(owner) && !aliases.contains(owner);
+            }
         }
     }
 
@@ -99,6 +190,42 @@ public class JdbcBindingRepository {
             current = current.getCause();
         }
         return false;
+    }
+
+    private static boolean isTransactionRejected(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof TransactionRejected) return true;
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static boolean conflicts(PlayerBinding legacy, PlayerBinding current) {
+        return differentNonNull(legacy.qqId(), current.qqId())
+            || differentNonNull(legacy.discordId(), current.discordId());
+    }
+
+    private static boolean differentNonNull(String legacy, String current) {
+        return legacy != null && current != null && !legacy.equals(current);
+    }
+
+    private PlayerBinding findByPlayer(Connection connection, UUID playerUuid) throws SQLException {
+        try (PreparedStatement query = connection.prepareStatement(
+            "SELECT player_uuid, qq_id, discord_id, created_at FROM starx_player_bindings WHERE player_uuid = ?")) {
+            query.setString(1, playerUuid.toString());
+            try (ResultSet rows = query.executeQuery()) {
+                return rows.next() ? this.map(rows) : null;
+            }
+        }
+    }
+
+    private static void deletePlayer(Connection connection, UUID playerUuid) throws SQLException {
+        try (PreparedStatement delete = connection.prepareStatement(
+            "DELETE FROM starx_player_bindings WHERE player_uuid = ?")) {
+            delete.setString(1, playerUuid.toString());
+            delete.executeUpdate();
+        }
     }
 
     public boolean unbind(UUID playerUuid, String kind, String actor, long occurredAt) {
@@ -193,5 +320,8 @@ public class JdbcBindingRepository {
     @FunctionalInterface
     private static interface TransactionBody {
         public void execute(Connection var1) throws Exception;
+    }
+
+    private static final class TransactionRejected extends RuntimeException {
     }
 }

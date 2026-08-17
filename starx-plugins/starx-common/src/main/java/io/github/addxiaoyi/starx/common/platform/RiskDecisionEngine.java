@@ -38,11 +38,11 @@ public final class RiskDecisionEngine {
     score = Math.min(100, score);
 
     Action action = Action.ALLOW;
-    if (score >= WEB_APPROVAL_THRESHOLD && input.websiteAvailable()) {
+    if (score >= WEB_APPROVAL_THRESHOLD && input.websiteAvailable() && input.websiteBound()) {
       action = Action.REQUIRE_WEB_APPROVAL;
-    } else if (score >= TOTP_THRESHOLD && input.totpEnabled()) {
+    } else if (score >= TOTP_THRESHOLD && input.totpEnabled() && input.totpAvailable()) {
       action = Action.REQUIRE_TOTP;
-    } else if (score >= TOTP_THRESHOLD && input.websiteAvailable()) {
+    } else if (score >= TOTP_THRESHOLD && input.websiteAvailable() && input.websiteBound()) {
       action = Action.REQUIRE_WEB_APPROVAL;
     }
     return new Decision(action, score, reasons);
@@ -60,12 +60,29 @@ public final class RiskDecisionEngine {
       boolean totpEnabled,
       int ipRisk,
       int recentPasswordFailures,
-      boolean websiteAvailable
+      boolean websiteAvailable,
+      boolean websiteBound,
+      boolean totpAvailable
   ) {
     public Input(
         boolean trustedDevice, boolean familiarRegion, boolean totpEnabled,
+        int ipRisk, int recentPasswordFailures, boolean websiteAvailable,
+        boolean websiteBound) {
+      this(trustedDevice, familiarRegion, totpEnabled, ipRisk,
+          recentPasswordFailures, websiteAvailable, websiteBound, true);
+    }
+
+    public Input(
+        boolean trustedDevice, boolean familiarRegion, boolean totpEnabled,
+        int ipRisk, int recentPasswordFailures, boolean websiteAvailable) {
+      this(trustedDevice, familiarRegion, totpEnabled, ipRisk,
+          recentPasswordFailures, websiteAvailable, false, true);
+    }
+
+    public Input(
+        boolean trustedDevice, boolean familiarRegion, boolean totpEnabled,
         int ipRisk, boolean websiteAvailable) {
-      this(trustedDevice, familiarRegion, totpEnabled, ipRisk, 0, websiteAvailable);
+      this(trustedDevice, familiarRegion, totpEnabled, ipRisk, 0, websiteAvailable, false, true);
     }
   }
 

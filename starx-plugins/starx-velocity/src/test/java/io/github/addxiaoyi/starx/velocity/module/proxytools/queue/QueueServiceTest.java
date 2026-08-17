@@ -121,6 +121,34 @@ class QueueServiceTest {
   }
 
   @Test
+  void staleConnectionCannotRemoveReplacementQueueEntry() {
+    QueueService queue = new QueueService();
+    RegisteredServer server = server("survival");
+    Player oldConnection = player("00000000-0000-0000-0000-000000000001", true);
+    Player replacement = player("00000000-0000-0000-0000-000000000001", true);
+
+    queue.enqueue(server, replacement);
+    assertEquals(0, queue.removeFromAllQueues(oldConnection));
+    assertEquals(1, queue.size(server));
+  }
+
+  @Test
+  void staleAsyncResultCannotCompleteReplacementQueueEntry() {
+    QueueService queue = new QueueService();
+    RegisteredServer server = server("survival");
+    Player oldConnection = player("00000000-0000-0000-0000-000000000001", true);
+    Player replacement = player("00000000-0000-0000-0000-000000000001", true);
+    CompletableFuture<Boolean> oldResult = new CompletableFuture<>();
+
+    queue.enqueue(server, oldConnection);
+    assertEquals(1, queue.processQueues((ignored, serverName) -> oldResult));
+    queue.enqueue(server, replacement);
+    oldResult.complete(true);
+
+    assertEquals(1, queue.size(server));
+  }
+
+  @Test
   void synchronousConnectorFailureDoesNotLeakClaim() {
     QueueService queue = new QueueService();
     RegisteredServer server = server("survival");

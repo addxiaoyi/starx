@@ -8,7 +8,12 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
 import java.util.logging.Level;
 
 public final class LuckPermsContextModule implements VelocityModule {
@@ -23,6 +28,8 @@ public final class LuckPermsContextModule implements VelocityModule {
 
   private final StarxVelocityPlugin plugin;
   private final JdbcBindingRepository bindings;
+  private final Function<UUID, UUID> canonicalUuidResolver;
+  private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
   private Object contextManager;
   private Object calculator;
   private Method unregister;
@@ -30,8 +37,26 @@ public final class LuckPermsContextModule implements VelocityModule {
   public LuckPermsContextModule(
       StarxVelocityPlugin plugin,
       JdbcBindingRepository bindings) {
+    this(plugin, bindings, uuid -> uuid);
+  }
+
+  public LuckPermsContextModule(
+      StarxVelocityPlugin plugin,
+      JdbcBindingRepository bindings,
+      Function<UUID, UUID> canonicalUuidResolver) {
+    this(plugin, bindings, canonicalUuidResolver, uuid -> Set.of(uuid));
+  }
+
+  public LuckPermsContextModule(
+      StarxVelocityPlugin plugin,
+      JdbcBindingRepository bindings,
+      Function<UUID, UUID> canonicalUuidResolver,
+      Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.bindings = Objects.requireNonNull(bindings, "bindings");
+    this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+    this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+        knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
   }
 
   @Override
@@ -101,8 +126,16 @@ public final class LuckPermsContextModule implements VelocityModule {
       }
       BindingContextValues values;
       try {
-        values = bindings.findByPlayer(player.getUniqueId())
+        UUID requested = player.getUniqueId();
+        UUID canonical = LuckPermsContextModule.this.canonicalUuidResolver.apply(requested);
+        LinkedHashSet<UUID> knownUuids = new LinkedHashSet<>();
+        knownUuids.add(canonical);
+        knownUuids.addAll(LuckPermsContextModule.this.knownMinecraftUuidsResolver.apply(requested));
+        values = knownUuids.stream()
+            .map(bindings::findByPlayer)
+            .flatMap(Optional::stream)
             .map(BindingContextValues::from)
+            .findFirst()
             .orElseGet(BindingContextValues::empty);
       } catch (RuntimeException error) {
         plugin.logger().log(

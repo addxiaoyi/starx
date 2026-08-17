@@ -140,6 +140,10 @@ implements SkinRepository {
             String skinId = SkinsRestorerSkinRepository.skinIdForWrite(existing, uuid);
             SkinsRestorerSkinRepository.writeSkinData(this.skinStorage, skinId, value, signature);
             SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
+            if (!SkinsRestorerSkinRepository.hasPersistedSkinData(
+                    this.playerStorage, this.skinStorage, uuid, value, signature)) {
+                throw new IllegalStateException("SkinsRestorer did not retain the written skin data");
+            }
             return true;
         }
         catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
@@ -343,6 +347,47 @@ implements SkinRepository {
             value = optional.isPresent() ? optional.get() : "";
         }
         return value == null ? "" : value.toString();
+    }
+
+    private static boolean hasPersistedSkinData(
+        Object playerStorage,
+        Object skinStorage,
+        UUID uuid,
+        String expectedValue,
+        String expectedSignature
+    ) throws ReflectiveOperationException {
+        if (!SkinsRestorerSkinRepository.hasMethod(
+                skinStorage, "getSkinDataByIdentifier", 1)) {
+            return true;
+        }
+        Optional<?> skinId = SkinsRestorerSkinRepository.invokeOptional(
+            playerStorage, "getSkinIdOfPlayer", uuid);
+        if (skinId.isEmpty()) {
+            return false;
+        }
+        Optional<?> skinData = SkinsRestorerSkinRepository.invokeOptional(
+            skinStorage, "getSkinDataByIdentifier", skinId.get());
+        if (skinData.isEmpty()) {
+            return false;
+        }
+        Object data = skinData.get();
+        String value = SkinsRestorerSkinRepository.readString(data, "getValue", "value");
+        String signature = SkinsRestorerSkinRepository.readString(data, "getSignature", "signature");
+        return Objects.equals(expectedValue, value)
+            && Objects.equals(normalizeSignature(expectedSignature), normalizeSignature(signature));
+    }
+
+    private static String normalizeSignature(String signature) {
+        return signature == null ? "" : signature;
+    }
+
+    private static boolean hasMethod(Object target, String name, int parameterCount) {
+        for (Method method : target.getClass().getMethods()) {
+            if (method.getName().equals(name) && method.getParameterCount() == parameterCount) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String skinIdForWrite(Optional<?> existing, UUID uuid) throws ReflectiveOperationException {

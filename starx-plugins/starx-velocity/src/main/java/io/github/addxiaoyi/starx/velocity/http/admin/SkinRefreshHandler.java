@@ -12,16 +12,26 @@ import io.github.addxiaoyi.starx.velocity.module.skin.SkinBridgeModule;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 public final class SkinRefreshHandler
 implements AdminHandler {
     private static final int MAX_USERNAME_LENGTH = 16;
     private final SkinBridgeModule skinBridge;
     private final JdbcUserRepository users;
+    private final Function<String, Optional<StarxUser>> usernameResolver;
 
     public SkinRefreshHandler(SkinBridgeModule skinBridge, JdbcUserRepository users) {
+        this(skinBridge, users, users::findFullByUsername);
+    }
+
+    public SkinRefreshHandler(
+        SkinBridgeModule skinBridge,
+        JdbcUserRepository users,
+        Function<String, Optional<StarxUser>> usernameResolver) {
         this.skinBridge = Objects.requireNonNull(skinBridge, "skinBridge");
         this.users = Objects.requireNonNull(users, "users");
+        this.usernameResolver = Objects.requireNonNull(usernameResolver, "usernameResolver");
     }
 
     @Override
@@ -48,12 +58,12 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", "username too long"));
             return;
         }
-        Optional<StarxUser> user = this.users.findFullByUsername(req.username);
+        Optional<StarxUser> user = this.usernameResolver.apply(req.username);
         if (user.isEmpty()) {
             ctx.status(404).json(Map.of("error", "User not found"));
             return;
         }
-        this.skinBridge.refreshSkin(user.get().uuid(), user.get().username());
+        this.skinBridge.refreshSkin(user.get().uuid(), req.username);
         ctx.status(200).json(Map.of("success", true));
     }
 

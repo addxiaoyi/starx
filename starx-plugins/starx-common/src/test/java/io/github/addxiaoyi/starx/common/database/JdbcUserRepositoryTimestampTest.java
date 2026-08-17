@@ -1,6 +1,8 @@
 package io.github.addxiaoyi.starx.common.database;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.addxiaoyi.starx.api.dto.UserDto;
 import java.nio.file.Path;
@@ -9,6 +11,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -93,6 +96,79 @@ final class JdbcUserRepositoryTimestampTest {
     assertEquals(
         Timestamp.valueOf("2026-03-01 00:00:01.000").toInstant(),
         epochUser.lastLoginAt());
+  }
+
+  @Test
+  void restoresAMigrationOnlyWhileItsPasswordHashIsStillCurrent() throws Exception {
+    UUID playerId = UUID.randomUUID();
+    try (Connection connection = this.source.getConnection();
+         Statement statement = connection.createStatement()) {
+      statement.executeUpdate("""
+          INSERT INTO starx_users (
+            uuid, username, password_hash, premium, created_at, trusted_devices,
+            source_system, migration_state, total_playtime, welcome_message_shown
+          ) VALUES ('%s', 'migrating-user', 'legacy-hash', 0, 0, '[]',
+            'uniauth', 'pending', 0, 0)
+          """.formatted(playerId));
+    }
+
+    JdbcUserRepository users = new JdbcUserRepository(this.source);
+    users.markPasswordMigrated(playerId, "migration-hash", Instant.parse("2026-08-17T00:00:00Z"));
+
+    assertTrue(users.restorePasswordMigrationIfCurrent(
+        playerId, "migration-hash", "legacy-hash", "pending", null));
+    assertEquals("legacy-hash", users.findFullByUuid(playerId).orElseThrow().passwordHash());
+
+    users.markPasswordMigrated(playerId, "newer-hash", Instant.parse("2026-08-17T00:01:00Z"));
+    assertFalse(users.restorePasswordMigrationIfCurrent(
+        playerId, "migration-hash", "legacy-hash", "pending", null));
+    assertEquals("newer-hash", users.findFullByUuid(playerId).orElseThrow().passwordHash());
+  }
+
+  @Test
+  void loginMetadataUpdatesReportWhenTheAccountWasDeletedConcurrently() throws Exception {
+    UUID playerId = UUID.randomUUID();
+    JdbcUserRepository users = new JdbcUserRepository(this.source);
+
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalStateException.class, () -> users.updateLastLogin(playerId, Instant.now()));
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalStateException.class, () -> users.updatePremium(playerId, true));
+  }
+
+  @Test
+  void trustedDeviceReplacementRejectsAStaleSnapshot() throws Exception {
+    UUID playerId = UUID.randomUUID();
+    JdbcUserRepository users = new JdbcUserRepository(this.source);
+    users.create(new io.github.addxiaoyi.starx.common.model.StarxUser(
+        playerId, "trusted-user", null, "hash", null, false, Instant.now(), null,
+        null, List.of("device-a"), null, "local", "completed", null, null, null,
+        null, 0L, null, false));
+
+    assertTrue(users.replaceTrustedDevicesIfCurrent(
+        playerId, List.of("device-a"), List.of("device-a", "device-b")));
+    assertFalse(users.replaceTrustedDevicesIfCurrent(
+        playerId, List.of("device-a"), List.of("device-a", "device-c")));
+    assertEquals(List.of("device-a", "device-b"),
+        users.findFullByUuid(playerId).orElseThrow().trustedDevices());
+  }
+
+  @Test
+  void loginMetadataRollbackHandlesAnUnsetPreviousLoginTimestamp() throws Exception {
+    UUID playerId = UUID.randomUUID();
+    JdbcUserRepository users = new JdbcUserRepository(this.source);
+    users.create(new io.github.addxiaoyi.starx.common.model.StarxUser(
+        playerId, "new-user", null, "hash", null, false, Instant.now(), null,
+        null, List.of(), null, "local", "completed", null, null, null,
+        null, 0L, null, false));
+    Instant loginAt = Instant.parse("2026-08-17T01:00:00Z");
+    users.updateLastLogin(playerId, loginAt);
+    users.updatePremium(playerId, true);
+
+    assertTrue(users.restoreLoginMetadataIfCurrent(
+        playerId, loginAt, true, null, false));
+    assertEquals(null, users.findFullByUuid(playerId).orElseThrow().lastLoginAt());
+    assertFalse(users.findFullByUuid(playerId).orElseThrow().premium());
   }
 
   private static UserDto user(List<UserDto> users, String username) {

@@ -18,7 +18,7 @@ final class UworldRegistry<P, W, S> {
   }
 
   private final ConcurrentMap<String, OwnedWorld<W>> worlds = new ConcurrentHashMap<>();
-  private final ConcurrentMap<P, S> sessions = new ConcurrentHashMap<>();
+  private final ConcurrentMap<IdentityKey<P>, S> sessions = new ConcurrentHashMap<>();
   private final AtomicBoolean stopping = new AtomicBoolean();
 
   boolean registerWorld(String owner, String name, W world) {
@@ -59,21 +59,21 @@ final class UworldRegistry<P, W, S> {
     if (this.stopping.get()) {
       return ClaimResult.RUNTIME_STOPPING;
     }
-    if (this.sessions.putIfAbsent(player, session) != null) {
+    if (this.sessions.putIfAbsent(new IdentityKey<>(player), session) != null) {
       return ClaimResult.PLAYER_BUSY;
     }
-    if (this.stopping.get() && this.sessions.remove(player, session)) {
+    if (this.stopping.get() && this.sessions.remove(new IdentityKey<>(player), session)) {
       return ClaimResult.RUNTIME_STOPPING;
     }
     return ClaimResult.ACCEPTED;
   }
 
   Optional<S> session(P player) {
-    return Optional.ofNullable(this.sessions.get(player));
+    return Optional.ofNullable(this.sessions.get(new IdentityKey<>(player)));
   }
 
   boolean release(P player, S session) {
-    return this.sessions.remove(player, session);
+    return this.sessions.remove(new IdentityKey<>(player), session);
   }
 
   void beginStopping() {
@@ -101,5 +101,25 @@ final class UworldRegistry<P, W, S> {
   }
 
   private record OwnedWorld<W>(String owner, W world) {
+  }
+
+  private static final class IdentityKey<P> {
+    private final P value;
+    private final int hash;
+
+    private IdentityKey(P value) {
+      this.value = Objects.requireNonNull(value, "value");
+      this.hash = System.identityHashCode(value);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      return other instanceof IdentityKey<?> key && this.value == key.value;
+    }
+
+    @Override
+    public int hashCode() {
+      return this.hash;
+    }
   }
 }

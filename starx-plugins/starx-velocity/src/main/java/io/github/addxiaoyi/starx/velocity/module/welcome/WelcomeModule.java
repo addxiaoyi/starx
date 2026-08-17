@@ -22,6 +22,7 @@ import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.player.ServerPostConnectEvent;
 import com.velocitypowered.api.proxy.Player;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
+import io.github.addxiaoyi.starx.common.auth.AuthService;
 import io.github.addxiaoyi.starx.common.model.StarxUser;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
@@ -43,20 +44,37 @@ implements VelocityModule {
     private static final Logger LOGGER = Logger.getLogger(WelcomeModule.class.getName());
     private final StarxVelocityPlugin plugin;
     private final JdbcUserRepository userRepository;
+    private final AuthService authService;
     private final Map<UUID, Instant> loginTimestamps = new ConcurrentHashMap<UUID, Instant>();
+    private final Map<UUID, UUID> accountIds = new ConcurrentHashMap<UUID, UUID>();
+    private final Map<UUID, Player> activePlayers = new ConcurrentHashMap<UUID, Player>();
+    private final LatestWriteGate<UUID> loginAddressWrites = new LatestWriteGate<>();
     private final Config config;
     private WelcomeListener listener;
 
     public WelcomeModule(StarxVelocityPlugin plugin, JdbcUserRepository userRepository) {
         this.plugin = plugin;
         this.userRepository = userRepository;
+        this.authService = null;
         this.config = Config.defaultConfig();
     }
 
     public WelcomeModule(StarxVelocityPlugin plugin, JdbcUserRepository userRepository, Config config) {
         this.plugin = plugin;
         this.userRepository = userRepository;
+        this.authService = null;
         this.config = config;
+    }
+
+    public WelcomeModule(
+        StarxVelocityPlugin plugin,
+        JdbcUserRepository userRepository,
+        AuthService authService
+    ) {
+        this.plugin = plugin;
+        this.userRepository = userRepository;
+        this.authService = authService;
+        this.config = Config.defaultConfig();
     }
 
     @Override
@@ -69,6 +87,7 @@ implements VelocityModule {
         WelcomeListener currentListener = new WelcomeListener();
         this.listener = currentListener;
         this.plugin.proxy().getEventManager().register(this.plugin, currentListener);
+        this.plugin.proxy().getAllPlayers().forEach(this::restoreActivePlayer);
         LOGGER.info("Welcome module enabled");
     }
 
@@ -80,16 +99,24 @@ implements VelocityModule {
             this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
         }
         this.loginTimestamps.clear();
+        this.accountIds.clear();
+        this.activePlayers.clear();
+        this.loginAddressWrites.clear();
     }
 
     private void onPlayerJoin(Player player) {
         UUID uuid = player.getUniqueId();
         String username = player.getUsername();
+        this.activePlayers.put(uuid, player);
         this.loginTimestamps.put(uuid, Instant.now());
         String ip = this.getPlayerIp(player);
         LocalAddressInfo currentAddress = LocalAddressInfo.parse(ip);
-        this.saveLoginAddress(uuid, currentAddress);
-        Optional<StarxUser> userOpt = this.userRepository.findFullByUuid(uuid);
+        Optional<StarxUser> userOpt = this.authService == null
+            ? this.userRepository.findFullByUuid(uuid)
+            : this.authService.findConnectedUser(uuid);
+        UUID accountUuid = userOpt.map(StarxUser::uuid).orElse(uuid);
+        this.accountIds.put(uuid, accountUuid);
+        this.saveLoginAddress(accountUuid, currentAddress);
         if (userOpt.isPresent()) {
             StarxUser user = userOpt.get();
             this.sendWelcomeMessage(player, user, currentAddress);
@@ -100,10 +127,40 @@ implements VelocityModule {
 
     private void onPlayerQuit(Player player) {
         UUID uuid = player.getUniqueId();
+        if (!this.detachActivePlayer(uuid, player)) {
+            return;
+        }
+        UUID accountUuid = this.accountIds.remove(uuid);
+        if (accountUuid == null) {
+            accountUuid = uuid;
+        }
         Instant loginTime = this.loginTimestamps.remove(uuid);
         if (loginTime != null) {
-            this.recordSession(uuid, loginTime, Instant.now());
+            this.recordSession(accountUuid, loginTime, Instant.now());
         }
+    }
+
+    private boolean detachActivePlayer(UUID uuid, Player player) {
+        java.util.concurrent.atomic.AtomicBoolean removed =
+            new java.util.concurrent.atomic.AtomicBoolean();
+        this.activePlayers.compute(uuid, (ignored, current) -> {
+            if (current == player) {
+                removed.set(true);
+                return null;
+            }
+            return current;
+        });
+        return removed.get();
+    }
+
+    private void restoreActivePlayer(Player player) {
+        UUID uuid = player.getUniqueId();
+        this.activePlayers.put(uuid, player);
+        this.loginTimestamps.put(uuid, Instant.now());
+        Optional<StarxUser> user = this.authService == null
+            ? this.userRepository.findFullByUuid(uuid)
+            : this.authService.findConnectedUser(uuid);
+        this.accountIds.put(uuid, user.map(StarxUser::uuid).orElse(uuid));
     }
 
     void recordSession(UUID uuid, Instant loginTime, Instant logoutTime) {
@@ -123,18 +180,24 @@ implements VelocityModule {
     }
 
     private void saveLoginAddress(UUID uuid, LocalAddressInfo address) {
-        this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> {
-            try {
-                this.userRepository.updateLoginInfo(
+        LatestWriteGate<UUID>.Ticket ticket = this.loginAddressWrites.claim(uuid);
+        try {
+            this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> {
+                try {
+                    this.loginAddressWrites.run(ticket, () -> this.userRepository.updateLoginInfo(
                         uuid,
                         address.address(),
                         "",
-                        address.locationLabel());
-            }
-            catch (Exception e) {
-                LOGGER.log(Level.WARNING, "无法保存玩家 " + uuid + " 的登录地址", e);
-            }
-        }).schedule();
+                        address.locationLabel()));
+                }
+                catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "无法保存玩家 " + uuid + " 的登录地址", e);
+                }
+            }).schedule();
+        } catch (RuntimeException error) {
+            this.loginAddressWrites.cancel(ticket);
+            throw error;
+        }
     }
 
     private void sendWelcomeMessage(

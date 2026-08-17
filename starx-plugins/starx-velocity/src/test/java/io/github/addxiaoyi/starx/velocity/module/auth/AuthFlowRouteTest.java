@@ -39,7 +39,7 @@ final class AuthFlowRouteTest {
     flows.route(player, lobby);
 
     assertEquals(AuthFlowIndex.ConnectResult.WRONG_TARGET, flows.connected(player, new Object()));
-    assertTrue(flows.requiresAuth(player));
+    assertFalse(flows.requiresAuth(player));
     assertEquals(AuthFlowIndex.BeginResult.DUPLICATE,
         flows.begin(playerId, new Object(), "duplicate"));
     assertTrue(flows.close(playerId, player));

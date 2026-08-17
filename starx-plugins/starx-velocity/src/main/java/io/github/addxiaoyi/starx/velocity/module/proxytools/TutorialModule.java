@@ -12,6 +12,9 @@ import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
 import java.time.Duration;
 import net.kyori.adventure.text.Component;
 import io.github.addxiaoyi.starx.common.database.JdbcTutorialProgressRepository;
@@ -33,9 +36,19 @@ public final class TutorialModule implements VelocityModule {
       StarxVelocityPlugin plugin,
       Config config,
       JdbcTutorialProgressRepository repository) {
+    this(plugin, config, repository, uuid -> uuid, uuid -> Set.of(uuid));
+  }
+
+  public TutorialModule(
+      StarxVelocityPlugin plugin,
+      Config config,
+      JdbcTutorialProgressRepository repository,
+      Function<UUID, UUID> canonicalUuidResolver,
+      Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.config = Objects.requireNonNull(config, "config");
-    this.progress = new TutorialProgressService(config.steps().size(), repository);
+    this.progress = new TutorialProgressService(
+        config.steps().size(), repository, canonicalUuidResolver, knownMinecraftUuidsResolver);
     this.joinPolicy = new TutorialJoinPolicy(this.progress);
   }
 
@@ -69,8 +82,7 @@ public final class TutorialModule implements VelocityModule {
 
   private void prompt(Player player) {
     if (!this.config.enabled()) return;
-    String playerId = player.getUniqueId().toString();
-    if (!this.joinPolicy.shouldPrompt(playerId)) return;
+    if (!this.joinPolicy.shouldPrompt(player)) return;
     this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
       if (player.isActive()) new TutorialCommand().show(player);
     }).delay(Duration.ofSeconds(1)).schedule();
@@ -130,7 +142,7 @@ public final class TutorialModule implements VelocityModule {
 
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
-      TutorialModule.this.joinPolicy.release(event.getPlayer().getUniqueId().toString());
+      TutorialModule.this.joinPolicy.release(event.getPlayer());
     }
   }
 }

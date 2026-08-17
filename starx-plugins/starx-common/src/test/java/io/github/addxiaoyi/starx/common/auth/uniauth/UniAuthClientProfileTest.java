@@ -74,16 +74,22 @@ class UniAuthClientProfileTest {
     });
     server.start();
     try {
-      UniAuthClient.LoginResponse login = new UniAuthClient(new UniAuthConfig(
+      UniAuthClient client = new UniAuthClient(new UniAuthConfig(
           true,
           "http://127.0.0.1:" + server.getAddress().getPort() + "/",
           "test-key",
           1000,
-          true)).login("Alice", "password").join();
+          true));
+      UniAuthClient.LoginResponse login = client.login("Alice", "password").join();
 
       assertFalse(login.success());
       assertTrue(login.serviceUnavailable());
       assertEquals("认证服务暂时不可用，请稍后重试", login.message());
+
+      UniAuthClient.StatusResponse status = client.fetchStatus("Alice").join();
+      assertFalse(status.success());
+      assertFalse(status.exists());
+      assertTrue(status.serviceUnavailable());
     } finally {
       server.stop(0);
     }

@@ -17,6 +17,9 @@ class MigrationSurfaceContractTest {
     assertFalse(source.contains("public MigrationResult migrate(boolean"));
     assertFalse(source.contains("migrateFromMultiLogin"));
     assertFalse(source.contains("not implemented yet"));
+    assertFalse(source.contains("isBeforeFirst()"));
+    assertFalse(source.contains("public void onDisable() {\n        RUNNING.set(false);"));
+    assertFalse(source.contains("catch (Exception ignored) {}"));
   }
 
   @Test

@@ -149,6 +149,35 @@ class SmartQueueServiceTest {
     assertEquals(0, queue.size(server));
   }
 
+  @Test
+  void staleConnectionCannotRemoveReplacementQueueEntry() {
+    SmartQueueService queue = new SmartQueueService();
+    RegisteredServer server = server("survival");
+    Player oldConnection = player("00000000-0000-0000-0000-000000000001", true);
+    Player replacement = player("00000000-0000-0000-0000-000000000001", true);
+
+    queue.enqueue(server, replacement, 100);
+    queue.recordQuit(oldConnection);
+
+    assertEquals(1, queue.size(server));
+  }
+
+  @Test
+  void staleAsyncResultCannotCompleteReplacementQueueEntry() {
+    SmartQueueService queue = new SmartQueueService();
+    RegisteredServer server = server("survival");
+    Player oldConnection = player("00000000-0000-0000-0000-000000000001", true);
+    Player replacement = player("00000000-0000-0000-0000-000000000001", true);
+    CompletableFuture<Boolean> oldResult = new CompletableFuture<>();
+
+    queue.enqueue(server, oldConnection, 100);
+    assertEquals(1, queue.processQueues((ignored, serverName) -> oldResult, 1));
+    queue.enqueue(server, replacement, 100);
+    oldResult.complete(true);
+
+    assertEquals(1, queue.size(server));
+  }
+
   private static RegisteredServer server(String name) {
     ServerInfo info = new ServerInfo(name, new InetSocketAddress("127.0.0.1", 25565));
     return (RegisteredServer) Proxy.newProxyInstance(

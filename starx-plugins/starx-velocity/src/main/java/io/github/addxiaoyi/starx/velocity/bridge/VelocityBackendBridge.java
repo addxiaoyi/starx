@@ -48,6 +48,7 @@ public final class VelocityBackendBridge implements VelocityModule {
   private final Clock clock;
   private final ChannelIdentifier channel;
   private final BackendCommandMailbox commandMailbox;
+  private final PendingSkinRequests pendingSkinRequests = new PendingSkinRequests();
   private final Listener listener = new Listener();
   private CommandMeta commandMeta;
   private ScheduledTask refreshTask;
@@ -121,6 +122,7 @@ public final class VelocityBackendBridge implements VelocityModule {
     }
     this.registry.clear();
     this.commandMailbox.clear();
+    this.pendingSkinRequests.clear();
     this.skinResponseConsumer = message -> { };
     this.backendReadyConsumer = (player, server) -> { };
   }
@@ -138,17 +140,31 @@ public final class VelocityBackendBridge implements VelocityModule {
   }
 
   public DispatchResult requestSkin(Player player) {
-    return dispatchSkinRequest(
-        player, this.channel, UUID.randomUUID().toString(), this.commandMailbox);
+    Objects.requireNonNull(player, "player");
+    String correlationId = UUID.randomUUID().toString();
+    this.pendingSkinRequests.register(player.getUniqueId(), correlationId, this.clock.instant());
+    DispatchResult result = dispatchSkinRequest(
+        player, this.channel, correlationId, this.commandMailbox);
+    if (!result.accepted()) {
+      this.pendingSkinRequests.cancel(player.getUniqueId(), correlationId);
+    }
+    return result;
   }
 
   public DispatchResult requestSkin(Player player, RegisteredServer server) {
-    return dispatchSkinRequest(
+    Objects.requireNonNull(player, "player");
+    String correlationId = UUID.randomUUID().toString();
+    this.pendingSkinRequests.register(player.getUniqueId(), correlationId, this.clock.instant());
+    DispatchResult result = dispatchSkinRequest(
         player,
         server,
         this.channel,
-        UUID.randomUUID().toString(),
+        correlationId,
         this.commandMailbox);
+    if (!result.accepted()) {
+      this.pendingSkinRequests.cancel(player.getUniqueId(), correlationId);
+    }
+    return result;
   }
 
   /** Queues a skin lookup even when no player is online to carry plugin messages. */
@@ -158,13 +174,15 @@ public final class VelocityBackendBridge implements VelocityModule {
       throw new IllegalArgumentException("playerName must not be blank");
     }
     DispatchResult fallback = DispatchResult.NO_SERVER;
+    String correlationId = UUID.randomUUID().toString();
+    this.pendingSkinRequests.register(playerUuid, correlationId, this.clock.instant());
     for (RegisteredServer server : this.plugin.proxy().getAllServers()) {
       DispatchResult result = dispatchSkinRequest(
           playerUuid,
           playerName,
           server,
           this.channel,
-          UUID.randomUUID().toString(),
+          correlationId,
           this.commandMailbox);
       if (result.accepted()) {
         return result;
@@ -173,6 +191,7 @@ public final class VelocityBackendBridge implements VelocityModule {
         fallback = result;
       }
     }
+    this.pendingSkinRequests.cancel(playerUuid, correlationId);
     return fallback;
   }
 
@@ -361,7 +380,7 @@ public final class VelocityBackendBridge implements VelocityModule {
       throw new IllegalArgumentException(
           "Unsupported HTTP backend bridge response: " + message.type());
     }
-    this.skinResponseConsumer.accept(message);
+    this.deliverSkinResponse(message);
   }
 
   static int refreshStatuses(
@@ -463,7 +482,7 @@ public final class VelocityBackendBridge implements VelocityModule {
         this.backendReadyConsumer.accept(connection.getPlayer(), connection.getServer());
       }
       if (BridgeProtocol.SKIN_RESPONSE.equals(message.type())) {
-        this.skinResponseConsumer.accept(message);
+        this.deliverSkinResponse(message);
         return;
       }
       BridgeMessage carried = markTransport(message, "player-carrier");
@@ -485,6 +504,13 @@ public final class VelocityBackendBridge implements VelocityModule {
           "Rejected StarX backend bridge packet from {0}: {1}",
           new Object[] {registeredName, error.getMessage()});
     }
+  }
+
+  private void deliverSkinResponse(BridgeMessage message) {
+    if (!this.pendingSkinRequests.accept(message, this.clock.instant())) {
+      return;
+    }
+    this.skinResponseConsumer.accept(message);
   }
 
   private final class Listener {

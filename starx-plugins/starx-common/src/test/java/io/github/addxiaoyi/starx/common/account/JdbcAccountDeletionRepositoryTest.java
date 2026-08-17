@@ -61,6 +61,26 @@ class JdbcAccountDeletionRepositoryTest {
   }
 
   @Test
+  void treatsHistoricalMinecraftUuidsAsTheSameDeletionAccount() throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("deletion-alias.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute(JdbcAccountDeletionRepository.CREATE_TABLE_SQL);
+    }
+    JdbcAccountDeletionRepository repo = new JdbcAccountDeletionRepository(source);
+    UUID current = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    UUID legacy = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    Set<UUID> knownUuids = Set.of(current, legacy);
+
+    String requestId = repo.request(legacy, 1_000L, 8_000L);
+
+    assertEquals(requestId, repo.request(current, knownUuids, 2_000L, 9_000L));
+    assertEquals(requestId, repo.latest(knownUuids).orElseThrow().requestId());
+    assertTrue(repo.cancel(requestId, knownUuids, 3_000L));
+    assertEquals("CANCELLED", repo.latest(knownUuids).orElseThrow().state());
+  }
+
+  @Test
   void concurrentRequestsReturnOnePendingRequest() throws Exception {
     SQLiteDataSource source = new SQLiteDataSource();
     source.setUrl("jdbc:sqlite:" + tempDir.resolve("deletion-race.db").toAbsolutePath());
@@ -104,5 +124,56 @@ class JdbcAccountDeletionRepositoryTest {
     assertEquals(0, repo.releaseStaleClaims(2_999L, 1_000L));
     assertEquals(1, repo.releaseStaleClaims(3_000L, 1_000L));
     assertEquals("PENDING", repo.latest(player).orElseThrow().state());
+  }
+
+  @Test
+  void staleWorkerCannotCompleteAReplacementClaim() throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("deletion-claim-owner.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute(JdbcAccountDeletionRepository.CREATE_TABLE_SQL);
+    }
+    JdbcAccountDeletionRepository repo = new JdbcAccountDeletionRepository(source);
+    UUID player = UUID.randomUUID();
+    String requestId = repo.request(player, 1_000L, 2_000L);
+    String firstToken = repo.claimDueToken(requestId, 2_000L).orElseThrow();
+
+    assertEquals(1, repo.releaseStaleClaims(3_000L, 1_000L));
+    String secondToken = repo.claimDueToken(requestId, 3_001L).orElseThrow();
+
+    assertFalse(repo.complete(requestId, firstToken, 3_002L));
+    assertTrue(repo.complete(requestId, secondToken, 3_003L));
+    assertEquals("COMPLETED", repo.latest(player).orElseThrow().state());
+  }
+
+  @Test
+  void requestDoesNotCreateASecondTaskWhileTheFirstIsClaimed() throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("deletion-claimed-request.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute(JdbcAccountDeletionRepository.CREATE_TABLE_SQL);
+    }
+    JdbcAccountDeletionRepository repo = new JdbcAccountDeletionRepository(source);
+    UUID player = UUID.randomUUID();
+    String first = repo.request(player, 1_000L, 2_000L);
+    assertTrue(repo.claimDue(first, 2_000L));
+
+    String second = repo.request(player, 2_001L, 3_000L);
+
+    assertEquals(first, second);
+    assertEquals(1, countRequests(source, player));
+    assertEquals("CLAIMED", repo.latest(player).orElseThrow().state());
+  }
+
+  private static int countRequests(SQLiteDataSource source, UUID player) throws Exception {
+    try (Connection connection = source.getConnection();
+         var query = connection.prepareStatement(
+             "SELECT COUNT(*) FROM starx_account_deletions WHERE player_uuid = ?")) {
+      query.setString(1, player.toString());
+      try (var rows = query.executeQuery()) {
+        rows.next();
+        return rows.getInt(1);
+      }
+    }
   }
 }

@@ -5,6 +5,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Objects;
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
 
@@ -19,10 +21,16 @@ public final class JdbcTutorialProgressRepository {
   }
 
   public int step(UUID playerId) {
-    Objects.requireNonNull(playerId, "playerId");
+    return step(List.of(playerId));
+  }
+
+  public int step(Collection<UUID> playerIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(playerIds);
+    if (ids.isEmpty()) return 0;
     try (Connection connection = dataSource.getConnection(); PreparedStatement query = connection.prepareStatement(
-        "SELECT step FROM starx_tutorial_progress WHERE player_uuid = ?")) {
-      query.setString(1, playerId.toString());
+        "SELECT MAX(step) FROM starx_tutorial_progress WHERE player_uuid IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ")")) {
+      JdbcUuidQuery.bind(query, ids);
       try (ResultSet row = query.executeQuery()) {
         return row.next() ? Math.max(0, row.getInt(1)) : 0;
       }
@@ -32,23 +40,36 @@ public final class JdbcTutorialProgressRepository {
   }
 
   public int advance(UUID playerId, int stepCount, long updatedAt) {
-    Objects.requireNonNull(playerId, "playerId");
+    return advance(playerId, List.of(playerId), stepCount, updatedAt);
+  }
+
+  public int advance(UUID canonicalPlayerId, Collection<UUID> knownPlayerIds, int stepCount, long updatedAt) {
+    Objects.requireNonNull(canonicalPlayerId, "canonicalPlayerId");
+    List<UUID> ids = JdbcUuidQuery.distinct(knownPlayerIds);
+    if (ids.isEmpty()) return 0;
     if (stepCount < 1) throw new IllegalArgumentException("stepCount must be positive");
     for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-      int current = step(playerId);
+      int current = step(ids);
       if (current >= stepCount) return stepCount;
-      int next = current + 1;
-      if (current == 0 && insertFirst(playerId, next, updatedAt)) return next;
-      if (updateExpected(playerId, current, next, updatedAt)) return next;
+      int canonicalStep = step(canonicalPlayerId);
+      int next = Math.min(stepCount, Math.max(current, canonicalStep) + 1);
+      if (canonicalStep == 0 && insertFirst(canonicalPlayerId, next, updatedAt)) return next;
+      if (updateExpected(canonicalPlayerId, canonicalStep, next, updatedAt)) return next;
     }
     throw new IllegalStateException("Tutorial progress changed too frequently; retry the command");
   }
 
   public void reset(UUID playerId) {
-    Objects.requireNonNull(playerId, "playerId");
+    reset(List.of(playerId));
+  }
+
+  public void reset(Collection<UUID> playerIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(playerIds);
+    if (ids.isEmpty()) return;
     try (Connection connection = dataSource.getConnection(); PreparedStatement delete = connection.prepareStatement(
-        "DELETE FROM starx_tutorial_progress WHERE player_uuid = ?")) {
-      delete.setString(1, playerId.toString());
+        "DELETE FROM starx_tutorial_progress WHERE player_uuid IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ")")) {
+      JdbcUuidQuery.bind(delete, ids);
       delete.executeUpdate();
     } catch (SQLException error) {
       throw new IllegalStateException("Failed to reset tutorial progress", error);
@@ -56,12 +77,26 @@ public final class JdbcTutorialProgressRepository {
   }
 
   public int complete(UUID playerId, int stepCount, long updatedAt) {
-    Objects.requireNonNull(playerId, "playerId");
+    return complete(playerId, List.of(playerId), stepCount, updatedAt);
+  }
+
+  public int complete(UUID canonicalPlayerId, Collection<UUID> knownPlayerIds, int stepCount, long updatedAt) {
+    Objects.requireNonNull(canonicalPlayerId, "canonicalPlayerId");
+    List<UUID> ids = JdbcUuidQuery.distinct(knownPlayerIds);
+    if (ids.isEmpty()) return 0;
     if (stepCount < 1) throw new IllegalArgumentException("stepCount must be positive");
-    if (completeExisting(playerId, stepCount, updatedAt)) return stepCount;
-    if (insertFirst(playerId, stepCount, updatedAt)) return stepCount;
-    if (completeExisting(playerId, stepCount, updatedAt)) return stepCount;
-    return Math.max(stepCount, step(playerId));
+    int existingStep = step(ids);
+    if (existingStep >= stepCount) return existingStep;
+    if (completeExisting(canonicalPlayerId, stepCount, updatedAt)) {
+      return Math.max(stepCount, step(ids));
+    }
+    if (insertFirst(canonicalPlayerId, Math.max(stepCount, existingStep), updatedAt)) {
+      return Math.max(stepCount, step(ids));
+    }
+    if (completeExisting(canonicalPlayerId, stepCount, updatedAt)) {
+      return Math.max(stepCount, step(ids));
+    }
+    return Math.max(stepCount, step(ids));
   }
 
   private boolean insertFirst(UUID playerId, int step, long updatedAt) {
@@ -71,9 +106,23 @@ public final class JdbcTutorialProgressRepository {
       insert.setInt(2, step);
       insert.setLong(3, updatedAt);
       return insert.executeUpdate() == 1;
-    } catch (SQLException conflict) {
-      return false;
+    } catch (SQLException error) {
+      if (isConstraintViolation(error)) return false;
+      throw new IllegalStateException("Failed to insert tutorial progress", error);
     }
+  }
+
+  private static boolean isConstraintViolation(SQLException error) {
+    for (SQLException current = error; current != null; current = current.getNextException()) {
+      String state = current.getSQLState();
+      if ("23505".equals(state)) return true;
+      String message = current.getMessage();
+      if (message != null) {
+        String normalized = message.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.contains("unique") || normalized.contains("duplicate")) return true;
+      }
+    }
+    return false;
   }
 
   private boolean updateExpected(UUID playerId, int expected, int next, long updatedAt) {

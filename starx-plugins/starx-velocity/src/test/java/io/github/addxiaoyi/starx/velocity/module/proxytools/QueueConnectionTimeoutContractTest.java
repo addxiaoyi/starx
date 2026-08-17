@@ -20,7 +20,7 @@ final class QueueConnectionTimeoutContractTest {
     String fifo = Files.readString(proxytools.resolve("queue/QueueService.java"));
     assertTrue(fifo.contains("CompletionStage<Boolean> connect"));
     assertTrue(fifo.contains("result.whenComplete"));
-    assertTrue(fifo.contains("ConcurrentHashMap.newKeySet()"));
+    assertTrue(fifo.contains("Map<UUID, Player> members"));
     assertTrue(fifo.contains("claimNext()"));
 
     String smart = Files.readString(proxytools.resolve("smart/SmartQueueService.java"));

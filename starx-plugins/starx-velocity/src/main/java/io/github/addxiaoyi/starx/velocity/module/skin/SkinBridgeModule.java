@@ -37,7 +37,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 import net.kyori.adventure.text.Component;
@@ -58,6 +60,7 @@ implements VelocityModule {
     private volatile boolean skinsRestorerAvailable;
     private final VelocityBackendBridge backendBridge;
     private final BackendSkinFallbackCache backendSkinCache;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
     private Listener listener;
     private CommandMeta skinCommandMeta;
 
@@ -71,12 +74,22 @@ implements VelocityModule {
         this.repositoryFactory = null;
         this.backendBridge = null;
         this.backendSkinCache = null;
+        this.knownMinecraftUuidsResolver = uuid -> Set.of(uuid);
     }
 
     public SkinBridgeModule(
         StarxVelocityPlugin plugin,
         EventBus eventBus,
         VelocityBackendBridge backendBridge
+    ) {
+        this(plugin, eventBus, backendBridge, uuid -> Set.of(uuid));
+    }
+
+    public SkinBridgeModule(
+        StarxVelocityPlugin plugin,
+        EventBus eventBus,
+        VelocityBackendBridge backendBridge,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver
     ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.proxy = plugin.proxy();
@@ -93,6 +106,8 @@ implements VelocityModule {
             plugin.dataDirectory().resolve("cache").resolve("backend-skins"),
             Duration.ofHours(24),
             LOGGER);
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     public SkinBridgeModule(ProxyServer proxy, EventBus eventBus, String skinProfileBaseUrl) {
@@ -105,6 +120,7 @@ implements VelocityModule {
         this.repositoryFactory = null;
         this.backendBridge = null;
         this.backendSkinCache = null;
+        this.knownMinecraftUuidsResolver = uuid -> Set.of(uuid);
     }
 
     SkinBridgeModule(ProxyServer proxy, EventBus eventBus, Supplier<SkinRepository> repositoryFactory) {
@@ -117,6 +133,7 @@ implements VelocityModule {
         this.websiteCommandClient = null;
         this.backendBridge = null;
         this.backendSkinCache = null;
+        this.knownMinecraftUuidsResolver = uuid -> Set.of(uuid);
     }
 
     @Override
@@ -144,7 +161,8 @@ implements VelocityModule {
                 this.skinProfileBaseUrl,
                 Logger.getLogger(WebsiteSkinRepository.class.getName()));
         }
-        this.skinService = new SkinService(repository, this.eventBus);
+        this.skinService = new SkinService(
+            repository, this.eventBus, this.knownMinecraftUuidsResolver);
         if (this.backendBridge != null) {
             this.backendBridge.onSkinResponse(this::applyBackendSkin);
             this.backendBridge.onBackendReady(this::refreshSkin);
@@ -435,7 +453,7 @@ implements VelocityModule {
         if (backendTargets < 0) {
             throw new IllegalArgumentException("backendTargets must not be negative");
         }
-        return locallyPersisted || backendTargets > 0 || appliedToOnlinePlayer;
+        return locallyPersisted || backendTargets > 0;
     }
 
     private final class Listener {

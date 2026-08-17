@@ -3,6 +3,8 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.auth;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
@@ -12,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -68,9 +71,7 @@ implements VelocityModule {
         String url = baseUrl + "session/minecraft/profile/" + uuid.toString().replace("-", "");
         ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
             if (response.statusCode() == 200) {
-                String body = (String)response.body();
-                boolean nameMatches = body.contains("\"name\"") && body.contains("\"" + username + "\"");
-                future.complete(nameMatches);
+                future.complete(matchesProfileUuid(response.body(), uuid));
             } else {
                 future.complete(false);
             }
@@ -82,10 +83,45 @@ implements VelocityModule {
         return future;
     }
 
+    private static boolean matchesProfileUuid(String body, UUID expectedUuid) {
+        if (body == null || expectedUuid == null) {
+            return false;
+        }
+        try {
+            JsonElement id = JsonParser.parseString(body).getAsJsonObject().get("id");
+            if (id == null || !id.isJsonPrimitive() || !id.getAsJsonPrimitive().isString()) {
+                return false;
+            }
+            String value = id.getAsString().trim();
+            if (value.length() == 32) {
+                value = value.substring(0, 8) + "-"
+                    + value.substring(8, 12) + "-"
+                    + value.substring(12, 16) + "-"
+                    + value.substring(16, 20) + "-"
+                    + value.substring(20);
+            }
+            return UUID.fromString(value).equals(expectedUuid);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
     public CompletableFuture<Boolean> checkAllServers(String username, UUID uuid) {
-        CompletableFuture<Boolean> result = new CompletableFuture<Boolean>();
-        result.complete(false);
-        return result;
+        if (this.config.servers().isEmpty()) {
+            return CompletableFuture.completedFuture(false);
+        }
+        List<CompletableFuture<Boolean>> checks = this.config.servers().keySet().stream()
+            .map(serverName -> this.checkUserExists(username, uuid, serverName))
+            .toList();
+        return allSuccessful(checks);
+    }
+
+    static CompletableFuture<Boolean> allSuccessful(List<CompletableFuture<Boolean>> checks) {
+        Objects.requireNonNull(checks, "checks");
+        if (checks.isEmpty()) return CompletableFuture.completedFuture(false);
+        return CompletableFuture.allOf(checks.toArray(CompletableFuture[]::new))
+            .handle((ignored, error) -> error == null
+                && checks.stream().allMatch(check -> Boolean.TRUE.equals(check.join())));
     }
 
     public CompletableFuture<String> authenticate(String username, String serverId, String ip, String serverName) {

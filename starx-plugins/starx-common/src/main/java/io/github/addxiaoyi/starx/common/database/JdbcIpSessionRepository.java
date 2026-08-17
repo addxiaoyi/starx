@@ -23,6 +23,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -102,10 +103,17 @@ public class JdbcIpSessionRepository {
    * 根据玩家 UUID 和 IP 地址查找会话
    */
   public Optional<IpSession> findByUuidAndIp(UUID uuid, String ipAddress) {
-    String sql = "SELECT " + SELECT_COLUMNS + " FROM starx_ip_sessions WHERE player_uuid = ? AND ip_address = ?";
+    return findByUuidAndIp(List.of(uuid), ipAddress);
+  }
+
+  public Optional<IpSession> findByUuidAndIp(Collection<UUID> uuids, String ipAddress) {
+    List<UUID> ids = JdbcUuidQuery.distinct(uuids);
+    if (ids.isEmpty()) return Optional.empty();
+    String sql = "SELECT " + SELECT_COLUMNS + " FROM starx_ip_sessions WHERE player_uuid IN ("
+        + JdbcUuidQuery.placeholders(ids.size()) + ") AND ip_address = ? ORDER BY login_time DESC";
     return queryOne(sql, ps -> {
-      ps.setString(1, uuid.toString());
-      ps.setString(2, ipAddress);
+      JdbcUuidQuery.bind(ps, ids);
+      ps.setString(ids.size() + 1, ipAddress);
     }, this::map);
   }
 
@@ -113,15 +121,20 @@ public class JdbcIpSessionRepository {
    * 查找玩家最近 N 小时内有登录记录的 IP
    */
   public List<IpSession> findRecentSessions(UUID uuid, int hours) {
+    return findRecentSessions(List.of(uuid), hours);
+  }
+
+  public List<IpSession> findRecentSessions(Collection<UUID> uuids, int hours) {
+    List<UUID> ids = JdbcUuidQuery.distinct(uuids);
+    if (ids.isEmpty()) return List.of();
     long cutoff = System.currentTimeMillis() - (hours * 60L * 60L * 1000L);
-    String sql = "SELECT " + SELECT_COLUMNS + """
-        FROM starx_ip_sessions
-        WHERE player_uuid = ? AND login_time > ?
-        ORDER BY login_time DESC
-        """;
+    String sql = "SELECT " + SELECT_COLUMNS
+        + " FROM starx_ip_sessions WHERE player_uuid IN ("
+        + JdbcUuidQuery.placeholders(ids.size()) + ") AND login_time > ?"
+        + " ORDER BY login_time DESC";
     return queryList(sql, ps -> {
-      ps.setString(1, uuid.toString());
-      ps.setLong(2, cutoff);
+      JdbcUuidQuery.bind(ps, ids);
+      ps.setLong(ids.size() + 1, cutoff);
     }, this::map);
   }
 
@@ -129,7 +142,11 @@ public class JdbcIpSessionRepository {
    * 检查是否存在有效的 IP 免密记录
    */
   public boolean hasRecentSession(UUID uuid, String ipAddress, int hours) {
-    Optional<IpSession> session = findByUuidAndIp(uuid, ipAddress);
+    return hasRecentSession(List.of(uuid), ipAddress, hours);
+  }
+
+  public boolean hasRecentSession(Collection<UUID> uuids, String ipAddress, int hours) {
+    Optional<IpSession> session = findByUuidAndIp(uuids, ipAddress);
     return session.isPresent() && session.get().isWithinHours(hours);
   }
 
@@ -137,7 +154,14 @@ public class JdbcIpSessionRepository {
    * 删除玩家的所有 IP 会话记录
    */
   public void deleteByUuid(UUID uuid) {
-    execute("DELETE FROM starx_ip_sessions WHERE player_uuid = ?", ps -> ps.setString(1, uuid.toString()));
+    deleteByUuid(List.of(uuid));
+  }
+
+  public void deleteByUuid(Collection<UUID> uuids) {
+    List<UUID> ids = JdbcUuidQuery.distinct(uuids);
+    if (ids.isEmpty()) return;
+    execute("DELETE FROM starx_ip_sessions WHERE player_uuid IN ("
+        + JdbcUuidQuery.placeholders(ids.size()) + ")", ps -> JdbcUuidQuery.bind(ps, ids));
   }
 
   /**
@@ -154,16 +178,30 @@ public class JdbcIpSessionRepository {
    * 获取玩家的最新登录会话
    */
   public Optional<IpSession> findLatestByUuid(UUID uuid) {
-    String sql = "SELECT " + SELECT_COLUMNS + " FROM starx_ip_sessions WHERE player_uuid = ? ORDER BY login_time DESC LIMIT 1";
-    return queryOne(sql, ps -> ps.setString(1, uuid.toString()), this::map);
+    return findLatestByUuid(List.of(uuid));
+  }
+
+  public Optional<IpSession> findLatestByUuid(Collection<UUID> uuids) {
+    List<UUID> ids = JdbcUuidQuery.distinct(uuids);
+    if (ids.isEmpty()) return Optional.empty();
+    String sql = "SELECT " + SELECT_COLUMNS + " FROM starx_ip_sessions WHERE player_uuid IN ("
+        + JdbcUuidQuery.placeholders(ids.size()) + ") ORDER BY login_time DESC LIMIT 1";
+    return queryOne(sql, ps -> JdbcUuidQuery.bind(ps, ids), this::map);
   }
 
   /**
    * 获取玩家的所有登录来源类型
    */
   public List<String> findAllSourcesByUuid(UUID uuid) {
-    String sql = "SELECT DISTINCT source FROM starx_ip_sessions WHERE player_uuid = ?";
-    return queryList(sql, ps -> ps.setString(1, uuid.toString()), rs -> rs.getString("source"));
+    return findAllSourcesByUuid(List.of(uuid));
+  }
+
+  public List<String> findAllSourcesByUuid(Collection<UUID> uuids) {
+    List<UUID> ids = JdbcUuidQuery.distinct(uuids);
+    if (ids.isEmpty()) return List.of();
+    String sql = "SELECT DISTINCT source FROM starx_ip_sessions WHERE player_uuid IN ("
+        + JdbcUuidQuery.placeholders(ids.size()) + ")";
+    return queryList(sql, ps -> JdbcUuidQuery.bind(ps, ids), rs -> rs.getString("source"));
   }
 
   private IpSession map(ResultSet rs) throws SQLException {

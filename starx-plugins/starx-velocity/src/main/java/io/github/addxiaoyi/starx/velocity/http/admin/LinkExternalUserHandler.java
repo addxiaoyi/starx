@@ -13,6 +13,7 @@ import io.github.addxiaoyi.starx.velocity.http.RouteRegistrar;
 import io.github.addxiaoyi.starx.velocity.http.admin.AdminHandler;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 public final class LinkExternalUserHandler
 implements AdminHandler {
@@ -20,10 +21,29 @@ implements AdminHandler {
     private static final int MAX_EXTERNAL_ID_LENGTH = 100;
     private final JdbcUserRepository users;
     private final EventBus eventBus;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<String, java.util.Optional<UserDto>> usernameResolver;
 
     public LinkExternalUserHandler(JdbcUserRepository users, EventBus eventBus) {
+        this(users, eventBus, Function.identity(), users::findByUsername);
+    }
+
+    public LinkExternalUserHandler(
+        JdbcUserRepository users,
+        EventBus eventBus,
+        Function<UUID, UUID> canonicalUuidResolver) {
+        this(users, eventBus, canonicalUuidResolver, users::findByUsername);
+    }
+
+    public LinkExternalUserHandler(
+        JdbcUserRepository users,
+        EventBus eventBus,
+        Function<UUID, UUID> canonicalUuidResolver,
+        Function<String, java.util.Optional<UserDto>> usernameResolver) {
         this.users = Objects.requireNonNull(users, "users");
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.usernameResolver = Objects.requireNonNull(usernameResolver, "usernameResolver");
     }
 
     @Override
@@ -59,24 +79,37 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", "externalUserId too long (max 100 characters)"));
             return;
         }
-        UserDto existing = this.users.findByUsername(req.username).orElse(null);
+        UserDto existing = this.usernameResolver.apply(req.username).orElse(null);
         if (existing == null) {
             ctx.status(404).json(Map.of("error", "User not found"));
             return;
         }
-        boolean trusted = isTrustedBinding(existing.uuid(), existing.username(), req.playerUuid, req.username, req.verified);
+        UUID requestedUuid = parseUuid(req.playerUuid);
+        boolean trusted = requestedUuid != null && isTrustedBinding(
+            canonicalUuidResolver.apply(existing.uuid()),
+            req.username,
+            canonicalUuidResolver.apply(requestedUuid).toString(),
+            req.username,
+            req.verified);
         if (externalUserId != null && req.verified && !trusted) {
             ctx.status(409).json(Map.of("error", "verified identity does not match player"));
             return;
         }
-        UserDto updated = UserDto.builder().uuid(existing.uuid()).username(existing.username()).email(existing.email()).premium(existing.premium()).createdAt(existing.createdAt()).lastLoginAt(existing.lastLoginAt()).externalUserId(externalUserId).build();
-        this.users.save(updated);
-        this.users.saveWebsiteBinding(existing.uuid(), existing.username(), externalUserId, trusted);
+        try {
+            this.users.linkExternalIdentity(existing.uuid(), req.username, externalUserId, trusted);
+        } catch (JdbcUserRepository.ExternalIdentityConflictException error) {
+            ctx.status(409).json(Map.of("error", "external identity already linked"));
+            return;
+        }
         this.eventBus.publish("link:external-user", Map.of(
             "username", req.username,
             "externalUserId", externalUserId == null ? "" : externalUserId,
-            "linked", externalUserId != null));
-        ctx.status(200).json(Map.of("success", true, "linked", externalUserId != null));
+            "linked", externalUserId != null,
+            "verified", trusted));
+        ctx.status(200).json(Map.of(
+            "success", true,
+            "linked", externalUserId != null,
+            "verified", trusted));
     }
 
     static String normalizeExternalUserId(String value) {
@@ -94,6 +127,15 @@ implements AdminHandler {
                 && existingUsername.equalsIgnoreCase(requestedUsername.trim());
         } catch (IllegalArgumentException ignored) {
             return false;
+        }
+    }
+
+    private static UUID parseUuid(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return UUID.fromString(value.trim());
+        } catch (IllegalArgumentException error) {
+            return null;
         }
     }
 

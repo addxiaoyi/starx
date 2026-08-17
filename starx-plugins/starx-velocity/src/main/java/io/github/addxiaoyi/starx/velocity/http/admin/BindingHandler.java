@@ -3,6 +3,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.http.admin;
 
+import io.github.addxiaoyi.starx.api.dto.UserDto;
 import io.github.addxiaoyi.starx.common.auth.BindingVerificationService;
 import io.github.addxiaoyi.starx.common.database.JdbcBindingRepository;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
@@ -14,7 +15,9 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 public final class BindingHandler
 implements AdminHandler {
@@ -22,12 +25,41 @@ implements AdminHandler {
     private final JdbcUserRepository userRepo;
     private final BindingVerificationService verificationService;
     private final BindingCodeResolver codeResolver;
+    private final Function<UUID, Optional<UserDto>> identityAwareUserLookup;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
     public BindingHandler(JdbcBindingRepository repo, JdbcUserRepository userRepo, BindingVerificationService verificationService) {
+        this(repo, userRepo, verificationService, null, uuid -> uuid, uuid -> Set.of(uuid));
+    }
+
+    public BindingHandler(
+        JdbcBindingRepository repo,
+        JdbcUserRepository userRepo,
+        BindingVerificationService verificationService,
+        Function<UUID, Optional<UserDto>> identityAwareLookup) {
+        this(repo, userRepo, verificationService, identityAwareLookup, uuid -> uuid, uuid -> Set.of(uuid));
+    }
+
+    public BindingHandler(
+        JdbcBindingRepository repo,
+        JdbcUserRepository userRepo,
+        BindingVerificationService verificationService,
+        Function<UUID, Optional<UserDto>> identityAwareLookup,
+        Function<UUID, UUID> canonicalUuidResolver,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.repo = Objects.requireNonNull(repo, "repo");
         this.userRepo = Objects.requireNonNull(userRepo, "userRepo");
         this.verificationService = Objects.requireNonNull(verificationService, "verificationService");
-        this.codeResolver = new BindingCodeResolver(verificationService, userRepo);
+        this.identityAwareUserLookup = identityAwareLookup == null
+            ? userRepo::findByUuid
+            : candidate -> userRepo.findByUuid(candidate).or(() -> identityAwareLookup.apply(candidate));
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
+        this.codeResolver = identityAwareLookup == null
+            ? new BindingCodeResolver(verificationService, userRepo)
+            : new BindingCodeResolver(verificationService, userRepo, identityAwareLookup);
     }
 
     @Override
@@ -54,7 +86,21 @@ implements AdminHandler {
         String qq = ctx.queryParam("qq");
         String discord = ctx.queryParam("discord");
         if (player != null && !player.isBlank()) {
-            result = this.repo.findByPlayer(UUID.fromString(player));
+            Optional<UUID> parsedPlayer = parsePlayerUuid(player);
+            if (parsedPlayer.isEmpty()) {
+                ctx.status(400).json(Map.of("error", "Invalid UUID format"));
+                return;
+            }
+            UUID requested = parsedPlayer.orElseThrow();
+            UUID canonical = this.canonicalUuidResolver.apply(requested);
+            result = this.repo.findByPlayer(canonical);
+            if (result.isEmpty()) {
+                for (UUID known : this.knownMinecraftUuidsResolver.apply(requested)) {
+                    if (known.equals(canonical)) continue;
+                    result = this.repo.findByPlayer(known);
+                    if (result.isPresent()) break;
+                }
+            }
         } else if (qq != null && !qq.isBlank()) {
             result = this.repo.findByQq(qq);
         } else if (discord != null && !discord.isBlank()) {
@@ -70,14 +116,29 @@ implements AdminHandler {
         }
     }
 
+    private static Optional<UUID> parsePlayerUuid(String value) {
+        try {
+            return Optional.of(UUID.fromString(value));
+        } catch (IllegalArgumentException error) {
+            return Optional.empty();
+        }
+    }
+
     private void handleSave(JsonHttpExchange ctx) throws Exception {
         SaveRequest req = ctx.bodyAsClass(SaveRequest.class);
         if (req.playerUuid == null) {
             ctx.status(400).json(Map.of("error", "player_uuid is required"));
             return;
         }
-        PlayerBinding binding = new PlayerBinding(req.playerUuid, req.qqId, req.discordId, System.currentTimeMillis());
-        this.repo.save(binding);
+        UUID canonicalUuid = this.canonicalUuidResolver.apply(req.playerUuid);
+        PlayerBinding binding = new PlayerBinding(
+            canonicalUuid, req.qqId, req.discordId,
+            System.currentTimeMillis());
+        if (!this.repo.migrateAndSave(
+            this.knownMinecraftUuidsResolver.apply(canonicalUuid), binding)) {
+            ctx.status(409).json(Map.of("error", "Binding identities conflict"));
+            return;
+        }
         ctx.status(200).json(Map.of("success", true));
     }
 
@@ -87,11 +148,11 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", "player_uuid is required"));
             return;
         }
-        if (!this.userRepo.existsByUuid(req.playerUuid)) {
+        if (this.identityAwareUserLookup.apply(req.playerUuid).isEmpty()) {
             ctx.status(404).json(Map.of("error", "Player not found"));
             return;
         }
-        String code = this.verificationService.generateCode(req.playerUuid);
+        String code = this.verificationService.generateCode(this.canonicalUuidResolver.apply(req.playerUuid));
         ctx.status(200).json(Map.of("code", code, "message", "Send this code to the QQ bot"));
     }
 
@@ -102,10 +163,11 @@ implements AdminHandler {
             return;
         }
         UUID playerUuid = this.verificationService.verifyAndExecute(req.code, (operationId, candidate) -> {
+            UUID canonicalUuid = this.canonicalUuidResolver.apply(candidate);
             PlayerBinding binding = new PlayerBinding(
-                candidate, req.qqId, null, System.currentTimeMillis());
-            this.repo.save(binding);
-            return true;
+                canonicalUuid, req.qqId, null, System.currentTimeMillis());
+            return this.repo.migrateAndSave(
+                this.knownMinecraftUuidsResolver.apply(canonicalUuid), binding);
         });
         if (playerUuid == null) {
             ctx.status(404).json(Map.of("error", "Invalid or expired code"));

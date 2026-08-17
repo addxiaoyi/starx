@@ -94,7 +94,7 @@ final class AuthFlowIndexTest {
         flows.begin(playerId, player, "duplicate"));
     assertTrue(flows.deny(player, "admission failed"));
     assertFalse(flows.deny(player));
-    assertTrue(flows.requiresAuth(player));
+    assertFalse(flows.requiresAuth(player));
     assertEquals("admission failed", flows.denial(player).orElseThrow());
     assertEquals(AuthFlowIndex.BeginResult.DUPLICATE,
         flows.begin(playerId, duplicate, "duplicate"));

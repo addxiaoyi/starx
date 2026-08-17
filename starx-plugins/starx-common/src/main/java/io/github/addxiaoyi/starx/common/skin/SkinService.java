@@ -6,10 +6,13 @@ package io.github.addxiaoyi.starx.common.skin;
 import io.github.addxiaoyi.starx.api.dto.SkinDto;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.api.repository.SkinRepository;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -17,16 +20,30 @@ public final class SkinService {
     private static final Logger LOGGER = Logger.getLogger(SkinService.class.getName());
     private final SkinRepository skinRepository;
     private final EventBus eventBus;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
     public SkinService(SkinRepository skinRepository, EventBus eventBus) {
+        this(skinRepository, eventBus, uuid -> Set.of(uuid));
+    }
+
+    public SkinService(
+        SkinRepository skinRepository,
+        EventBus eventBus,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.skinRepository = Objects.requireNonNull(skinRepository, "skinRepository");
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     public void refreshSkin(UUID uuid, String name) {
         Objects.requireNonNull(uuid, "uuid");
         Objects.requireNonNull(name, "name");
-        Optional<SkinDto> skin = this.skinRepository.findByPlayer(uuid, name);
+        Optional<SkinDto> skin = Optional.empty();
+        for (UUID knownUuid : knownUuids(uuid)) {
+            skin = this.skinRepository.findByPlayer(knownUuid, name);
+            if (skin.isPresent()) break;
+        }
         if (skin.isPresent()) {
             SkinDto data = skin.get();
             boolean stored;
@@ -51,6 +68,16 @@ public final class SkinService {
             return;
         }
         this.eventBus.publish("skin:refresh:request", Map.of("uuid", uuid.toString(), "name", name));
+    }
+
+    private Set<UUID> knownUuids(UUID requested) {
+        LinkedHashSet<UUID> known = new LinkedHashSet<>();
+        known.add(requested);
+        Set<UUID> aliases = Objects.requireNonNull(
+            this.knownMinecraftUuidsResolver.apply(requested),
+            "knownMinecraftUuidsResolver returned null");
+        aliases.stream().filter(Objects::nonNull).forEach(known::add);
+        return known;
     }
 
     public void applySkin(UUID uuid) {

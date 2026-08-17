@@ -589,7 +589,10 @@ public final class ConfigLoader {
             stringValue(offlineIdentityNode, "prefix", "."),
             stringValue(offlineIdentityNode, "display-name", "前缀离线账号")),
         integer(node, "password-bypass-minutes", 30),
-        stringValue(node, "binding-website-url", "https://star-web.top"));
+        stringValue(node, "binding-website-url", "https://star-web.top"),
+        configBoolean(node, "premium-bypass", true, "auth.premium-bypass"),
+        configBoolean(node, "floodgate-bypass", true, "auth.floodgate-bypass"),
+        configBoolean(node, "skin-site-bypass", true, "auth.skin-site-bypass"));
   }
 
   private static StarxConfig.PlayerListConfig parsePlayerListConfig(Map<String, Object> node) {

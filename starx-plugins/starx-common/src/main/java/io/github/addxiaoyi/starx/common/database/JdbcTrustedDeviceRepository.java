@@ -8,8 +8,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +35,8 @@ public final class JdbcTrustedDeviceRepository {
       )
       """;
   private static final int MAX_DEVICES_PER_PLAYER = 10;
+  private static final int MAX_OBSERVE_ATTEMPTS = 6;
+  private static final long RETRY_BASE_DELAY_MILLIS = 10L;
 
   private final DataSource source;
 
@@ -56,20 +60,71 @@ public final class JdbcTrustedDeviceRepository {
     String normalizedRegion = normalizeRegion(regionKey);
     String normalizedLabel = normalizeLabel(label);
 
+    for (int attempt = 1; attempt <= MAX_OBSERVE_ATTEMPTS; attempt++) {
+      try {
+        return observeOnce(
+            playerId, fingerprintHash, normalizedRegion, normalizedLabel, expiresAt, now);
+      } catch (IllegalStateException error) {
+        if (!isBusy(error) || attempt == MAX_OBSERVE_ATTEMPTS) throw error;
+        try {
+          Thread.sleep(RETRY_BASE_DELAY_MILLIS << (attempt - 1));
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("Interrupted while observing trusted device", interrupted);
+        }
+      }
+    }
+    throw new IllegalStateException("Failed to observe trusted device");
+  }
+
+  private TrustedDevice observeOnce(
+      UUID playerId,
+      String fingerprintHash,
+      String normalizedRegion,
+      String normalizedLabel,
+      Instant expiresAt,
+      Instant now) {
     try (Connection connection = this.source.getConnection()) {
       boolean autoCommit = connection.getAutoCommit();
-      connection.setAutoCommit(false);
+      boolean sqlite = isSqlite(connection);
+      boolean sqliteManualTransaction = sqlite && autoCommit;
+      if (!sqliteManualTransaction) connection.setAutoCommit(false);
       try {
+        if (sqliteManualTransaction) beginImmediate(connection);
         TrustedDevice existing = findByHash(connection, playerId, fingerprintHash);
-        TrustedDevice saved = existing == null
-            ? insert(connection, playerId, fingerprintHash, normalizedRegion, normalizedLabel, expiresAt, now)
-            : update(connection, existing, normalizedRegion, normalizedLabel, expiresAt, now);
+        TrustedDevice saved;
+        if (existing == null) {
+          try {
+            saved = insert(
+                connection, playerId, fingerprintHash, normalizedRegion, normalizedLabel,
+                expiresAt, now);
+          } catch (SQLException error) {
+            if (!isUniqueViolation(error)) throw error;
+            existing = findByHash(connection, playerId, fingerprintHash);
+            if (existing == null) throw error;
+            saved = update(connection, existing, normalizedRegion, normalizedLabel, expiresAt, now);
+          }
+        } else {
+          saved = update(connection, existing, normalizedRegion, normalizedLabel, expiresAt, now);
+        }
         capActiveDevices(connection, playerId, now);
-        connection.commit();
-        connection.setAutoCommit(autoCommit);
+        if (sqliteManualTransaction) {
+          executeTransactionControl(connection, "COMMIT");
+        } else {
+          connection.commit();
+          connection.setAutoCommit(autoCommit);
+        }
         return saved;
       } catch (Exception error) {
-        connection.rollback();
+        try {
+          if (sqliteManualTransaction) {
+            executeTransactionControl(connection, "ROLLBACK");
+          } else {
+            connection.rollback();
+          }
+        } catch (SQLException rollbackError) {
+          error.addSuppressed(rollbackError);
+        }
         throw error;
       }
     } catch (SQLException error) {
@@ -77,7 +132,35 @@ public final class JdbcTrustedDeviceRepository {
     }
   }
 
+  private static void beginImmediate(Connection connection) throws SQLException {
+    executeTransactionControl(connection, "BEGIN IMMEDIATE");
+  }
+
+  private static void executeTransactionControl(Connection connection, String sql)
+      throws SQLException {
+    try (Statement statement = connection.createStatement()) {
+      statement.execute(sql);
+    }
+  }
+
+  private static boolean isSqlite(Connection connection) throws SQLException {
+    String url = connection.getMetaData().getURL();
+    return url != null && url.toLowerCase(Locale.ROOT).startsWith("jdbc:sqlite:");
+  }
+
   public boolean isTrusted(UUID playerId, String rawFingerprint, String regionKey, Instant now) {
+    return isTrustedForUuid(playerId, rawFingerprint, regionKey, now);
+  }
+
+  public boolean isTrusted(Collection<UUID> playerIds, String rawFingerprint, String regionKey, Instant now) {
+    List<UUID> ids = JdbcUuidQuery.distinct(playerIds);
+    for (UUID playerId : ids) {
+      if (isTrustedForUuid(playerId, rawFingerprint, regionKey, now)) return true;
+    }
+    return false;
+  }
+
+  private boolean isTrustedForUuid(UUID playerId, String rawFingerprint, String regionKey, Instant now) {
     String sql = """
         SELECT 1 FROM starx_trusted_devices
         WHERE player_uuid = ? AND fingerprint_hash = ? AND region_key = ?
@@ -98,19 +181,21 @@ public final class JdbcTrustedDeviceRepository {
   }
 
   public boolean hasFamiliarRegion(UUID playerId, String regionKey, Instant now) {
-    Objects.requireNonNull(playerId, "playerId");
+    return hasFamiliarRegion(List.of(playerId), regionKey, now);
+  }
+
+  public boolean hasFamiliarRegion(Collection<UUID> playerIds, String regionKey, Instant now) {
+    List<UUID> ids = JdbcUuidQuery.distinct(playerIds);
+    if (ids.isEmpty()) return false;
     Objects.requireNonNull(now, "now");
-    String sql = """
-        SELECT 1 FROM starx_trusted_devices
-        WHERE player_uuid = ? AND region_key = ?
-          AND revoked_at IS NULL AND expires_at > ?
-        LIMIT 1
-        """;
+    String sql = "SELECT 1 FROM starx_trusted_devices WHERE player_uuid IN ("
+        + JdbcUuidQuery.placeholders(ids.size()) + ") AND region_key = ?"
+        + " AND revoked_at IS NULL AND expires_at > ? LIMIT 1";
     try (Connection connection = this.source.getConnection();
          PreparedStatement statement = connection.prepareStatement(sql)) {
-      statement.setString(1, playerId.toString());
-      statement.setString(2, normalizeRegion(regionKey));
-      statement.setLong(3, now.toEpochMilli());
+      JdbcUuidQuery.bind(statement, ids);
+      statement.setString(ids.size() + 1, normalizeRegion(regionKey));
+      statement.setLong(ids.size() + 2, now.toEpochMilli());
       try (ResultSet rows = statement.executeQuery()) {
         return rows.next();
       }
@@ -120,15 +205,19 @@ public final class JdbcTrustedDeviceRepository {
   }
 
   public List<TrustedDevice> listActive(UUID playerId, Instant now) {
-    String sql = """
-        SELECT * FROM starx_trusted_devices
-        WHERE player_uuid = ? AND revoked_at IS NULL AND expires_at > ?
-        ORDER BY last_seen_at DESC
-        """;
+    return listActive(List.of(playerId), now);
+  }
+
+  public List<TrustedDevice> listActive(Collection<UUID> playerIds, Instant now) {
+    List<UUID> ids = JdbcUuidQuery.distinct(playerIds);
+    if (ids.isEmpty()) return List.of();
+    String sql = "SELECT * FROM starx_trusted_devices WHERE player_uuid IN ("
+        + JdbcUuidQuery.placeholders(ids.size()) + ") AND revoked_at IS NULL AND expires_at > ?"
+        + " ORDER BY last_seen_at DESC, id DESC";
     try (Connection connection = this.source.getConnection();
          PreparedStatement statement = connection.prepareStatement(sql)) {
-      statement.setString(1, playerId.toString());
-      statement.setLong(2, now.toEpochMilli());
+      JdbcUuidQuery.bind(statement, ids);
+      statement.setLong(ids.size() + 1, now.toEpochMilli());
       try (ResultSet rows = statement.executeQuery()) {
         List<TrustedDevice> devices = new ArrayList<>();
         while (rows.next()) devices.add(map(rows));
@@ -164,12 +253,19 @@ public final class JdbcTrustedDeviceRepository {
   }
 
   public int revokeAll(UUID playerId, Instant now) {
+    return revokeAll(List.of(playerId), now);
+  }
+
+  public int revokeAll(Collection<UUID> playerIds, Instant now) {
+    List<UUID> ids = JdbcUuidQuery.distinct(playerIds);
+    if (ids.isEmpty()) return 0;
     return updateCount(
         "UPDATE starx_trusted_devices SET revoked_at = ? "
-            + "WHERE player_uuid = ? AND revoked_at IS NULL",
+            + "WHERE player_uuid IN (" + JdbcUuidQuery.placeholders(ids.size()) + ") AND revoked_at IS NULL",
         statement -> {
           statement.setLong(1, now.toEpochMilli());
-          statement.setString(2, playerId.toString());
+          int index = 2;
+          for (UUID id : ids) statement.setString(index++, id.toString());
         });
   }
 
@@ -234,7 +330,7 @@ public final class JdbcTrustedDeviceRepository {
     try (PreparedStatement statement = connection.prepareStatement("""
         SELECT id FROM starx_trusted_devices
         WHERE player_uuid = ? AND revoked_at IS NULL AND expires_at > ?
-        ORDER BY last_seen_at DESC
+        ORDER BY last_seen_at DESC, id DESC
         """)) {
       statement.setString(1, playerId.toString());
       statement.setLong(2, now.toEpochMilli());
@@ -262,6 +358,41 @@ public final class JdbcTrustedDeviceRepository {
     } catch (SQLException error) {
       throw new IllegalStateException("Failed to update trusted device", error);
     }
+  }
+
+  static boolean isUniqueViolation(Throwable error) {
+    Throwable current = error;
+    while (current != null) {
+      if (current instanceof java.sql.SQLIntegrityConstraintViolationException) return true;
+      if (current instanceof SQLException sql) {
+        String state = sql.getSQLState();
+        if (state != null && state.startsWith("23")) return true;
+      }
+      String message = current.getMessage();
+      if (message != null) {
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (normalized.contains("unique constraint") || normalized.contains("duplicate key")) {
+          return true;
+        }
+      }
+      current = current.getCause();
+    }
+    return false;
+  }
+
+  private static boolean isBusy(Throwable error) {
+    Throwable current = error;
+    while (current != null) {
+      String message = current.getMessage();
+      if (message != null) {
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (normalized.contains("database is locked") || normalized.contains("database is busy")) {
+          return true;
+        }
+      }
+      current = current.getCause();
+    }
+    return false;
   }
 
   private static TrustedDevice map(ResultSet rows) throws SQLException {

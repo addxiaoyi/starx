@@ -1,6 +1,8 @@
 package io.github.addxiaoyi.starx.velocity.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,6 +35,33 @@ final class ConfigLayoutTest {
 
     assertEquals("core-key", config.apiKey());
     assertEquals(9, config.auth().passwordBypassMinutes());
+    assertTrue(config.auth().premiumBypass());
+    assertTrue(config.auth().floodgateBypass());
+    assertTrue(config.auth().skinSiteBypass());
+  }
+
+  @Test
+  void authenticationBypassFlagsAreLoadedFromAuthConfig() throws Exception {
+    Path entrypoint = this.tempDir.resolve("config.yml");
+    Files.writeString(entrypoint, """
+        schema-version: 5
+        config-files:
+          directory: config
+          files: [auth.yml]
+        """, StandardCharsets.UTF_8);
+    write("config/auth.yml", """
+        auth:
+          premium-bypass: false
+          floodgate-bypass: false
+          skin-site-bypass: false
+        """);
+
+    StarxConfig.AuthConfig auth = ConfigLoader.load(entrypoint).auth();
+
+    assertAll(
+        () -> assertFalse(auth.premiumBypass()),
+        () -> assertFalse(auth.floodgateBypass()),
+        () -> assertFalse(auth.skinSiteBypass()));
   }
 
   @Test

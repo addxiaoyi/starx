@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Locale;
 
 final class JdbcSchema {
   private JdbcSchema() {}
@@ -29,6 +30,16 @@ final class JdbcSchema {
     } catch (SQLException error) {
       if (!indexExists(connection, table, name)) throw error;
     }
+  }
+
+  static boolean isDuplicateConstraint(SQLException error) {
+    if ("23505".equals(error.getSQLState()) || error.getErrorCode() == 1062) return true;
+    String message = error.getMessage();
+    if (message == null) return false;
+    String normalized = message.toLowerCase(Locale.ROOT);
+    return normalized.contains("duplicate key")
+        || normalized.contains("unique constraint")
+        || normalized.contains("primary key constraint");
   }
 
   private static boolean indexExists(Connection connection, String table, String name)

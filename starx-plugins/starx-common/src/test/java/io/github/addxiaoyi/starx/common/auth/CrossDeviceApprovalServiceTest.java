@@ -11,10 +11,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Statement;
@@ -60,6 +62,27 @@ class CrossDeviceApprovalServiceTest {
   }
 
   @Test
+  void tokenCollisionDoesNotReplaceAnExistingMemoryChallenge() {
+    String firstToken = "collision-token-with-at-least-32-characters-0001";
+    String secondToken = "collision-token-with-at-least-32-characters-0002";
+    String[] generated = {firstToken, firstToken, secondToken};
+    AtomicInteger index = new AtomicInteger();
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        Clock.systemUTC(), Duration.ofMinutes(5),
+        () -> generated[Math.min(index.getAndIncrement(), generated.length - 1)]);
+
+    CrossDeviceApprovalService.Challenge first = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+    CrossDeviceApprovalService.Challenge second = service.create(
+        UUID.randomUUID(), "Blair", CrossDeviceApprovalService.Action.BIND_EMAIL);
+
+    assertEquals(firstToken, first.token());
+    assertEquals(secondToken, second.token());
+    assertTrue(service.approve(first.token(), PLAYER_ID, "Alex",
+        CrossDeviceApprovalService.Action.BIND_EMAIL).success());
+  }
+
+  @Test
   void persistentApprovalSurvivesRestartAndRejectsReplay(@TempDir Path tempDir) throws Exception {
     SQLiteDataSource source = new SQLiteDataSource();
     source.setUrl("jdbc:sqlite:" + tempDir.resolve("approval.db").toAbsolutePath());
@@ -87,6 +110,210 @@ class CrossDeviceApprovalServiceTest {
   }
 
   @Test
+  void persistentTokenCollisionRetriesWithoutReplacingTheOriginalChallenge(@TempDir Path tempDir)
+      throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("persistent-token-collision.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute("CREATE TABLE starx_accounts (account_id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL)");
+      sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
+      sql.execute("INSERT INTO starx_accounts VALUES ('account-1', 1)");
+    }
+    String firstToken = "persistent-collision-token-with-at-least-32-0001";
+    String secondToken = "persistent-collision-token-with-at-least-32-0002";
+    String[] generated = {firstToken, firstToken, secondToken};
+    AtomicInteger index = new AtomicInteger();
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        Clock.systemUTC(), Duration.ofMinutes(5),
+        () -> generated[Math.min(index.getAndIncrement(), generated.length - 1)],
+        new BindingChallengeService(new JdbcBindingChallengeRepository(source)),
+        ignored -> "account-1", ignored -> PLAYER_ID, ignored -> "Alex");
+
+    CrossDeviceApprovalService.Challenge first = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+    CrossDeviceApprovalService.Challenge second = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+
+    assertEquals(firstToken, first.token());
+    assertEquals(secondToken, second.token());
+    assertTrue(service.approve(first.token(), PLAYER_ID, "Alex",
+        CrossDeviceApprovalService.Action.BIND_EMAIL).success());
+  }
+
+  @Test
+  void persistentApprovalExpiresWhileItsActionIsExecuting(@TempDir Path tempDir) throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("approval-expiry.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute("CREATE TABLE starx_accounts (account_id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL)");
+      sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
+      sql.execute("INSERT INTO starx_accounts VALUES ('account-1', 1)");
+    }
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-22T00:00:00Z"), ZoneOffset.UTC);
+    BindingChallengeService challenges =
+        new BindingChallengeService(new JdbcBindingChallengeRepository(source));
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        clock, Duration.ofMinutes(5), () -> "expiring-approval-token-with-enough-entropy",
+        challenges, ignored -> "account-1", ignored -> PLAYER_ID, ignored -> "alex");
+    CrossDeviceApprovalService.Challenge challenge = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+    clock.advance(Duration.ofMinutes(4).plusSeconds(59));
+
+    assertEquals(CrossDeviceApprovalService.Status.APPROVED,
+        service.approveAndExecute(
+            challenge.token(), PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL,
+            ignored -> {
+              clock.advance(Duration.ofSeconds(2));
+              return true;
+            }).status());
+  }
+
+  @Test
+  void memoryApprovalCompletesWhenExecutionCrossesTheExpiryBoundary() {
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-22T00:00:00Z"), ZoneOffset.UTC);
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        clock, Duration.ofMinutes(5), () -> "memory-expiry-token-with-enough-entropy");
+    CrossDeviceApprovalService.Challenge challenge = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+
+    assertEquals(CrossDeviceApprovalService.Status.APPROVED,
+        service.approveAndExecute(
+            challenge.token(), PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL,
+            ignored -> {
+              clock.advance(Duration.ofMinutes(6));
+              return true;
+            }).status());
+  }
+
+  @Test
+  void memoryApprovalDoesNotStartAfterWaitingPastExpiry() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-22T00:00:00Z"), ZoneOffset.UTC);
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        clock, Duration.ofMinutes(5), () -> "memory-race-token-with-enough-entropy");
+    CrossDeviceApprovalService.Challenge challenge = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+    CountDownLatch firstStarted = new CountDownLatch(1);
+    CountDownLatch releaseFirst = new CountDownLatch(1);
+    AtomicInteger executions = new AtomicInteger();
+    AtomicReference<CrossDeviceApprovalService.Approval> secondResult = new AtomicReference<>();
+
+    Thread first = new Thread(() -> service.approveAndExecute(
+        challenge.token(), PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL,
+        ignored -> {
+          executions.incrementAndGet();
+          firstStarted.countDown();
+          try {
+            releaseFirst.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            return false;
+          }
+          return false;
+        }));
+    first.start();
+    assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
+
+    Thread second = new Thread(() -> secondResult.set(service.approveAndExecute(
+        challenge.token(), PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL,
+        ignored -> {
+          executions.incrementAndGet();
+          return true;
+        })));
+    second.start();
+    clock.advance(Duration.ofMinutes(6));
+    releaseFirst.countDown();
+    first.join(5_000);
+    second.join(5_000);
+
+    assertEquals(CrossDeviceApprovalService.Status.EXPIRED, secondResult.get().status());
+    assertEquals(1, executions.get());
+  }
+
+  @Test
+  void passesPlayerNameToPersistentAccountResolver(@TempDir Path tempDir) throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("resolver-context.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute("CREATE TABLE starx_accounts (account_id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL)");
+      sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
+      sql.execute("INSERT INTO starx_accounts VALUES ('account-1', 1)");
+    }
+    AtomicReference<String> resolvedName = new AtomicReference<>();
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        new BindingChallengeService(new JdbcBindingChallengeRepository(source)),
+        (playerId, username) -> {
+          resolvedName.set(username);
+          return "account-1";
+        },
+        ignored -> PLAYER_ID,
+        ignored -> "Alex");
+
+    service.create(PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+
+    assertEquals("alex", resolvedName.get());
+  }
+
+  @Test
+  void persistentConfirmationDoesNotLetTheRequestRenameTheIdentity(@TempDir Path tempDir)
+      throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("confirmation-identity.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute("CREATE TABLE starx_accounts (account_id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL)");
+      sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
+      sql.execute("INSERT INTO starx_accounts VALUES ('account-1', 1)");
+    }
+    AtomicReference<String> currentName = new AtomicReference<>("alex");
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        new BindingChallengeService(new JdbcBindingChallengeRepository(source)),
+        (playerId, username) -> {
+          if (username != null) currentName.set(username);
+          return "account-1";
+        },
+        ignored -> PLAYER_ID,
+        ignored -> currentName.get());
+
+    CrossDeviceApprovalService.Challenge challenge = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+
+    assertEquals(CrossDeviceApprovalService.Status.MISMATCH,
+        service.approve(challenge.token(), PLAYER_ID, "Impostor",
+            CrossDeviceApprovalService.Action.BIND_EMAIL).status());
+    assertEquals("alex", currentName.get());
+  }
+
+  @Test
+  void persistentConfirmationFailsClosedWhenItsAccountWasDeleted(@TempDir Path tempDir)
+      throws Exception {
+    SQLiteDataSource source = new SQLiteDataSource();
+    source.setUrl("jdbc:sqlite:" + tempDir.resolve("deleted-account.db").toAbsolutePath());
+    try (Connection connection = source.getConnection(); Statement sql = connection.createStatement()) {
+      sql.execute("CREATE TABLE starx_accounts (account_id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL)");
+      sql.execute(JdbcBindingChallengeRepository.CREATE_TABLE_SQL);
+      sql.execute("INSERT INTO starx_accounts VALUES ('account-1', 1)");
+    }
+    BindingChallengeService challenges =
+        new BindingChallengeService(new JdbcBindingChallengeRepository(source));
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        Clock.systemUTC(), Duration.ofMinutes(5),
+        () -> "deleted-account-token-with-enough-entropy",
+        challenges, ignored -> "account-1", ignored -> null, ignored -> "Alex");
+    CrossDeviceApprovalService.Challenge challenge = service.create(
+        PLAYER_ID, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+    AtomicInteger executions = new AtomicInteger();
+
+    assertEquals(CrossDeviceApprovalService.Status.UNKNOWN,
+        service.approveAndExecute(
+            challenge.token(), PLAYER_ID, "Alex",
+            CrossDeviceApprovalService.Action.BIND_EMAIL,
+            ignored -> {
+              executions.incrementAndGet();
+              return true;
+            }).status());
+    assertEquals(0, executions.get());
+  }
+
+  @Test
   void bindsApprovalToPlayerNameAndActionAndConsumesOnce() {
     MutableClock clock = new MutableClock(Instant.parse("2026-07-22T00:00:00Z"), ZoneOffset.UTC);
     CrossDeviceApprovalService service = new CrossDeviceApprovalService(
@@ -101,6 +328,21 @@ class CrossDeviceApprovalServiceTest {
     assertTrue(service.approve(challenge.token(), PLAYER_ID, "Alex",
         CrossDeviceApprovalService.Action.BIND_EMAIL).success());
     assertFalse(service.approve(challenge.token(), PLAYER_ID, "Alex",
+        CrossDeviceApprovalService.Action.BIND_EMAIL).success());
+  }
+
+  @Test
+  void memoryApprovalAcceptsAKnownMinecraftIdentityAlias() {
+    UUID legacyUuid = UUID.randomUUID();
+    UUID currentUuid = UUID.randomUUID();
+    CrossDeviceApprovalService service = new CrossDeviceApprovalService(
+        Clock.systemUTC(), Duration.ofMinutes(5),
+        () -> "memory-alias-token-with-enough-test-entropy");
+    service.bindKnownMinecraftUuidsResolver(ignored -> Set.of(legacyUuid, currentUuid));
+    CrossDeviceApprovalService.Challenge challenge = service.create(
+        legacyUuid, "Alex", CrossDeviceApprovalService.Action.BIND_EMAIL);
+
+    assertTrue(service.approve(challenge.token(), currentUuid, "Alex",
         CrossDeviceApprovalService.Action.BIND_EMAIL).success());
   }
 

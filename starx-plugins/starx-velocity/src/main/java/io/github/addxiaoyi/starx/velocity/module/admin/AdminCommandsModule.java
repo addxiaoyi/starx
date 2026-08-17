@@ -42,8 +42,10 @@ import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.function.Function;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -62,9 +64,27 @@ implements VelocityModule {
     private final JdbcBindingRepository bindingRepo;
     private final BindingVerificationService bindingVerification;
     private final AuthService authService;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
+    private final Function<UUID, UUID> canonicalUuidResolver;
     private CommandMeta commandMeta;
 
     public AdminCommandsModule(StarxVelocityPlugin plugin, JdbcUserRepository userRepo, JdbcPunishmentRepository punishmentRepo, JdbcStaffNoteRepository staffNoteRepo, JdbcReportRepository reportRepo, JdbcAnnouncementRepository announcementRepo, JdbcBindingRepository bindingRepo, BindingVerificationService bindingVerification, AuthService authService) {
+        this(plugin, userRepo, punishmentRepo, staffNoteRepo, reportRepo, announcementRepo, bindingRepo,
+            bindingVerification, authService, uuid -> Set.of(uuid), uuid -> uuid);
+    }
+
+    public AdminCommandsModule(
+        StarxVelocityPlugin plugin,
+        JdbcUserRepository userRepo,
+        JdbcPunishmentRepository punishmentRepo,
+        JdbcStaffNoteRepository staffNoteRepo,
+        JdbcReportRepository reportRepo,
+        JdbcAnnouncementRepository announcementRepo,
+        JdbcBindingRepository bindingRepo,
+        BindingVerificationService bindingVerification,
+        AuthService authService,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver,
+        Function<UUID, UUID> canonicalUuidResolver) {
         this.plugin = plugin;
         this.userRepo = userRepo;
         this.punishmentRepo = punishmentRepo;
@@ -74,6 +94,10 @@ implements VelocityModule {
         this.bindingRepo = bindingRepo;
         this.bindingVerification = bindingVerification;
         this.authService = authService;
+        this.knownMinecraftUuidsResolver = java.util.Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
+        this.canonicalUuidResolver = java.util.Objects.requireNonNull(
+            canonicalUuidResolver, "canonicalUuidResolver");
     }
 
     @Override
@@ -192,7 +216,10 @@ implements VelocityModule {
                 inv.source().sendMessage((Component)Component.text((String)"未找到该玩家。", (TextColor)NamedTextColor.RED));
                 return;
             }
-            Report r = new Report(UUID.randomUUID().toString(), reporter.getUniqueId(), ((Player)target.get()).getUniqueId(), category, details, "PENDING", null, null);
+             Report r = new Report(UUID.randomUUID().toString(),
+                 AdminCommandsModule.this.canonicalUuidResolver.apply(reporter.getUniqueId()),
+                 AdminCommandsModule.this.canonicalUuidResolver.apply(((Player)target.get()).getUniqueId()),
+                 category, details, "PENDING", null, null);
             AdminCommandsModule.this.reportRepo.create(r);
             inv.source().sendMessage((Component)Component.text((String)"举报已提交。", (TextColor)NamedTextColor.GREEN));
         }
@@ -235,19 +262,20 @@ implements VelocityModule {
             }
             UUID uuid = ((Player)target.get()).getUniqueId();
             inv.source().sendMessage((Component)Component.text((String)("==== History: " + targetName + " ===="), (TextColor)NamedTextColor.GOLD));
-            List<Punishment> punishments = AdminCommandsModule.this.punishmentRepo.findByPlayer(uuid);
+             Set<UUID> knownUuids = AdminCommandsModule.this.knownMinecraftUuidsResolver.apply(uuid);
+             List<Punishment> punishments = AdminCommandsModule.this.punishmentRepo.findByPlayers(knownUuids);
             inv.source().sendMessage((Component)Component.text((String)("处罚记录（" + punishments.size() + "）："), (TextColor)NamedTextColor.AQUA));
             for (Punishment punishment : punishments) {
                 inv.source().sendMessage((Component)Component.text((String)("  [" + punishment.type() + "] " + punishment.reason() + " - by " + punishment.staffName()), (TextColor)NamedTextColor.GRAY));
             }
-            List<StaffNote> notes = AdminCommandsModule.this.staffNoteRepo.findByPlayer(uuid);
+             List<StaffNote> notes = AdminCommandsModule.this.staffNoteRepo.findByPlayers(knownUuids);
             if (!notes.isEmpty()) {
                 inv.source().sendMessage((Component)Component.text((String)"管理备注：", (TextColor)NamedTextColor.AQUA));
                 for (StaffNote n : notes) {
                     inv.source().sendMessage((Component)Component.text((String)("  [" + n.severity() + "] " + n.note()), (TextColor)NamedTextColor.GRAY));
                 }
             }
-            if (!(list = AdminCommandsModule.this.reportRepo.findByTarget(uuid)).isEmpty()) {
+             if (!(list = AdminCommandsModule.this.reportRepo.findByTargets(knownUuids)).isEmpty()) {
                 inv.source().sendMessage((Component)Component.text((String)("举报记录（" + list.size() + "）："), (TextColor)NamedTextColor.AQUA));
                 for (Report r : list) {
                     inv.source().sendMessage((Component)Component.text((String)("  [" + r.status() + "] " + r.category() + " - " + r.details()), (TextColor)NamedTextColor.GRAY));
@@ -302,7 +330,12 @@ implements VelocityModule {
                 inv.source().sendMessage((Component)Component.text((String)"未找到该玩家。", (TextColor)NamedTextColor.RED));
                 return;
             }
-            StaffNote note = new StaffNote(UUID.randomUUID().toString(), ((Player)target.get()).getUniqueId(), content, severity, staff.getUniqueId(), System.currentTimeMillis());
+             StaffNote note = new StaffNote(UUID.randomUUID().toString(),
+                 AdminCommandsModule.this.canonicalUuidResolver.apply(((Player)target.get()).getUniqueId()),
+                 content,
+                 severity,
+                 AdminCommandsModule.this.canonicalUuidResolver.apply(staff.getUniqueId()),
+                 System.currentTimeMillis());
             AdminCommandsModule.this.staffNoteRepo.addNote(note);
             inv.source().sendMessage((Component)Component.text((String)"管理备注已添加。", (TextColor)NamedTextColor.GREEN));
         }
@@ -341,7 +374,8 @@ implements VelocityModule {
                 inv.source().sendMessage((Component)Component.text((String)"未找到该玩家。", (TextColor)NamedTextColor.RED));
                 return;
             }
-            List<StaffNote> notes = AdminCommandsModule.this.staffNoteRepo.findByPlayer(((Player)target.get()).getUniqueId());
+             List<StaffNote> notes = AdminCommandsModule.this.staffNoteRepo.findByPlayers(
+                 AdminCommandsModule.this.knownMinecraftUuidsResolver.apply(((Player)target.get()).getUniqueId()));
             if (notes.isEmpty()) {
                 inv.source().sendMessage((Component)Component.text((String)(targetName + " 暂无管理备注。"), (TextColor)NamedTextColor.GRAY));
                 return;
@@ -411,13 +445,18 @@ implements VelocityModule {
                 inv.source().sendMessage((Component)Component.text((String)"用法：/sxadmin bind qq", (TextColor)NamedTextColor.YELLOW));
                 return;
             }
-            UUID uuid = player.getUniqueId();
-            Optional<PlayerBinding> existing = AdminCommandsModule.this.bindingRepo.findByPlayer(uuid);
+             UUID uuid = player.getUniqueId();
+             UUID canonicalUuid = AdminCommandsModule.this.canonicalUuidResolver.apply(uuid);
+             Optional<PlayerBinding> existing = AdminCommandsModule.this.knownMinecraftUuidsResolver.apply(uuid)
+                 .stream()
+                 .map(AdminCommandsModule.this.bindingRepo::findByPlayer)
+                 .flatMap(Optional::stream)
+                 .findFirst();
             if (existing.isPresent() && existing.get().qqId() != null) {
                 inv.source().sendMessage((Component)Component.text((String)"你的账号已绑定 QQ。", (TextColor)NamedTextColor.RED));
                 return;
             }
-            String code = AdminCommandsModule.this.bindingVerification.generateCode(uuid);
+             String code = AdminCommandsModule.this.bindingVerification.generateCode(canonicalUuid);
             inv.source().sendMessage(((TextComponent)((TextComponent)((TextComponent)((TextComponent)((TextComponent)((TextComponent)((TextComponent)Component.text((String)"").append((Component)Component.text((String)"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", (TextColor)NamedTextColor.DARK_GRAY))).append((Component)Component.text((String)"\n\u2605 Your verification code: ", (TextColor)NamedTextColor.GREEN))).append((Component)Component.text((String)code, (TextColor)NamedTextColor.AQUA))).append((Component)Component.text((String)" \u2605", (TextColor)NamedTextColor.GREEN))).append((Component)Component.text((String)"\nSend this code to the QQ bot via private message", (TextColor)NamedTextColor.GRAY))).append((Component)Component.text((String)("\nto bind your QQ account to " + player.getUsername() + "."), (TextColor)NamedTextColor.GRAY))).append((Component)Component.text((String)"\nCode expires in 5 minutes.", (TextColor)NamedTextColor.RED))).append((Component)Component.text((String)"\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", (TextColor)NamedTextColor.DARK_GRAY)));
         }
 

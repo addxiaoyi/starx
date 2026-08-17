@@ -106,6 +106,25 @@ final class PersistentChallengeRecoveryTest {
   }
 
   @Test
+  void qqCodeExpiresWhileBindingIsExecuting() throws Exception {
+    SQLiteDataSource source = database("qq-expiry.db");
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-28T12:00:00Z"));
+    BindingChallengeService challenges = challenges(source);
+    UUID playerId = UUID.fromString("76301e72-8eb4-4a61-995e-8f273cb3c6bf");
+    BindingVerificationService bindings = new BindingVerificationService(
+        challenges, ignored -> "account-1",
+        account -> account.equals("account-1") ? playerId : null,
+        clock, CHALLENGE_TTL);
+    String code = bindings.generateCode(playerId);
+
+    assertNull(bindings.verifyAndExecute(code, (operationId, candidate) -> {
+      clock.advance(Duration.ofMinutes(6));
+      return true;
+    }));
+    assertNull(bindings.verifyAndExecute(code, (operationId, candidate) -> true));
+  }
+
+  @Test
   void crossDeviceRecoveryReusesOperationIdWithoutRepeatingAction() throws Exception {
     SQLiteDataSource source = database("cross-device.db");
     MutableClock clock = new MutableClock(Instant.parse("2026-07-28T12:00:00Z"));
@@ -154,6 +173,28 @@ final class PersistentChallengeRecoveryTest {
     assertEquals(CrossDeviceApprovalService.Status.UNKNOWN,
         approvals.approveAndExecute(
             token, playerId, "Player", CrossDeviceApprovalService.Action.BIND_EMAIL,
+            (operationId, challenge) -> true).status());
+  }
+
+  @Test
+  void crossDeviceApprovalAcceptsAnotherUuidForTheSameAccount() throws Exception {
+    SQLiteDataSource source = database("cross-device-alias.db");
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-28T12:00:00Z"));
+    BindingChallengeService challenges = challenges(source);
+    UUID legacyUuid = UUID.fromString("6e05dc86-5ac5-4ed7-8819-ac9f5ed90dfe");
+    UUID currentUuid = UUID.fromString("7e05dc86-5ac5-4ed7-8819-ac9f5ed90dfe");
+    CrossDeviceApprovalService approvals = new CrossDeviceApprovalService(
+        clock, CHALLENGE_TTL, () -> "cross-device-alias-token-00000000000000000001", challenges,
+        (playerId, username) -> "account-1",
+        account -> account.equals("account-1") ? currentUuid : null,
+        account -> account.equals("account-1") ? "Player" : null);
+
+    CrossDeviceApprovalService.Challenge created = approvals.create(
+        currentUuid, "Player", CrossDeviceApprovalService.Action.BIND_EMAIL);
+
+    assertEquals(CrossDeviceApprovalService.Status.APPROVED,
+        approvals.approveAndExecute(
+            created.token(), legacyUuid, "PLAYER", CrossDeviceApprovalService.Action.BIND_EMAIL,
             (operationId, challenge) -> true).status());
   }
 

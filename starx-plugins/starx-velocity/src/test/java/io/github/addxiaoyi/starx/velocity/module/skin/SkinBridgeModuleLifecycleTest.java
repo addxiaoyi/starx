@@ -51,6 +51,11 @@ final class SkinBridgeModuleLifecycleTest {
   }
 
   @Test
+  void doesNotTreatAnOnlineOnlySkinChangeAsDurablyApplied() {
+    assertFalse(SkinBridgeModule.isWebsiteSkinApplied(false, 0, true));
+  }
+
+  @Test
   void usesRepositoryCapabilityInsteadOfPluginPresenceForProviderSelection() throws Exception {
     String source = Files.readString(repositoryRoot().resolve(
         "starx-plugins/starx-velocity/src/main/java/io/github/addxiaoyi/starx/velocity/module/skin/"

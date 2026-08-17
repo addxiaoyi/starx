@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.common.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.addxiaoyi.starx.common.crypto.PasswordHasher;
@@ -15,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -27,7 +29,7 @@ final class AuthServiceSessionIdentityTest {
   @Test
   void loginUsesTheSessionUsernameWhenCallerSuppliesAnotherUsername() {
     UUID connectionUuid = UUID.randomUUID();
-    UUID sessionAccountUuid = UUID.randomUUID();
+    UUID sessionAccountUuid = offlineUuid(SESSION_USERNAME);
     UUID externalAccountUuid = UUID.randomUUID();
     String credential = "session-credential";
     String credentialHash = PasswordHasher.hash(credential);
@@ -40,6 +42,7 @@ final class AuthServiceSessionIdentityTest {
 
     try {
       AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+      auth.bindMinecraftIdentityResolver(ignored -> Set.of(sessionAccountUuid, connectionUuid));
       assertTrue(auth.openConnection(
           lease, connectionUuid, SESSION_USERNAME, address, "device-a"));
 
@@ -55,7 +58,7 @@ final class AuthServiceSessionIdentityTest {
       assertTrue(result.success());
       assertEquals(AuthSession.State.AUTHENTICATED, result.state());
       assertEquals(sessionAccountUuid, users.lastLoginUuid);
-      assertEquals(List.of(SESSION_USERNAME), users.usernameLookups);
+      assertEquals(List.of(), users.usernameLookups);
       assertTrue(sessions.isState(
           connectionUuid, lease, AuthSession.State.AUTHENTICATED));
     } finally {
@@ -117,7 +120,7 @@ final class AuthServiceSessionIdentityTest {
   @Test
   void trustedLoginUsesTheSessionUsernameWhenCallerSuppliesAnotherUsername() {
     UUID connectionUuid = UUID.randomUUID();
-    UUID sessionAccountUuid = UUID.randomUUID();
+    UUID sessionAccountUuid = offlineUuid(SESSION_USERNAME);
     UUID externalAccountUuid = UUID.randomUUID();
     String credentialHash = PasswordHasher.hash("session-credential");
     RecordingUsers users = new RecordingUsers(
@@ -141,6 +144,61 @@ final class AuthServiceSessionIdentityTest {
 
       assertTrue(result.success());
       assertEquals(sessionAccountUuid, users.lastLoginUuid);
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void loginPersistenceFailureDoesNotLeaveTheSessionAuthenticated() {
+    UUID playerId = offlineUuid(SESSION_USERNAME);
+    String password = "session-credential";
+    RecordingUsers users = new RecordingUsers(user(playerId, SESSION_USERNAME, PasswordHasher.hash(password)));
+    users.failLastLogin = true;
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+
+    try {
+      AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+      assertTrue(auth.openConnection(
+          lease, playerId, SESSION_USERNAME, InetAddress.getLoopbackAddress(), "device-a"));
+
+      AuthResult result = auth.login(
+          lease, playerId, SESSION_USERNAME, password, null,
+          InetAddress.getLoopbackAddress(), "device-a");
+
+      assertFalse(result.success());
+      assertNull(users.lastLoginUuid);
+      assertTrue(sessions.isState(playerId, lease, AuthSession.State.GUEST));
+    } finally {
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void bruteForceDelayFollowsTheAccountAcrossMinecraftAliases() {
+    UUID connectionUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid(SESSION_USERNAME);
+    String password = "session-credential";
+    RecordingUsers users = new RecordingUsers(user(
+        accountUuid, SESSION_USERNAME, PasswordHasher.hash(password)));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+
+    try {
+      AuthService auth = new AuthService(users, new LocalEventBus(), sessions);
+      auth.bindMinecraftIdentityResolver(ignored -> Set.of(accountUuid, connectionUuid));
+      assertTrue(auth.openConnection(
+          lease, connectionUuid, SESSION_USERNAME, InetAddress.getLoopbackAddress()));
+      auth.bruteForceProtector().recordFailure(accountUuid);
+
+      AuthResult result = auth.login(
+          lease, connectionUuid, SESSION_USERNAME, password, null,
+          InetAddress.getLoopbackAddress(), "device-a");
+
+      assertFalse(result.success());
+      assertTrue(result.message().contains("等待"));
+      assertTrue(sessions.isState(connectionUuid, lease, AuthSession.State.GUEST));
     } finally {
       sessions.shutdown();
     }
@@ -171,14 +229,21 @@ final class AuthServiceSessionIdentityTest {
         false);
   }
 
+  private static UUID offlineUuid(String username) {
+    return UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + username).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  }
+
   private static class RecordingUsers extends JdbcUserRepository {
     private final Map<UUID, StarxUser> users;
     private final List<String> usernameLookups = new ArrayList<>();
     private UUID lastLoginUuid;
+    private boolean failLastLogin;
 
     private RecordingUsers(StarxUser... users) {
       super(null);
-      this.users = Map.of(users[0].uuid(), users[0], users[1].uuid(), users[1]);
+      this.users = java.util.Arrays.stream(users)
+          .collect(java.util.stream.Collectors.toUnmodifiableMap(StarxUser::uuid, user -> user));
     }
 
     @Override
@@ -196,12 +261,20 @@ final class AuthServiceSessionIdentityTest {
 
     @Override
     public void updateLastLogin(UUID uuid, Instant lastLogin) {
+      if (this.failLastLogin) {
+        throw new IllegalStateException("login persistence unavailable");
+      }
       this.lastLoginUuid = uuid;
     }
 
     @Override
     public void updatePremium(UUID uuid, boolean premium) {
       // The fixture isolates the session identity boundary.
+    }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return false;
     }
   }
 

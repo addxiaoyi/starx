@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collection;
 import javax.sql.DataSource;
 
 public class JdbcPunishmentRepository {
@@ -44,7 +45,11 @@ public class JdbcPunishmentRepository {
   }
 
   public List<Punishment> findByPlayer(UUID targetId) {
-    return byUuid("target_uuid", targetId);
+    return findByPlayers(List.of(targetId));
+  }
+
+  public List<Punishment> findByPlayers(Collection<UUID> targetIds) {
+    return byUuids("target_uuid", targetIds);
   }
 
   public List<Punishment> findByType(String type) {
@@ -56,18 +61,27 @@ public class JdbcPunishmentRepository {
 
   public List<Punishment> findActive() {
     return this.store.many(
-        "SELECT " + COLUMNS + " FROM starx_punishments WHERE active = TRUE ORDER BY created_at DESC",
-        statement -> { },
+        "SELECT " + COLUMNS + " FROM starx_punishments "
+            + "WHERE active = TRUE AND (expires_at IS NULL OR expires_at > ?) "
+            + "ORDER BY created_at DESC",
+        statement -> statement.setLong(1, System.currentTimeMillis()),
         this::map);
   }
 
   public List<Punishment> findActiveByTargetUuid(UUID targetId) {
+    return findActiveByTargetUuids(List.of(targetId));
+  }
+
+  public List<Punishment> findActiveByTargetUuids(Collection<UUID> targetIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(targetIds);
+    if (ids.isEmpty()) return List.of();
     return this.store.many(
-        "SELECT " + COLUMNS + " FROM starx_punishments WHERE target_uuid = ?"
+        "SELECT " + COLUMNS + " FROM starx_punishments WHERE target_uuid IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ")"
             + " AND active = TRUE AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC",
         statement -> {
-          statement.setString(1, targetId.toString());
-          statement.setLong(2, System.currentTimeMillis());
+          JdbcUuidQuery.bind(statement, ids);
+          statement.setLong(ids.size() + 1, System.currentTimeMillis());
         },
         this::map);
   }
@@ -92,10 +106,13 @@ public class JdbcPunishmentRepository {
         this::map);
   }
 
-  private List<Punishment> byUuid(String column, UUID targetId) {
+  private List<Punishment> byUuids(String column, Collection<UUID> targetIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(targetIds);
+    if (ids.isEmpty()) return List.of();
     return this.store.many(
-        "SELECT " + COLUMNS + " FROM starx_punishments WHERE " + column + " = ? ORDER BY created_at DESC",
-        statement -> statement.setString(1, targetId.toString()),
+        "SELECT " + COLUMNS + " FROM starx_punishments WHERE " + column + " IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ") ORDER BY created_at DESC",
+        statement -> JdbcUuidQuery.bind(statement, ids),
         this::map);
   }
 

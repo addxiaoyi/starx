@@ -109,6 +109,7 @@ public class InMemoryIpSessionStore implements IpSessionStore {
     return minutes > 0 && session.isPresent()
         && deviceFingerprint.equals(session.get().deviceFingerprint())
         && "local".equalsIgnoreCase(session.get().source())
+        && this.clock.millis() - session.get().loginTime() >= 0
         && this.clock.millis() - session.get().loginTime() < minutes * 60_000L;
   }
 

@@ -10,19 +10,55 @@ import io.github.addxiaoyi.starx.velocity.http.JsonHttpExchange;
 import io.github.addxiaoyi.starx.velocity.http.RouteRegistrar;
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
 
 public final class UserOverviewHandler implements AdminHandler {
   private final JdbcUserRepository users;
   private final JdbcBindingRepository bindings;
   private final JdbcPlayerSessionRepository sessions;
+  private final Function<UUID, UUID> canonicalUuidResolver;
+  private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
+  private final Function<String, Optional<StarxUser>> usernameResolver;
 
   public UserOverviewHandler(JdbcUserRepository users, JdbcBindingRepository bindings,
                              JdbcPlayerSessionRepository sessions) {
+    this(users, bindings, sessions, Function.identity(), uuid -> Set.of(uuid),
+        users::findFullByUsername);
+  }
+
+  public UserOverviewHandler(JdbcUserRepository users, JdbcBindingRepository bindings,
+                              JdbcPlayerSessionRepository sessions,
+                              Function<UUID, UUID> canonicalUuidResolver) {
+    this(users, bindings, sessions, canonicalUuidResolver, uuid -> Set.of(uuid),
+        users::findFullByUsername);
+  }
+
+  public UserOverviewHandler(JdbcUserRepository users, JdbcBindingRepository bindings,
+                             JdbcPlayerSessionRepository sessions,
+                             Function<UUID, UUID> canonicalUuidResolver,
+                             Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
+    this(users, bindings, sessions, canonicalUuidResolver, knownMinecraftUuidsResolver,
+        users::findFullByUsername);
+  }
+
+  public UserOverviewHandler(JdbcUserRepository users, JdbcBindingRepository bindings,
+                             JdbcPlayerSessionRepository sessions,
+                             Function<UUID, UUID> canonicalUuidResolver,
+                             Function<UUID, Set<UUID>> knownMinecraftUuidsResolver,
+                             Function<String, Optional<StarxUser>> usernameResolver) {
     this.users = Objects.requireNonNull(users, "users");
     this.bindings = Objects.requireNonNull(bindings, "bindings");
     this.sessions = Objects.requireNonNull(sessions, "sessions");
+    this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+    this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+        knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
+    this.usernameResolver = Objects.requireNonNull(usernameResolver, "usernameResolver");
   }
 
   @Override public void register(RouteRegistrar routes, RouteRegistrar.RouteHandler... authFilter) {
@@ -43,16 +79,25 @@ public final class UserOverviewHandler implements AdminHandler {
       context.status(400).json(Map.of("ok", false, "error", "valid name is required"));
       return;
     }
-    StarxUser user = users.findFullByUsername(name).orElse(null);
+    StarxUser user = usernameResolver.apply(name).orElse(null);
     if (user == null) {
       context.status(404).json(Map.of("ok", false, "error", "user_not_found"));
       return;
     }
 
-    PlayerBinding binding = bindings.findByPlayer(user.uuid()).orElse(null);
-    PlayerSessionSummary session = sessions.summary(user.uuid()).orElse(null);
+    UUID playerUuid = canonicalUuidResolver.apply(user.uuid());
+    Set<UUID> knownUuids = new LinkedHashSet<>(
+        Objects.requireNonNull(this.knownMinecraftUuidsResolver.apply(user.uuid()), "knownUuids"));
+    knownUuids.add(playerUuid);
+    knownUuids.add(user.uuid());
+    PlayerBinding binding = null;
+    for (UUID knownUuid : knownUuids) {
+      binding = bindings.findByPlayer(knownUuid).orElse(null);
+      if (binding != null) break;
+    }
+    PlayerSessionSummary session = sessions.summary(knownUuids).orElse(null);
     Map<String, Object> identity = new LinkedHashMap<>();
-    identity.put("uuid", user.uuid().toString());
+    identity.put("uuid", playerUuid.toString());
     identity.put("username", user.username());
     identity.put("premium", user.premium());
     identity.put("source", value(user.sourceSystem()));
@@ -69,14 +114,14 @@ public final class UserOverviewHandler implements AdminHandler {
     Map<String, Object> linked = new LinkedHashMap<>();
     linked.put("qqBound", binding != null && binding.qqId() != null && !binding.qqId().isBlank());
     linked.put("discordBound", binding != null && binding.discordId() != null && !binding.discordId().isBlank());
-    linked.put("websiteBound", user.externalUserId() != null && !user.externalUserId().isBlank());
+    linked.put("websiteBound", users.hasTrustedWebsiteBinding(user.uuid(), user.username()));
 
     Map<String, Object> play = new LinkedHashMap<>();
     play.put("totalMillis", session == null ? 0L : session.totalPlaytime());
     play.put("loginCount", session == null ? 0 : session.loginCount());
     play.put("lastServer", session == null ? "" : value(session.lastServer()));
     play.put("lastDisconnect", session == null ? "UNKNOWN" : session.disconnectReason().name());
-    play.put("byServerMillis", sessions.playtimeByServer(user.uuid()));
+    play.put("byServerMillis", sessions.playtimeByServer(knownUuids));
 
     context.status(200).json(Map.of(
         "ok", true,

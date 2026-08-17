@@ -341,6 +341,28 @@ class SkinsRestorerSkinRepositoryTest {
   }
 
   @Test
+  void rejectsAWriteThatCannotBeReadBackFromTheSameApi() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", new PlayerStorage());
+    set(repository, "skinStorage", new SkinStorage());
+
+    assertFalse(repository.trySetSkinData(uuid, "value", "signature"));
+  }
+
+  @Test
+  void acceptsAWriteThatCanBeReadBackFromTheSameApi() throws Exception {
+    SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
+    UUID uuid = UUID.randomUUID();
+    set(repository, "available", true);
+    set(repository, "playerStorage", new PlayerStorage());
+    set(repository, "skinStorage", new PersistingSkinStorage());
+
+    assertTrue(repository.trySetSkinData(uuid, "value", "signature"));
+  }
+
+  @Test
   void keepsProviderAvailableWhenSkinPropertyRejectsCompatibilityProbe() throws Exception {
     SkinsRestorerSkinRepository repository = new SkinsRestorerSkinRepository();
     LegacyPlayerStorage playerStorage = new LegacyPlayerStorage();
@@ -580,6 +602,18 @@ class SkinsRestorerSkinRepositoryTest {
 
     public void removeSkinData(SkinIdentifier identifier) {
       this.clearedIdentifier = identifier;
+    }
+  }
+
+  public static final class PersistingSkinStorage {
+    private SkinProperty saved;
+
+    public Optional<SkinProperty> getSkinDataByIdentifier(SkinIdentifier identifier) {
+      return Optional.ofNullable(this.saved);
+    }
+
+    public void setCustomSkinData(String identifier, SkinProperty property) {
+      this.saved = property;
     }
   }
 

@@ -69,9 +69,17 @@ public record IpSession(
    * 检查是否在指定的小时内
    */
   public boolean isWithinHours(int hours) {
-    long now = System.currentTimeMillis();
-    long expiryTime = loginTime + (hours * 60L * 60L * 1000L);
-    return now < expiryTime;
+    return isWithinMillis(hours, 60L * 60L * 1000L);
+  }
+
+  public boolean isWithinMinutes(int minutes) {
+    return isWithinMillis(minutes, 60L * 1000L);
+  }
+
+  private boolean isWithinMillis(int amount, long unitMillis) {
+    if (amount <= 0) return false;
+    long age = System.currentTimeMillis() - loginTime;
+    return age >= 0 && age < amount * unitMillis;
   }
 
   /**

@@ -8,7 +8,9 @@ public final class BindingStateMachine {
       case CONFIRM -> current == BindingState.SENT ? BindingState.CONFIRMED : null;
       case RELEASE -> current == BindingState.CONFIRMED ? BindingState.SENT : null;
       case CONSUME -> current == BindingState.CONFIRMED ? BindingState.CONSUMED : null;
-      case EXPIRE -> current == BindingState.CREATED || current == BindingState.SENT ? BindingState.EXPIRED : null;
+      case EXPIRE -> current == BindingState.CREATED
+          || current == BindingState.SENT
+          || current == BindingState.CONFIRMED ? BindingState.EXPIRED : null;
       case REVOKE -> current == BindingState.CREATED || current == BindingState.SENT || current == BindingState.CONFIRMED ? BindingState.REVOKED : null;
     };
     if (next == null) throw new IllegalStateException("Invalid binding transition: " + current + " -> " + action);

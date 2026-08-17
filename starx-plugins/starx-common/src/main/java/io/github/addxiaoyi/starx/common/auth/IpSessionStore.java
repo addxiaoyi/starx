@@ -18,6 +18,10 @@
 package io.github.addxiaoyi.starx.common.auth;
 
 import io.github.addxiaoyi.starx.common.model.IpSession;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -37,6 +41,13 @@ public interface IpSessionStore {
    * 查找指定玩家和 IP 的会话记录
    */
   Optional<IpSession> findByUuidAndIp(UUID uuid, String ipAddress);
+
+  default Optional<IpSession> findByUuidAndIp(Collection<UUID> uuids, String ipAddress) {
+    return uuids.stream()
+        .map(uuid -> this.findByUuidAndIp(uuid, ipAddress))
+        .flatMap(Optional::stream)
+        .max(Comparator.comparingLong(IpSession::loginTime));
+  }
 
   /**
    * 检查是否存在有效的 IP 免密记录
@@ -60,9 +71,16 @@ public interface IpSessionStore {
     return this.findByUuidAndIp(uuid, ipAddress)
         .filter(session -> deviceFingerprint.equals(session.deviceFingerprint()))
         .filter(session -> "local".equalsIgnoreCase(session.source()))
-        .map(IpSession::loginTime)
-        .map(loginTime -> System.currentTimeMillis() - loginTime < minutes * 60_000L)
+        .map(session -> session.isWithinMinutes(minutes))
         .orElse(false);
+  }
+
+  default boolean hasRecentSessionMinutes(
+      Collection<UUID> uuids, String ipAddress, String deviceFingerprint, int minutes) {
+    for (UUID uuid : uuids) {
+      if (this.hasRecentSessionMinutes(uuid, ipAddress, deviceFingerprint, minutes)) return true;
+    }
+    return false;
   }
 
   /**
@@ -74,13 +92,32 @@ public interface IpSessionStore {
    */
   java.util.List<IpSession> findRecentSessions(UUID uuid, int hours);
 
+  default List<IpSession> findRecentSessions(Collection<UUID> uuids, int hours) {
+    List<IpSession> sessions = new ArrayList<>();
+    for (UUID uuid : uuids) sessions.addAll(this.findRecentSessions(uuid, hours));
+    return sessions.stream()
+        .sorted(Comparator.comparingLong(IpSession::loginTime).reversed())
+        .toList();
+  }
+
   /**
    * 获取玩家的最新登录会话
    */
   Optional<IpSession> findLatestByUuid(UUID uuid);
 
+  default Optional<IpSession> findLatestByUuid(Collection<UUID> uuids) {
+    return uuids.stream()
+        .map(this::findLatestByUuid)
+        .flatMap(Optional::stream)
+        .max(Comparator.comparingLong(IpSession::loginTime));
+  }
+
   /**
    * 删除玩家的所有 IP 会话记录
    */
   void deleteByUuid(UUID uuid);
+
+  default void deleteByUuid(Collection<UUID> uuids) {
+    for (UUID uuid : uuids) this.deleteByUuid(uuid);
+  }
 }

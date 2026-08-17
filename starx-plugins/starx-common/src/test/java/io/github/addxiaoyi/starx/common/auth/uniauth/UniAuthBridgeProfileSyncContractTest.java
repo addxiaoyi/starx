@@ -13,9 +13,28 @@ class UniAuthBridgeProfileSyncContractTest {
       throws Exception {
     String source = Files.readString(locateSource(), StandardCharsets.UTF_8);
 
-    assertTrue(source.contains("profileForLogin(user.username()).thenApply"));
+    assertTrue(source.contains("profileForLogin(username).thenApply"));
     assertTrue(source.contains("synchronizeProfile(user.uuid(), user, profile)"));
     assertTrue(source.contains("return new BridgeResult(true, \"Login successful (local)\", user)"));
+  }
+
+  @Test
+  void localProfileSyncValidatesTheProfileAgainstThePersistedAccount() throws Exception {
+    String source = Files.readString(locateSource(), StandardCharsets.UTF_8);
+    int start = source.indexOf("private CompletableFuture<BridgeResult> authenticateLocally");
+    int end = source.indexOf("private CompletableFuture<UniAuthClient.PlayerProfileResponse>", start);
+
+    assertTrue(start >= 0 && end > start);
+    assertTrue(source.substring(start, end).contains("isProfileIdentityCompatible"));
+  }
+
+  @Test
+  void localProfileSyncUsesTheCurrentConnectionUuidForAliasValidation() throws Exception {
+    String source = Files.readString(locateSource(), StandardCharsets.UTF_8);
+    int authenticate = source.indexOf("authenticateLocally(existing.get(), password)");
+
+    assertTrue(authenticate < 0);
+    assertTrue(source.contains("authenticateLocally(uuid, username, existing.get(), password)"));
   }
 
   @Test
@@ -24,6 +43,16 @@ class UniAuthBridgeProfileSyncContractTest {
 
     assertTrue(source.contains("login.requiresLocalMigration() && existing.isEmpty()"));
     assertTrue(source.contains("邮箱未验证账号只能迁移已有本地档案"));
+  }
+
+  @Test
+  void failedProfileSyncRestoresOnlyItsOwnPasswordMigration() throws Exception {
+    String source = Files.readString(locateSource(), StandardCharsets.UTF_8);
+    int start = source.indexOf("private BridgeResult migrateExisting");
+    int end = source.indexOf("private BridgeResult createFromUniAuth", start);
+
+    assertTrue(start >= 0 && end > start);
+    assertTrue(source.substring(start, end).contains("restorePasswordMigrationIfCurrent"));
   }
 
   private static Path locateSource() {

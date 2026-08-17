@@ -1,14 +1,19 @@
 package io.github.addxiaoyi.starx.common.auth.uniauth;
 
 import io.github.addxiaoyi.starx.common.crypto.PasswordHasher;
+import io.github.addxiaoyi.starx.common.auth.EmailAddress;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 import io.github.addxiaoyi.starx.common.model.StarxUser;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -19,6 +24,8 @@ public final class UniAuthBridge {
   private final UniAuthConfig config;
   private final UniAuthClient client;
   private final JdbcUserRepository userRepository;
+  private volatile Function<UUID, Set<UUID>> minecraftIdentityResolver = uuid -> Set.of(uuid);
+  private volatile Function<String, Optional<StarxUser>> usernameResolver;
 
   public UniAuthBridge(
       UniAuthConfig config,
@@ -27,6 +34,15 @@ public final class UniAuthBridge {
     this.config = Objects.requireNonNull(config, "config");
     this.client = Objects.requireNonNull(client, "client");
     this.userRepository = Objects.requireNonNull(userRepository, "userRepository");
+    this.usernameResolver = userRepository::findFullByUsername;
+  }
+
+  public void bindMinecraftIdentityResolver(Function<UUID, Set<UUID>> resolver) {
+    this.minecraftIdentityResolver = Objects.requireNonNull(resolver, "resolver");
+  }
+
+  public void bindUsernameResolver(Function<String, Optional<StarxUser>> resolver) {
+    this.usernameResolver = Objects.requireNonNull(resolver, "resolver");
   }
 
   public CompletableFuture<BridgeResult> authenticate(
@@ -35,7 +51,7 @@ public final class UniAuthBridge {
       String password) {
     Optional<StarxUser> existing = resolveAccount(uuid, username);
     if (existing.isPresent() && hasLocalPassword(existing.get())) {
-      return authenticateLocally(existing.get(), password);
+      return authenticateLocally(uuid, username, existing.get(), password);
     }
 
     return client.login(username, password).thenCompose(login -> {
@@ -52,20 +68,79 @@ public final class UniAuthBridge {
             "邮箱未验证账号只能迁移已有本地档案",
             null));
       }
-      return profileForLogin(username).thenApply(profile -> existing.isPresent()
-          ? migrateExisting(existing.get(), username, password, profile)
-          : createFromUniAuth(uuid, username, password, login, profile));
+      return profileForLogin(username).thenApply(profile -> {
+        StarxUser account = existing.orElse(null);
+        UniAuthClient.PlayerProfileResponse identity = profile == null ? login.profile() : profile;
+        if (!isProfileIdentityCompatible(uuid, username, account, identity)) {
+          return new BridgeResult(false, "UniAuth \u8fd4\u56de\u7684\u8eab\u4efd\u4e0e\u5f53\u524d\u73a9\u5bb6\u4e0d\u4e00\u81f4", null);
+        }
+        return existing.isPresent()
+            ? migrateExisting(existing.get(), username, password, profile)
+            : createFromUniAuth(uuid, username, password, login, profile);
+      });
     });
   }
 
+  static boolean isProfileIdentityCompatible(
+      UUID connectionUuid,
+      String username,
+      StarxUser existing,
+      UniAuthClient.PlayerProfileResponse profile) {
+    if (profile == null) {
+      return existing != null;
+    }
+    String profileUsername = clean(profile.username());
+    String profileUuid = clean(profile.uuid());
+    if (profileUsername == null && profileUuid == null) {
+      return existing != null;
+    }
+    if (profileUsername != null && (username == null
+        || !profileUsername.equalsIgnoreCase(username))) {
+      return false;
+    }
+    if (profileUuid == null) {
+      return true;
+    }
+    try {
+      UUID remoteUuid = UUID.fromString(profileUuid);
+      return remoteUuid.equals(connectionUuid)
+          || existing != null && remoteUuid.equals(existing.uuid());
+    } catch (IllegalArgumentException ignored) {
+      return false;
+    }
+  }
+
+  static boolean hasProfileIdentity(UniAuthClient.PlayerProfileResponse profile) {
+    return profile != null
+        && (clean(profile.username()) != null || clean(profile.uuid()) != null);
+  }
+
+  static boolean isOfflineUuidAlias(UUID connectionUuid, String username, StarxUser account) {
+    if (connectionUuid == null || username == null || username.isBlank() || account == null
+        || !username.equalsIgnoreCase(account.username())) {
+      return false;
+    }
+    UUID offlineUuid = UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + account.username()).getBytes(StandardCharsets.UTF_8));
+    return offlineUuid.equals(account.uuid()) && offlineUuid.equals(connectionUuid);
+  }
+
   private CompletableFuture<BridgeResult> authenticateLocally(
+      UUID connectionUuid,
+      String username,
       StarxUser user,
       String password) {
     if (!PasswordHasher.verify(password, user.passwordHash())) {
       return CompletableFuture.completedFuture(
           new BridgeResult(false, "Invalid password", null));
     }
-    return profileForLogin(user.username()).thenApply(profile -> {
+    return profileForLogin(username).thenApply(profile -> {
+      if (profile != null && !hasProfileIdentity(profile)) {
+        return new BridgeResult(true, "Login successful (local)", user);
+      }
+      if (!isProfileIdentityCompatible(connectionUuid, username, user, profile)) {
+        return new BridgeResult(false, "UniAuth 返回的身份与当前玩家不一致", null);
+      }
       try {
         synchronizeProfile(user.uuid(), user, profile);
         StarxUser updated = userRepository.findFullByUuid(user.uuid()).orElse(user);
@@ -108,15 +183,23 @@ public final class UniAuthBridge {
       String username,
       String password,
       UniAuthClient.PlayerProfileResponse profile) {
+    String migratedPasswordHash = PasswordHasher.hash(password);
     try {
       UUID targetUuid = existing.uuid();
       userRepository.markPasswordMigrated(
-          targetUuid, PasswordHasher.hash(password), Instant.now());
+          targetUuid, migratedPasswordHash, Instant.now());
       synchronizeProfile(targetUuid, existing, profile);
       StarxUser updated = userRepository.findFullByUuid(targetUuid).orElse(existing);
       LOGGER.log(Level.INFO, "User {0} migrated from UniAuth to local auth", username);
       return new BridgeResult(true, "Login successful (migrated from UniAuth)", updated);
     } catch (Exception exception) {
+      try {
+        userRepository.restorePasswordMigrationIfCurrent(
+            existing.uuid(), migratedPasswordHash, existing.passwordHash(),
+            existing.migrationState(), existing.passwordMigratedAt());
+      } catch (RuntimeException rollbackFailure) {
+        exception.addSuppressed(rollbackFailure);
+      }
       LOGGER.log(Level.WARNING,
           "Failed to migrate user " + username + " to local auth", exception);
       return new BridgeResult(
@@ -136,7 +219,7 @@ public final class UniAuthBridge {
     try {
       UniAuthConfig.ProfileSyncConfig sync = config.profileSync();
       String email = sync.enabled() && sync.syncEmail() && profile != null
-          ? clean(profile.email()) : clean(login.email());
+          ? normalizeProfileEmail(profile.email()) : normalizeProfileEmail(login.email());
       String externalUserId =
           sync.enabled() && sync.syncExternalUserId() && profile != null
               ? clean(profile.externalUserId()) : clean(login.userId());
@@ -166,7 +249,7 @@ public final class UniAuthBridge {
           false);
       userRepository.create(newUser);
       LOGGER.log(Level.INFO, "User {0} created from UniAuth", username);
-      return new BridgeResult(true, "Login successful (created from UniAuth)", newUser);
+      return new BridgeResult(true, "Login successful (created from UniAuth)", newUser, false, true);
     } catch (Exception exception) {
       LOGGER.log(Level.WARNING,
           "Failed to create user " + username + " from UniAuth", exception);
@@ -185,33 +268,47 @@ public final class UniAuthBridge {
     if (profile == null) {
       return;
     }
+    if (!hasProfileIdentity(profile)) {
+      LOGGER.log(Level.WARNING,
+          "Skipping UniAuth profile synchronization for {0}: player identity is missing",
+          existing.username());
+      return;
+    }
     UniAuthConfig.ProfileSyncConfig sync = config.profileSync();
     if (!sync.enabled()) {
       return;
     }
 
-    if (sync.syncEmail()) {
-      String remoteEmail = clean(profile.email());
-      String localEmail = clean(existing.email());
-      if (remoteEmail != null
+    String remoteEmail = normalizeProfileEmail(profile.email());
+    String localEmail = clean(existing.email());
+    boolean updateEmail = sync.syncEmail()
+        && remoteEmail != null
         && (localEmail == null || sync.overwriteLocalValues())
-        && !remoteEmail.equalsIgnoreCase(Objects.requireNonNullElse(localEmail, ""))) {
-        if (!userRepository.tryUpdateEmail(uuid, remoteEmail)) {
+        && !remoteEmail.equalsIgnoreCase(Objects.requireNonNullElse(localEmail, ""));
+    String remoteId = clean(profile.externalUserId());
+    String localId = clean(existing.externalUserId());
+    boolean updateExternalId = sync.syncExternalUserId()
+        && remoteId != null
+        && (localId == null || sync.overwriteLocalValues());
+    if (updateEmail || updateExternalId) {
+      try {
+        userRepository.synchronizeProfile(
+            uuid,
+            updateEmail ? remoteEmail : existing.email(),
+            updateExternalId ? remoteId : localId,
+            sync.sourceSystem(),
+            updateEmail);
+      } catch (JdbcUserRepository.ExternalIdentityConflictException conflict) {
+        if (updateEmail && !updateExternalId) {
           LOGGER.log(Level.WARNING,
               "UniAuth email synchronization skipped for {0}: email belongs to another user",
               existing.username());
+          return;
         }
+        throw conflict;
       }
-    }
-
-    if (sync.syncExternalUserId()) {
-      String remoteId = clean(profile.externalUserId());
-      String localId = clean(existing.externalUserId());
-      if (remoteId != null && (localId == null || sync.overwriteLocalValues())) {
-        userRepository.updateExternalIdentity(uuid, remoteId, sync.sourceSystem());
-      } else if (remoteId != null && remoteId.equals(localId)) {
+    } else if (remoteId != null && remoteId.equals(localId)) {
       userRepository.updateSourceSystem(uuid, sync.sourceSystem());
-      }
     }
   }
 
@@ -221,6 +318,16 @@ public final class UniAuthBridge {
     }
     String normalized = value.trim();
     return normalized.isBlank() ? null : normalized;
+  }
+
+  static String normalizeProfileEmail(String value) {
+    String email = clean(value);
+    if (email == null) return null;
+    try {
+      return EmailAddress.normalize(email);
+    } catch (IllegalArgumentException error) {
+      return null;
+    }
   }
 
   private static boolean hasLocalPassword(StarxUser user) {
@@ -233,10 +340,34 @@ public final class UniAuthBridge {
     if (byUuid.isPresent()) {
       return byUuid;
     }
+    for (UUID knownUuid : knownMinecraftUuids(uuid)) {
+      if (knownUuid.equals(uuid)) {
+        continue;
+      }
+      Optional<StarxUser> byAlias = userRepository.findFullByUuid(knownUuid);
+      if (byAlias.isPresent()) {
+        return byAlias;
+      }
+    }
     if (username == null || username.isBlank()) {
       return Optional.empty();
     }
-    return userRepository.findFullByUsername(username);
+    return usernameResolver.apply(username)
+        .filter(account -> isOfflineUuidAlias(uuid, username, account)
+            || knownMinecraftUuids(uuid).contains(account.uuid()));
+  }
+
+  private Set<UUID> knownMinecraftUuids(UUID requestedUuid) {
+    Set<UUID> resolved = this.minecraftIdentityResolver.apply(requestedUuid);
+    if (resolved == null || resolved.isEmpty()) {
+      return Set.of(requestedUuid);
+    }
+    LinkedHashSet<UUID> known = new LinkedHashSet<>();
+    known.add(requestedUuid);
+    for (UUID uuid : resolved) {
+      known.add(Objects.requireNonNull(uuid, "resolved uuid"));
+    }
+    return Set.copyOf(known);
   }
 
   private static String safeMessage(Throwable throwable) {
@@ -253,9 +384,18 @@ public final class UniAuthBridge {
       boolean success,
       String message,
       StarxUser user,
-      boolean serviceUnavailable) {
+      boolean serviceUnavailable,
+      boolean provisionedAccount) {
     public BridgeResult(boolean success, String message, StarxUser user) {
-      this(success, message, user, false);
+      this(success, message, user, false, false);
+    }
+
+    public BridgeResult(
+        boolean success,
+        String message,
+        StarxUser user,
+        boolean serviceUnavailable) {
+      this(success, message, user, serviceUnavailable, false);
     }
   }
 }

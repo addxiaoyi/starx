@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import io.github.addxiaoyi.starx.common.crypto.PasswordHasher;
 import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 import io.github.addxiaoyi.starx.common.event.LocalEventBus;
+import io.github.addxiaoyi.starx.common.model.StarxUser;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -47,6 +48,34 @@ final class AuthServiceTotpEnableTest {
     private RejectingRepository(UUID playerId) {
       super(null);
       this.playerId = playerId;
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUuid(UUID uuid) {
+      if (!this.playerId.equals(uuid)) {
+        return Optional.empty();
+      }
+      return Optional.of(new StarxUser(
+          this.playerId,
+          "totp-user",
+          null,
+          this.passwordHash,
+          null,
+          false,
+          Instant.now(),
+          null,
+          null,
+          List.of(),
+          null,
+          "local",
+          "completed",
+          null,
+          null,
+          null,
+          null,
+          0L,
+          null,
+          false));
     }
 
     @Override

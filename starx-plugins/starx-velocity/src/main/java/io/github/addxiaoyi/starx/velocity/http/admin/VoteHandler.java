@@ -4,6 +4,7 @@
 package io.github.addxiaoyi.starx.velocity.http.admin;
 
 import io.github.addxiaoyi.starx.common.database.JdbcVoteRepository;
+import io.github.addxiaoyi.starx.common.database.VoteAlreadyCastException;
 import io.github.addxiaoyi.starx.common.model.StaffVote;
 import io.github.addxiaoyi.starx.velocity.http.JsonHttpExchange;
 import io.github.addxiaoyi.starx.velocity.http.RouteRegistrar;
@@ -13,13 +14,27 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
+import java.util.function.Function;
 
 public final class VoteHandler
 implements AdminHandler {
     private final JdbcVoteRepository repo;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
     public VoteHandler(JdbcVoteRepository repo) {
+        this(repo, uuid -> uuid, uuid -> Set.of(uuid));
+    }
+
+    public VoteHandler(
+        JdbcVoteRepository repo,
+        Function<UUID, UUID> canonicalUuidResolver,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.repo = Objects.requireNonNull(repo, "repo");
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     @Override
@@ -61,11 +76,19 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", "vote must be YES or NO"));
             return;
         }
-        if (this.repo.hasVoted(req.voteId, req.voterUuid)) {
+        if (this.repo.hasVoted(req.voteId, this.knownMinecraftUuidsResolver.apply(req.voterUuid))) {
             ctx.status(409).json(Map.of("error", "Already voted"));
             return;
         }
-        this.repo.castVote(req.voteId, req.voterUuid, "YES".equalsIgnoreCase(req.vote));
+        try {
+            this.repo.castVote(
+                req.voteId,
+                this.canonicalUuidResolver.apply(req.voterUuid),
+                "YES".equalsIgnoreCase(req.vote));
+        } catch (VoteAlreadyCastException error) {
+            ctx.status(409).json(Map.of("error", "Already voted"));
+            return;
+        }
         ctx.status(200).json(Map.of("success", true));
     }
 

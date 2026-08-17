@@ -14,7 +14,7 @@ class CrossDeviceApprovalHandlerTest {
         new CrossDeviceApprovalService(), "https://star-web.top");
 
     Map<String, Object> response = handler.create(
-        UUID.randomUUID().toString(), "Alex", "bind_email");
+        UUID.randomUUID().toString(), "Alex", "bind_email", "Player@Example.com");
 
     assertEquals(true, response.get("ok"));
     assertEquals("BIND_EMAIL", response.get("action"));
@@ -22,6 +22,18 @@ class CrossDeviceApprovalHandlerTest {
         String.valueOf(response.get("url")).startsWith("https://star-web.top/minecraft/approve?token="));
     org.junit.jupiter.api.Assertions.assertTrue(
         String.valueOf(response.get("url")).endsWith("&action=bind_email"));
+  }
+
+  @Test
+  void rejectsEmailApprovalWithoutTheEmailBoundToTheChallenge() {
+    CrossDeviceApprovalHandler handler = new CrossDeviceApprovalHandler(
+        new CrossDeviceApprovalService(), "https://star-web.top");
+
+    Map<String, Object> response = handler.create(
+        UUID.randomUUID().toString(), "Alex", "bind_email");
+
+    assertEquals(false, response.get("ok"));
+    assertEquals("invalid_request", response.get("error"));
   }
 
   @Test

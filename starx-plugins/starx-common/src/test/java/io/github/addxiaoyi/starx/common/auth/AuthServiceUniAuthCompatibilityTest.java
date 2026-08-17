@@ -21,7 +21,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -33,7 +35,7 @@ class AuthServiceUniAuthCompatibilityTest {
 
   @Test
   void localPasswordWinsWhenImportedAccountStillHasPendingMigration() {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("PendingUser");
     InMemoryUsers users = new InMemoryUsers(user(accountUuid, "PendingUser", "pending"));
     UniAuthConfig config = config();
     UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
@@ -49,7 +51,7 @@ class AuthServiceUniAuthCompatibilityTest {
   @NullSource
   @ValueSource(strings = {"pending", "legacy", "unknown"})
   void localPasswordWinsForAnyMigrationStateWhenHashIsPresent(String migrationState) {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("StateUser");
     InMemoryUsers users = new InMemoryUsers(user(accountUuid, "StateUser", migrationState));
     UniAuthConfig config = config();
     UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
@@ -63,14 +65,14 @@ class AuthServiceUniAuthCompatibilityTest {
 
   @Test
   void localLoginUsesTheCurrentConnectionUuidWhenStoredIdentityDiffers() throws Exception {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("PremiumUser");
     UUID connectionUuid = UUID.randomUUID();
     InMemoryUsers users = new InMemoryUsers(user(accountUuid, "PremiumUser", "completed"));
     UniAuthConfig config = config();
     UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
     SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
     AuthLease lease = AuthLease.create();
-    InetAddress address = InetAddress.getLoopbackAddress();
+    InetAddress address = InetAddress.getByName("203.0.113.9");
     try {
       assertTrue(sessions.open(connectionUuid, "PremiumUser", address, "device-a", lease) != null);
       AuthService auth = new AuthService(
@@ -80,6 +82,7 @@ class AuthServiceUniAuthCompatibilityTest {
           config,
           bridge,
           new InMemoryIpSessionStore());
+      auth.bindMinecraftIdentityResolver(ignored -> Set.of(accountUuid, connectionUuid));
 
       AuthResult result = auth.login(
           lease,
@@ -99,8 +102,345 @@ class AuthServiceUniAuthCompatibilityTest {
   }
 
   @Test
+  void bridgeCreatedAccountIsRemovedWhenIdentityPersistenceFails() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "NewBridgeUser";
+    MutableUsers users = new MutableUsers();
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getLoopbackAddress();
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "device-a", lease) != null);
+      AuthService auth = new AuthService(
+          users,
+          new LocalEventBus(),
+          sessions,
+          config,
+          bridge,
+          new InMemoryIpSessionStore());
+      auth.bindMinecraftIdentityObserver((uuid, name, source) -> {
+        throw new IllegalStateException("identity store unavailable");
+      });
+
+      AuthResult result = auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "device-a");
+
+      assertFalse(result.success());
+      assertTrue(users.findFullByUuid(connectionUuid).isEmpty());
+      assertEquals(AuthSession.State.GUEST, sessions.get(connectionUuid, lease).orElseThrow().state());
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void bridgeCreatedAccountIsRemovedWhenPendingAuthenticationIsCancelled() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "PendingBridgeUser";
+    MutableUsers users = new MutableUsers();
+    users.websiteBinding = true;
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getByName("203.0.113.9");
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "new-device", lease) != null);
+      AuthService auth = new AuthService(
+          users,
+          new LocalEventBus(),
+          sessions,
+          config,
+          bridge,
+          new InMemoryIpSessionStore());
+      auth.bindWebLoginApprovalGateway((uuid, name, activeLease) -> "https://example.test/approve");
+
+      AuthResult result = auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "new-device");
+
+      assertTrue(result.success());
+      assertEquals(AuthSession.State.WEB_APPROVAL_PENDING, result.state());
+      assertTrue(users.findFullByUuid(connectionUuid).isPresent());
+      assertTrue(auth.cancelAuthentication(connectionUuid, lease));
+      assertTrue(users.findFullByUuid(connectionUuid).isEmpty());
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void bridgeCreatedAccountIsRemovedWhenAuthenticationSessionExpires() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "ExpiredBridgeUser";
+    MutableUsers users = new MutableUsers();
+    users.websiteBinding = true;
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    java.util.concurrent.atomic.AtomicReference<Instant> now =
+        new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), now::get);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getByName("203.0.113.9");
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "new-device", lease) != null);
+      AuthService auth = new AuthService(
+          users,
+          new LocalEventBus(),
+          sessions,
+          config,
+          bridge,
+          new InMemoryIpSessionStore());
+      auth.bindWebLoginApprovalGateway((uuid, name, activeLease) -> "https://example.test/approve");
+
+      AuthResult result = auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "new-device");
+
+      assertTrue(result.success());
+      assertTrue(users.findFullByUuid(connectionUuid).isPresent());
+      now.set(now.get().plus(Duration.ofMinutes(6)));
+      assertTrue(sessions.get(connectionUuid).isEmpty());
+      assertTrue(users.findFullByUuid(connectionUuid).isEmpty());
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void bridgeCreatedAccountIsRemovedWhenAuthenticationSessionsShutdown() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "ShutdownBridgeUser";
+    MutableUsers users = new MutableUsers();
+    users.websiteBinding = true;
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getByName("203.0.113.9");
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "new-device", lease) != null);
+      AuthService auth = new AuthService(
+          users,
+          new LocalEventBus(),
+          sessions,
+          config,
+          bridge,
+          new InMemoryIpSessionStore());
+      auth.bindWebLoginApprovalGateway((uuid, name, activeLease) -> "https://example.test/approve");
+
+      AuthResult result = auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "new-device");
+
+      assertTrue(result.success());
+      assertTrue(users.findFullByUuid(connectionUuid).isPresent());
+      sessions.shutdown();
+      assertTrue(users.findFullByUuid(connectionUuid).isEmpty());
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void failedProvisionedAccountCleanupIsRetriedOnTheNextConnection() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "RetryBridgeUser";
+    MutableUsers users = new MutableUsers();
+    users.websiteBinding = true;
+    users.failNextDelete = true;
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getByName("203.0.113.9");
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "device-a", lease) != null);
+      AuthService auth = new AuthService(
+          users,
+          new LocalEventBus(),
+          sessions,
+          config,
+          bridge,
+          new InMemoryIpSessionStore());
+      auth.bindWebLoginApprovalGateway((uuid, name, activeLease) -> "https://example.test/approve");
+
+      AuthResult result = auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "device-a");
+
+      assertTrue(result.success());
+      assertTrue(auth.cancelAuthentication(connectionUuid, lease));
+      assertTrue(users.findFullByUuid(connectionUuid).isPresent());
+      AuthLease replacement = AuthLease.create();
+      assertTrue(auth.openConnection(replacement, connectionUuid, username, address, "device-a"));
+      assertTrue(users.findFullByUuid(connectionUuid).isEmpty());
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void authenticatedBridgeAccountIsRemovedWhenRouteIsCancelledBeforeCommit() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "RouteAbortBridgeUser";
+    MutableUsers users = new MutableUsers();
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getLoopbackAddress();
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "device-a", lease) != null);
+      AuthService auth = new AuthService(
+          users, new LocalEventBus(), sessions, config, bridge, new InMemoryIpSessionStore());
+
+      assertTrue(auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "device-a").success());
+      assertTrue(users.findFullByUuid(connectionUuid).isPresent());
+
+      auth.logout(connectionUuid);
+
+      assertTrue(users.findFullByUuid(connectionUuid).isEmpty());
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void failedIdentityCleanupIsRetriedWithIdentityRollback() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "RetryIdentityBridgeUser";
+    MutableUsers users = new MutableUsers();
+    users.failNextDelete = true;
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getLoopbackAddress();
+    java.util.concurrent.atomic.AtomicInteger rollbackCalls = new java.util.concurrent.atomic.AtomicInteger();
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "device-a", lease) != null);
+      AuthService auth = new AuthService(
+          users,
+          new LocalEventBus(),
+          sessions,
+          config,
+          bridge,
+          new InMemoryIpSessionStore());
+      auth.bindMinecraftIdentityObserver((uuid, name, source) -> {
+        throw new IllegalStateException("identity persistence unavailable");
+      });
+      auth.bindMinecraftIdentityRollback(uuid -> {
+        if (rollbackCalls.incrementAndGet() == 1) {
+          throw new IllegalStateException("identity delete unavailable");
+        }
+      });
+
+      AuthResult result = auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "device-a");
+
+      assertFalse(result.success());
+      assertTrue(users.findFullByUuid(connectionUuid).isPresent());
+      AuthLease replacement = AuthLease.create();
+      assertTrue(auth.openConnection(replacement, connectionUuid, username, address, "device-a"));
+      assertTrue(users.findFullByUuid(connectionUuid).isEmpty());
+      assertEquals(2, rollbackCalls.get());
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
+  void replacementConnectionIsRejectedWhileProvisionedCleanupIsUnavailable() throws Exception {
+    UUID connectionUuid = UUID.randomUUID();
+    String username = "BlockedBridgeUser";
+    MutableUsers users = new MutableUsers();
+    users.websiteBinding = true;
+    users.failDeleteAlways = true;
+    HttpServer server = this.startSuccessfulUniAuthServer(username, connectionUuid);
+    UniAuthConfig config = new UniAuthConfig(
+        true,
+        "http://127.0.0.1:" + server.getAddress().getPort() + "/",
+        "test-key",
+        1000,
+        true);
+    UniAuthBridge bridge = new UniAuthBridge(config, new UniAuthClient(config), users);
+    SessionManager sessions = new SessionManager(Duration.ofMinutes(5), Instant::now);
+    AuthLease lease = AuthLease.create();
+    InetAddress address = InetAddress.getByName("203.0.113.9");
+    try {
+      assertTrue(sessions.open(connectionUuid, username, address, "new-device", lease) != null);
+      AuthService auth = new AuthService(
+          users,
+          new LocalEventBus(),
+          sessions,
+          config,
+          bridge,
+          new InMemoryIpSessionStore());
+      auth.bindWebLoginApprovalGateway((uuid, name, activeLease) -> "https://example.test/approve");
+      assertTrue(auth.login(
+          lease, connectionUuid, username, PASSWORD, null, address, "new-device").success());
+      assertTrue(auth.cancelAuthentication(connectionUuid, lease));
+
+      assertFalse(auth.openConnection(
+          AuthLease.create(), connectionUuid, username, address, "new-device"));
+    } finally {
+      server.stop(0);
+      sessions.shutdown();
+    }
+  }
+
+  @Test
   void uniauthPasswordStillRequiresTotpForAHighRiskConnection() throws Exception {
-    UUID accountUuid = UUID.randomUUID();
+    UUID accountUuid = offlineUuid("RemoteUser");
     UUID connectionUuid = UUID.randomUUID();
     String secret = TotpGenerator.generateSecret();
     InMemoryUsers users = new InMemoryUsers(
@@ -126,6 +466,7 @@ class AuthServiceUniAuthCompatibilityTest {
           config,
           bridge,
           new InMemoryIpSessionStore());
+      auth.bindMinecraftIdentityResolver(ignored -> Set.of(accountUuid, connectionUuid));
 
       AuthResult passwordResult = auth.login(
           lease,
@@ -224,6 +565,10 @@ class AuthServiceUniAuthCompatibilityTest {
   }
 
   private HttpServer startSuccessfulUniAuthServer() throws Exception {
+    return this.startSuccessfulUniAuthServer(null, null);
+  }
+
+  private HttpServer startSuccessfulUniAuthServer(String username, UUID uuid) throws Exception {
     var keyPairGenerator = KeyPairGenerator.getInstance("RSA");
     keyPairGenerator.initialize(2048);
     String publicKey = Base64.getEncoder().encodeToString(
@@ -237,7 +582,11 @@ class AuthServiceUniAuthCompatibilityTest {
       }
     });
     server.createContext("/login", exchange -> {
-      byte[] body = "{\"code\":200,\"data\":{}}".getBytes(StandardCharsets.UTF_8);
+      String data = username == null
+          ? "{}"
+          : "{\"username\":\"" + username + "\",\"uuid\":\"" + uuid + "\"}";
+      byte[] body = ("{\"code\":200,\"data\":" + data + "}")
+          .getBytes(StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(200, body.length);
       try (var output = exchange.getResponseBody()) {
         output.write(body);
@@ -255,6 +604,11 @@ class AuthServiceUniAuthCompatibilityTest {
         100,
         true,
         UniAuthConfig.ProfileSyncConfig.defaults());
+  }
+
+  private static UUID offlineUuid(String username) {
+    return UUID.nameUUIDFromBytes(
+        ("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
   }
 
   private static StarxUser user(UUID uuid, String username, String migrationState) {
@@ -329,6 +683,58 @@ class AuthServiceUniAuthCompatibilityTest {
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
       // The remote-login test isolates the authentication decision from persistence details.
     }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return false;
+    }
+  }
+
+  private static final class MutableUsers extends JdbcUserRepository {
+    private final Map<UUID, StarxUser> users = new java.util.concurrent.ConcurrentHashMap<>();
+    private boolean websiteBinding;
+    private boolean failNextDelete;
+    private boolean failDeleteAlways;
+
+    private MutableUsers() {
+      super(null);
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUsername(String username) {
+      return this.users.values().stream()
+          .filter(user -> user.username().equalsIgnoreCase(username))
+          .findFirst();
+    }
+
+    @Override
+    public Optional<StarxUser> findFullByUuid(UUID uuid) {
+      return Optional.ofNullable(this.users.get(uuid));
+    }
+
+    @Override
+    public void create(StarxUser user) {
+      this.users.put(user.uuid(), user);
+    }
+
+    @Override
+    public void delete(UUID uuid) {
+      if (this.failDeleteAlways || this.failNextDelete) {
+        this.failNextDelete = false;
+        throw new IllegalStateException("delete unavailable");
+      }
+      this.users.remove(uuid);
+    }
+
+    @Override
+    public void updateLastLogin(UUID uuid, Instant lastLogin) {
+      // The fixture only tracks whether the bridge-created account is removed.
+    }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return this.websiteBinding;
+    }
   }
 
   private static final class MultipleUsers extends JdbcUserRepository {
@@ -361,6 +767,11 @@ class AuthServiceUniAuthCompatibilityTest {
     @Override
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
       // The fixture does not exercise persistence.
+    }
+
+    @Override
+    public boolean hasTrustedWebsiteBinding(UUID uuid, String username) {
+      return false;
     }
   }
 }

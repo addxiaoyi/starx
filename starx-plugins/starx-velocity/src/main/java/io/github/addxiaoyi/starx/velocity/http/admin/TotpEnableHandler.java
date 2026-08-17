@@ -49,22 +49,38 @@ public final class TotpEnableHandler implements AdminHandler {
 
   private void confirm(JsonHttpExchange ctx) throws Exception {
     Request request = ctx.bodyAsClass(Request.class);
-    respond(ctx, this.auth.confirmTotpEnrollment(uuid(request), request.code));
+    try {
+      respond(ctx, this.auth.confirmTotpEnrollment(uuid(request), request.code));
+    } catch (IllegalArgumentException error) {
+      ctx.status(400).json(Map.of("error", error.getMessage()));
+    }
   }
 
   private void disable(JsonHttpExchange ctx) throws Exception {
     Request request = ctx.bodyAsClass(Request.class);
-    respond(ctx, this.auth.disableTotp(uuid(request), request.password));
+    try {
+      respond(ctx, this.auth.disableTotp(uuid(request), request.password));
+    } catch (IllegalArgumentException error) {
+      ctx.status(400).json(Map.of("error", error.getMessage()));
+    }
   }
 
   private void rotate(JsonHttpExchange ctx) throws Exception {
     Request request = ctx.bodyAsClass(Request.class);
-    respond(ctx, this.auth.rotateRecoveryCodes(uuid(request), request.code));
+    try {
+      respond(ctx, this.auth.rotateRecoveryCodes(uuid(request), request.code));
+    } catch (IllegalArgumentException error) {
+      ctx.status(400).json(Map.of("error", error.getMessage()));
+    }
   }
 
   private static UUID uuid(Request request) {
+    return parseUuid(request == null ? null : request.uuid);
+  }
+
+  static UUID parseUuid(String rawUuid) {
     try {
-      return UUID.fromString(Objects.requireNonNullElse(request.uuid, ""));
+      return UUID.fromString(Objects.requireNonNullElse(rawUuid, ""));
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("uuid is invalid");
     }

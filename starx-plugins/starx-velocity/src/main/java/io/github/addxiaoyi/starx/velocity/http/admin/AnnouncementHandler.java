@@ -13,13 +13,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Set;
+import java.util.function.Function;
 
 public final class AnnouncementHandler
 implements AdminHandler {
     private final JdbcAnnouncementRepository repo;
+    private final Function<UUID, UUID> canonicalUuidResolver;
+    private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
 
     public AnnouncementHandler(JdbcAnnouncementRepository repo) {
+        this(repo, uuid -> uuid, uuid -> Set.of(uuid));
+    }
+
+    public AnnouncementHandler(
+        JdbcAnnouncementRepository repo,
+        Function<UUID, UUID> canonicalUuidResolver,
+        Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
         this.repo = Objects.requireNonNull(repo, "repo");
+        this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
+        this.knownMinecraftUuidsResolver = Objects.requireNonNull(
+            knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
     }
 
     @Override
@@ -63,7 +77,8 @@ implements AdminHandler {
         String player = ctx.queryParam("player");
         if (player != null && !player.isBlank()) {
             try {
-                result = this.repo.findUnreadByPlayer(UUID.fromString(player));
+                UUID playerUuid = UUID.fromString(player);
+                result = this.repo.findUnreadByPlayer(this.knownMinecraftUuidsResolver.apply(playerUuid));
             }
             catch (IllegalArgumentException e) {
                 ctx.status(400).json(Map.of("error", "Invalid UUID format"));
@@ -89,7 +104,10 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", e.getMessage()));
             return;
         }
-        this.repo.markRead(announcementId, req.playerUuid);
+        this.repo.markRead(
+            announcementId,
+            this.canonicalUuidResolver.apply(req.playerUuid),
+            this.knownMinecraftUuidsResolver.apply(req.playerUuid));
         ctx.status(200).json(Map.of("success", true));
     }
 

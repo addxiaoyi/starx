@@ -5,6 +5,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.List;
+import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -59,9 +60,16 @@ public class JdbcVoteRepository {
   }
 
   public List<StaffVote> findByInitiator(UUID initiatorId) {
+    return findByInitiator(List.of(initiatorId));
+  }
+
+  public List<StaffVote> findByInitiator(Collection<UUID> initiatorIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(initiatorIds);
+    if (ids.isEmpty()) return List.of();
     return this.store.many(
-        "SELECT * FROM starx_staff_votes WHERE initiator_uuid = ? ORDER BY created_at DESC",
-        statement -> statement.setString(1, initiatorId.toString()),
+        "SELECT * FROM starx_staff_votes WHERE initiator_uuid IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ") ORDER BY created_at DESC",
+        statement -> JdbcUuidQuery.bind(statement, ids),
         this::map);
   }
 
@@ -87,30 +95,71 @@ public class JdbcVoteRepository {
   }
 
   public void castVote(String voteId, UUID voterId, boolean yes) {
-    this.store.transaction(connection -> {
-      JdbcStore.execute(
-          connection,
-          "INSERT INTO starx_staff_vote_records (vote_id, voter_uuid, vote, voted_at) VALUES (?, ?, ?, ?)",
-          statement -> {
-            statement.setString(1, voteId);
-            statement.setString(2, voterId.toString());
-            statement.setString(3, yes ? "YES" : "NO");
-            statement.setLong(4, System.currentTimeMillis());
-          });
-      String column = yes ? "yes_votes" : "no_votes";
-      JdbcStore.execute(
-          connection,
-          "UPDATE starx_staff_votes SET " + column + " = " + column + " + 1 WHERE id = ?",
-          statement -> statement.setString(1, voteId));
-    });
+    try {
+      this.store.transaction(connection -> {
+        long now = System.currentTimeMillis();
+        int inserted = JdbcStore.execute(
+            connection,
+            "INSERT INTO starx_staff_vote_records (vote_id, voter_uuid, vote, voted_at) "
+                + "SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM starx_staff_votes "
+                + "WHERE id = ? AND status = 'ACTIVE' AND expires_at > ?)",
+            statement -> {
+              statement.setString(1, voteId);
+              statement.setString(2, voterId.toString());
+              statement.setString(3, yes ? "YES" : "NO");
+              statement.setLong(4, now);
+              statement.setString(5, voteId);
+              statement.setLong(6, now);
+            });
+        if (inserted != 1) throw new IllegalStateException("Vote is not active or has expired");
+        String column = yes ? "yes_votes" : "no_votes";
+        int updated = JdbcStore.execute(
+            connection,
+            "UPDATE starx_staff_votes SET " + column + " = " + column + " + 1 "
+                + "WHERE id = ? AND status = 'ACTIVE' AND expires_at > ?",
+            statement -> {
+              statement.setString(1, voteId);
+              statement.setLong(2, now);
+            });
+        if (updated != 1) throw new IllegalStateException("Vote changed before it could be counted");
+      });
+    } catch (RuntimeException error) {
+      if (isUniqueViolation(error)) {
+        throw new VoteAlreadyCastException("Voter has already cast a ballot", error);
+      }
+      throw error;
+    }
+  }
+
+  private static boolean isUniqueViolation(Throwable error) {
+    Throwable current = error;
+    while (current != null) {
+      if (current instanceof java.sql.SQLIntegrityConstraintViolationException) return true;
+      if (current instanceof java.sql.SQLException sql
+          && ("23".equals(sql.getSQLState()) || "23505".equals(sql.getSQLState()))) return true;
+      String message = current.getMessage();
+      if (message != null && message.toLowerCase(java.util.Locale.ROOT).contains("unique constraint")) {
+        return true;
+      }
+      current = current.getCause();
+    }
+    return false;
   }
 
   public boolean hasVoted(String voteId, UUID voterId) {
+    return hasVoted(voteId, List.of(voterId));
+  }
+
+  public boolean hasVoted(String voteId, Collection<UUID> voterIds) {
+    List<UUID> ids = JdbcUuidQuery.distinct(voterIds);
+    if (ids.isEmpty()) return false;
     return this.store.one(
-        "SELECT 1 FROM starx_staff_vote_records WHERE vote_id = ? AND voter_uuid = ?",
+        "SELECT 1 FROM starx_staff_vote_records WHERE vote_id = ? AND voter_uuid IN ("
+            + JdbcUuidQuery.placeholders(ids.size()) + ")",
         statement -> {
           statement.setString(1, voteId);
-          statement.setString(2, voterId.toString());
+          int index = 2;
+          for (UUID id : ids) statement.setString(index++, id.toString());
         },
         rows -> true).isPresent();
   }

@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.velocity.module.auth;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -18,8 +19,10 @@ final class ExternalHandshakeWiringContractTest {
     assertTrue(plugin.contains("externalHandshake"));
     assertTrue(auth.contains("ExternalHandshake externalHandshake"));
     assertTrue(auth.contains("this.externalHandshake.matches(player.getRawVirtualHost().orElse(null))"));
-    assertTrue(auth.contains("\"external-handshake\""));
+    assertTrue(auth.contains("Validated external-handshake"));
     assertTrue(auth.contains("autoLoginTrusted"));
+    assertFalse(auth.contains(
+        "lease, playerId, username, address, \"external-handshake\", false"));
   }
 
   private static Path source(String file) {

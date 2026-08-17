@@ -3,6 +3,7 @@ package io.github.addxiaoyi.starx.velocity.module.proxytools.queue;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -57,14 +58,13 @@ public final class QueueService {
 
   public boolean removeFromQueue(RegisteredServer server, Player player) {
     Bucket bucket = queues.get(serverName(server));
-    return bucket != null && bucket.remove(player.getUniqueId());
+    return bucket != null && bucket.remove(player);
   }
 
   public int removeFromAllQueues(Player player) {
     int removed = 0;
-    UUID playerId = player.getUniqueId();
     for (Bucket bucket : queues.values()) {
-      if (bucket.remove(playerId)) removed++;
+      if (bucket.remove(player)) removed++;
     }
     return removed;
   }
@@ -78,21 +78,20 @@ public final class QueueService {
         Bucket bucket = entry.getValue();
         Player player = bucket.claimNext();
         if (player == null) continue;
-        UUID playerId = player.getUniqueId();
         CompletionStage<Boolean> result;
         try {
           result = connector.connect(player, entry.getKey());
         } catch (RuntimeException error) {
-          bucket.complete(playerId, false);
+          bucket.complete(player, false);
           continue;
         }
         if (result == null) {
-          bucket.complete(playerId, false);
+          bucket.complete(player, false);
           continue;
         }
         dispatched++;
         result.whenComplete((success, error) ->
-            bucket.complete(playerId, error == null && Boolean.TRUE.equals(success)));
+            bucket.complete(player, error == null && Boolean.TRUE.equals(success)));
       }
     } finally {
       this.dispatching.set(false);
@@ -111,33 +110,45 @@ public final class QueueService {
 
   private static final class Bucket {
     private final ConcurrentLinkedDeque<Player> players = new ConcurrentLinkedDeque<>();
-    private final ConcurrentHashMap<UUID, Boolean> members = new ConcurrentHashMap<>();
-    private final java.util.Set<UUID> inFlight = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, Player> members = new HashMap<>();
+    private final Map<UUID, Player> inFlight = new HashMap<>();
 
     synchronized void add(Player player) {
-      if (members.putIfAbsent(player.getUniqueId(), Boolean.TRUE) == null) {
-        players.addLast(player);
+      UUID playerId = player.getUniqueId();
+      Player current = members.get(playerId);
+      if (current == player) return;
+      if (current != null) {
+        players.removeIf(queued -> queued == current);
+        if (inFlight.get(playerId) == current) inFlight.remove(playerId);
       }
+      members.put(playerId, player);
+      players.addLast(player);
     }
 
     synchronized Player claimNext() {
       for (Player player : new ArrayList<>(players)) {
         UUID playerId = player.getUniqueId();
-        if (!members.containsKey(playerId)) continue;
+        if (members.get(playerId) != player) continue;
         if (!player.isActive()) {
-          remove(playerId);
+          remove(player);
           continue;
         }
-        if (inFlight.add(playerId)) return player;
+        if (!inFlight.containsKey(playerId)) {
+          inFlight.put(playerId, player);
+          return player;
+        }
       }
       return null;
     }
 
-    synchronized void complete(UUID playerId, boolean success) {
-      if (!inFlight.remove(playerId)) return;
+    synchronized void complete(Player player, boolean success) {
+      UUID playerId = player.getUniqueId();
+      if (inFlight.get(playerId) != player) return;
+      inFlight.remove(playerId);
       if (!success) return;
-      if (members.remove(playerId) != null) {
-        players.removeIf(player -> player.getUniqueId().equals(playerId));
+      if (members.get(playerId) == player) {
+        members.remove(playerId);
+        players.removeIf(queued -> queued == player);
       }
     }
 
@@ -145,16 +156,18 @@ public final class QueueService {
       Player player = players.pollFirst();
       if (player != null) {
         UUID playerId = player.getUniqueId();
-        members.remove(playerId);
-        inFlight.remove(playerId);
+        if (members.get(playerId) == player) members.remove(playerId);
+        if (inFlight.get(playerId) == player) inFlight.remove(playerId);
       }
       return player;
     }
 
-    synchronized boolean remove(UUID playerId) {
-      inFlight.remove(playerId);
-      if (members.remove(playerId) == null) return false;
-      players.removeIf(player -> player.getUniqueId().equals(playerId));
+    synchronized boolean remove(Player player) {
+      UUID playerId = player.getUniqueId();
+      if (members.get(playerId) != player) return false;
+      members.remove(playerId);
+      if (inFlight.get(playerId) == player) inFlight.remove(playerId);
+      players.removeIf(queued -> queued == player);
       return true;
     }
 
