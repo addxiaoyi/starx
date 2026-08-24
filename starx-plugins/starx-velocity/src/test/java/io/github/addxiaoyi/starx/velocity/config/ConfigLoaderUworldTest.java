@@ -354,7 +354,7 @@ final class ConfigLoaderUworldTest {
         () -> assertEquals(
             Set.of(
                 "schema-version", "auto-config", "api-key", "compatibility", "http", "network-automation", "webhook", "website-sync", "database",
-                "uniauth", "auth", "player-list", "modules", "napcat", "totp", "uworld"),
+                "uniauth", "auth", "player-list", "modules", "napcat", "totp", "uworld", "update"),
             root.keySet()),
         () -> assertEquals(
             Set.of(
