@@ -16,6 +16,12 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   private final Object skinStorage;
   private final Logger logger;
   private final AtomicBoolean failureLogged = new AtomicBoolean();
+  // 中国大陆等受限网络下应设为 false：仅读 SkinsRestorer 本地缓存，不触发 Mojang API。
+  private volatile boolean allowMojangApi = true;
+
+  void setAllowMojangApi(boolean allow) {
+    this.allowMojangApi = allow;
+  }
 
   static SkinsRestorerBackendSkinResolver discover(Logger logger) {
     try {
@@ -112,13 +118,16 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   private Optional<?> tryCurrentApi(UUID uuid, String name) throws ReflectiveOperationException {
     Optional<?> byUuid = null;
     try {
-      // The name overload may call Mojang for UUIDs that are not Mojang profiles.
       byUuid = invokeOptional(this.playerStorage, "getSkinOfPlayer", uuid);
       if (byUuid.isPresent()) {
         return byUuid;
       }
     } catch (NoSuchMethodException ignored) {
       // Fall through to the name lookup exposed by older storage implementations.
+    }
+    // 只有在允许时才尝试名称查询，名称查询会调用 Mojang API。
+    if (!this.allowMojangApi) {
+      return byUuid;
     }
     try {
       return invokeOptional(this.playerStorage, "getSkinForPlayer", uuid, name);

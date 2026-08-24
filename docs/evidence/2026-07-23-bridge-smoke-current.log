@@ -1,0 +1,9 @@
+velocity_sha256=C5CBFC4887B7B3ED228B9AFEEA2092EE81213EB99E6D201B4DFABEB0E648D695
+server_sha256=E0281E5C4193F0EB4AD1DF5B4435C16E318602633160D9D6DC91D318A949FDFE
+Could not resolve the Java child for paper.jar under PID 159260; host tree cleanup remains authoritative
+Could not resolve the Java child for velocity.jar under PID 148152; host tree cleanup remains authoritative
+VELOCITY_LOG=D:\qwq\项目\————————————————————————\starmc-website\tmp\uworld-real-client-probe\runs\20260716-090951-039\bridge-20260723-234701-159-velocity.log
+PAPER_LOG=D:\qwq\项目\————————————————————————\starmc-website\tmp\uworld-real-client-probe\runs\20260716-090951-039\bridge-20260723-234701-159-paper.log
+VELOCITY_SHA256=C5CBFC4887B7B3ED228B9AFEEA2092EE81213EB99E6D201B4DFABEB0E648D695
+SERVER_SHA256=E0281E5C4193F0EB4AD1DF5B4435C16E318602633160D9D6DC91D318A949FDFE
+STARX_BRIDGE_SMOKE=PASS platform=PAPER players=1/4 capability=bridge.v1

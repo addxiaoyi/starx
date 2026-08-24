@@ -1,0 +1,43 @@
+{
+  "name": "starmc-website",
+  "private": true,
+  "version": "0.0.0",
+  "description": "StarMC 网站后端 + Velocity 插件联调（前端独立维护）",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "test": "npm run backend:test && npm run production:test",
+    "production:test": "powershell -NoProfile -ExecutionPolicy Bypass -File ops/production/tests/Production.ControlPlane.Tests.ps1",
+    "production:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File ops/production/Verify-StarXProductionControlPlane.ps1",
+    "production:verify:control": "powershell -NoProfile -ExecutionPolicy Bypass -File ops/production/Verify-StarXProductionControlPlane.ps1 -SkipGradle",
+    "config:write": "node tools/starmc-config-wizard.mjs --write --backend-only",
+    "config:lint": "node tools/starmc-config-lint.mjs --backend-only",
+    "config:doctor": "node tools/starmc-config-doctor.mjs --backend-only",
+    "config:doctor:simple": "node tools/starmc-config-doctor.mjs --write --backend-only",
+    "config:doctor:all": "node tools/starmc-config-doctor.mjs --write",
+    "config:frontend-env": "node tools/starmc-frontend-env.mjs --write",
+    "backend:dev": "npm --prefix 重构/backend run dev:simple",
+    "backend:start": "npm --prefix 重构/backend run start:simple",
+    "backend:verify": "npm --prefix 重构/backend run verify",
+    "backend:doctor": "npm --prefix 重构/backend run doctor:simple",
+    "backend:test": "npm --prefix 重构/backend test",
+    "website:contract:e2e": "npm --prefix 重构/backend run test:plugin-e2e",
+    "plugin:probe": "npm --prefix 重构/backend run probe:bridge",
+    "frontend:dev": "npm --prefix 重构/starmc run dev",
+    "frontend:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-frontend-ascii.ps1 -SkipTests -SkipTypecheck",
+    "frontend:copy-legacy-public": "node tools/copy-legacy-public.mjs",
+    "deploy:build": "node scripts/deploy.mjs",
+    "deploy:frontend": "cd 重构/starmc && npm run build",
+    "deploy:check": "cd 重构/backend && npm test",
+    "frontend:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-frontend-ascii.ps1",
+    "plugin:universal": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/invoke-gradle-ascii.ps1 :starx-plugins:starx-universal:build --console=plain",
+    "plugin:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/invoke-gradle-ascii.ps1 clean test :starx-plugins:starx-api:build :starx-plugins:starx-extension-example:build :starx-plugins:starx-universal:check --console=plain",
+    "verify": "npm run backend:verify && npm run frontend:verify && npm run plugin:verify && npm run production:verify:control",
+    "plugin:api:test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/invoke-gradle-ascii.ps1 :starx-plugins:starx-api:test --console=plain",
+    "plugin:api:publish-local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/invoke-gradle-ascii.ps1 :starx-plugins:starx-api:publishToMavenLocal --console=plain",
+    "plugin:extension-example": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/invoke-gradle-ascii.ps1 :starx-plugins:starx-extension-example:build --console=plain"
+  }
+}

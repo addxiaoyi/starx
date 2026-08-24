@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.github.addxiaoyi.starx.api.dto.SkinDto;
 import io.github.addxiaoyi.starx.api.repository.SkinRepository;
+import io.github.addxiaoyi.starx.website.LruTtlCache;
 import io.github.addxiaoyi.starx.website.PlayerTexture;
 import io.github.addxiaoyi.starx.website.PlayerTextureRecord;
 import io.github.addxiaoyi.starx.website.TextureBlob;
@@ -13,12 +14,8 @@ import io.github.addxiaoyi.starx.website.TextureKind;
 import io.github.addxiaoyi.starx.website.TextureSource;
 import io.github.addxiaoyi.starx.website.WebsiteSyncConfig;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -39,7 +36,6 @@ import java.util.function.Supplier;
 
 final class SkinsRestorerTextureSource implements TextureSource {
   private static final int MAX_PLAYERS = 100_000;
-  private static final int MAX_CACHE_ENTRIES = 2_048;
 
   record PlayerRef(UUID uuid, String name) {
     PlayerRef {
@@ -69,7 +65,7 @@ final class SkinsRestorerTextureSource implements TextureSource {
   private final TextureFetcher fetcher;
   private final Clock clock;
   private final Consumer<String> logger;
-  private final Map<CacheKey, TextureBlob> cache = new ConcurrentHashMap<>();
+  private final LruTtlCache<CacheKey, TextureBlob> cache;
 
   SkinsRestorerTextureSource(
       ProxyServer proxy,
@@ -108,6 +104,8 @@ final class SkinsRestorerTextureSource implements TextureSource {
     this.fetcher = Objects.requireNonNull(fetcher, "fetcher");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.logger = logger == null ? ignored -> { } : logger;
+    // 使用基于 TTL 的 LRU 缓存，避免 "满则清空" 导致的抖动
+    this.cache = new LruTtlCache<>(2048, java.time.Duration.ofHours(1).toMillis());
   }
 
   static List<PlayerRef> mergePlayers(
@@ -194,17 +192,14 @@ final class SkinsRestorerTextureSource implements TextureSource {
 
   private TextureBlob blob(TextureKind kind, URI uri) throws Exception {
     CacheKey key = new CacheKey(kind, uri);
-    TextureBlob cached = this.cache.get(key);
+    TextureBlob cached = this.cache.get(key, System.currentTimeMillis());
     if (cached != null) {
       return cached;
     }
     byte[] bytes = this.fetcher.fetch(uri);
     TextureBlob loaded = new TextureBlob(kind, bytes, sha256(bytes));
-    if (this.cache.size() >= MAX_CACHE_ENTRIES) {
-      this.cache.clear();
-    }
-    TextureBlob previous = this.cache.putIfAbsent(key, loaded);
-    return previous == null ? loaded : previous;
+    this.cache.put(key, loaded, System.currentTimeMillis());
+    return loaded;
   }
 
   static Optional<TextureProfile> parseProfile(SkinDto skin, Instant fallbackUpdatedAt) {
@@ -290,32 +285,19 @@ final class SkinsRestorerTextureSource implements TextureSource {
 
   private static TextureFetcher httpFetcher(WebsiteSyncConfig.Heartbeat heartbeat) {
     Objects.requireNonNull(heartbeat, "heartbeat");
-    HttpClient http = HttpClient.newBuilder()
-        .connectTimeout(heartbeat.connectTimeout())
-        .followRedirects(HttpClient.Redirect.NEVER)
-        .build();
+    // 使用受控的 HTTP 客户端，防止 Worker 线程堆积
+    io.github.addxiaoyi.starx.website.ControlledHttpClientProvider httpProvider =
+        io.github.addxiaoyi.starx.website.ControlledHttpClientProvider.getInstance();
     Duration timeout = heartbeat.requestTimeout();
     return uri -> {
       if (!isAllowedTextureUri(uri)) {
         throw new IOException("Texture URL is not a public HTTP(S) endpoint");
       }
-      HttpRequest request = HttpRequest.newBuilder(uri)
-          .GET()
-          .timeout(timeout)
-          .header("Accept", "image/png")
-          .build();
-      HttpResponse<InputStream> response = http.send(
-          request, HttpResponse.BodyHandlers.ofInputStream());
-      if (response.statusCode() != 200) {
-        response.body().close();
-        throw new IOException("Texture endpoint returned HTTP " + response.statusCode());
-      }
-      try (InputStream body = response.body()) {
-        byte[] bytes = body.readNBytes(TextureBlob.MAX_BYTES + 1);
-        if (bytes.length > TextureBlob.MAX_BYTES) {
-          throw new IOException("Texture exceeds 512 KiB");
-        }
-        return bytes;
+      try {
+        return httpProvider.fetchTexture(uri, timeout);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("Texture fetch interrupted", e);
       }
     };
   }

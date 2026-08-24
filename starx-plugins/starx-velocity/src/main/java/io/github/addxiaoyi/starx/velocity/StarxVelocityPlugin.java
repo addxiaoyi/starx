@@ -51,6 +51,7 @@ import io.github.addxiaoyi.starx.common.identity.JdbcAccountIdentityRepository;
 import io.github.addxiaoyi.starx.uworld.UworldRuntime;
 import io.github.addxiaoyi.starx.velocity.bridge.VelocityBackendBridge;
 import io.github.addxiaoyi.starx.velocity.config.ConfigLoader;
+import io.github.addxiaoyi.starx.velocity.config.UpdateConfig;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import io.github.addxiaoyi.starx.velocity.config.VelocityAutoConfigurator;
 import io.github.addxiaoyi.starx.velocity.database.DatabaseManager;
@@ -154,6 +155,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
     private DefaultStarxService extensionService;
     private Consumer<StarxEvent> extensionEventForwarder;
     private CompatibilityReport compatibilityReport;
+    private volatile io.github.addxiaoyi.starx.common.update.UpdateManager updateManager;
 
     @Inject
     public StarxVelocityPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -599,7 +601,54 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             Map.copyOf(runtimePortReport));
         this.lifecycle.own("network automation", this.networkAutomationService::close);
         this.networkAutomationService.start();
+        this.initializeUpdateManager();
         this.logger.info("StarX Velocity \u521d\u59cb\u5316\u5b8c\u6210");
+    }
+
+    /** 初始化插件自动更新检查器 */
+    private void initializeUpdateManager() {
+        UpdateConfig updateConfig = this.config.update();
+        if (!updateConfig.enabled()) {
+            return;
+        }
+        io.github.addxiaoyi.starx.common.update.RepositoryClient repository;
+        if (updateConfig.isGitHubSource()) {
+            String owner = updateConfig.githubOwner();
+            String repo = updateConfig.githubRepo();
+            if (owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+                this.logger.warning("Update source: GitHub owner/repo not configured");
+                return;
+            }
+            repository = new io.github.addxiaoyi.starx.common.update.GitHubReleasesClient(
+                "starx-update", owner, repo);
+        } else {
+            String group = updateConfig.mavenGroup();
+            String artifact = updateConfig.mavenArtifact();
+            if (group == null || group.isBlank() || artifact == null || artifact.isBlank()) {
+                this.logger.warning("Update source: Maven group/artifact not configured");
+                return;
+            }
+            repository = new io.github.addxiaoyi.starx.common.update.MavenCentralClient(
+                "starx-update", group, artifact);
+        }
+        String currentVersion = this.implementationVersion();
+        this.updateManager = new io.github.addxiaoyi.starx.common.update.UpdateManager(
+            currentVersion, repository,
+            this.dataDirectory.resolve("updates"),
+            this.logger::info);
+        long intervalMinutes = updateConfig.checkInterval().toMinutes();
+        this.proxy.getScheduler().buildTask(this, () -> {
+            io.github.addxiaoyi.starx.common.update.UpdateManager.CheckResult result = this.updateManager.checkAndUpdate();
+            switch (result) {
+                case UPDATE_DOWNLOADED -> this.logger.info(
+                    "StarX update downloaded; restart to apply");
+                case UPDATE_AVAILABLE -> this.logger.info(
+                    "New version " + this.updateManager.latestKnownVersion() + " available");
+                case CHECK_FAILED -> this.logger.fine("Update check failed");
+                default -> { /* UP_TO_DATE, DOWNLOAD_FAILED */ }
+            }
+        }).repeat(java.time.Duration.ofMinutes(intervalMinutes)).schedule();
+        this.lifecycle.own("update manager", () -> this.updateManager = null);
     }
 
     private String implementationVersion() {

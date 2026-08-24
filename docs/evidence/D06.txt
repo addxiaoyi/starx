@@ -1,0 +1,15 @@
+status=PASS
+artifact_sha256=6EA06E607B447E336D2E38C198F963458D824A2C56C393920E2E696CF56ABD12
+case_id=D06
+timestamp=2026-07-20T04:15:49.593+08:00
+velocity_build=606
+java_version=21.0.10
+client_version=1.21.11
+account_type=offline
+initial_server=no previous backend
+expected_target=lobby
+observed_outcome=entered diagnostics before any backend selection; leave transferred to configured lobby; sessions=0
+proxy_log=docs/evidence/D06-20260720-proxy.log
+proxy_log_sha256=D1EB16A7A473BE72EDFA0E3F7AB4E4AF2EFADCF3CA65266065C1F88D41CA0098
+operator=Codex isolated no-previous-server diagnostics probe
+source_run=tmp/uworld-real-client-probe/runs/20260720-041345-695

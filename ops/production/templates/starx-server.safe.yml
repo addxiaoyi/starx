@@ -1,0 +1,12 @@
+node-id: "${NODE_ID}"
+server-type: "${SERVER_TYPE}"
+network:
+  maintenance: false
+bridge:
+  enabled: true
+  heartbeat:
+    enabled: true
+    velocity-url: "${HEALTH_BASE_URL}"
+    api-key: "${API_KEY}"
+    interval-seconds: 15
+    timeout-ms: 4000

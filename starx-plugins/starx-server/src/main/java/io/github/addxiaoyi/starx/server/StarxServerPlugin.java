@@ -243,37 +243,63 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
     if (client == null || currentSession == null) {
       return;
     }
-    BackendHeartbeatExchange.run(
-            client,
-            currentSession,
-            currentSession.statusReport(UUID.randomUUID().toString()),
-            8,
-            command -> {
-              CompletableFuture<Optional<BridgeMessage>> scheduled = new CompletableFuture<>();
-              this.getServer().getGlobalRegionScheduler().run(this, ignored -> {
-                try {
-                  scheduled.complete(command.get());
-                } catch (RuntimeException error) {
-                  scheduled.completeExceptionally(error);
-                }
-              });
-              return scheduled;
-            })
-        .whenComplete((ignored, error) -> {
-          if (error == null) {
-            if (this.heartbeatDegraded.getAndSet(false)) {
-              this.getLogger().info("StarX empty-server heartbeat recovered");
-            }
+    this.publishHeartbeatInternal(client, currentSession);
+  }
+
+  /**
+   * 内部心跳调度：根据 mailbox 积压情况决定是否继续拉取命令。
+   * 当前端有积压消息（queued > 0）时，立即触发下轮心跳，以实现「满缓冲区即推送」。
+   */
+  private void publishHeartbeatInternal(
+      BackendHeartbeatClient client,
+      BackendBridgeSession session
+  ) {
+    client.sendWithBacklog(session.statusReport(UUID.randomUUID().toString()))
+        .whenComplete((reply, error) -> {
+          if (error != null) {
+            this.handleHeartbeatError(error);
             return;
           }
-          this.requestHeartbeatEndpointRefresh();
-          if (this.heartbeatDegraded.compareAndSet(false, true)) {
-            this.getLogger().log(
-                Level.WARNING,
-                "StarX empty-server heartbeat failed; player-carried bridge remains available: {0}",
-                heartbeatFailureMessage(error));
-          }
+          BackendHeartbeatExchange.run(
+              client,
+              session,
+              session.statusReport(UUID.randomUUID().toString()),
+              8,
+              command -> {
+                CompletableFuture<Optional<BridgeMessage>> scheduled = new CompletableFuture<>();
+                this.getServer().getGlobalRegionScheduler().run(this, ignored -> {
+                  try {
+                    scheduled.complete(command.get());
+                  } catch (RuntimeException e) {
+                    scheduled.completeExceptionally(e);
+                  }
+                });
+                return scheduled;
+              })
+              .whenComplete((ignored, exchangeError) -> {
+                if (exchangeError == null) {
+                  if (this.heartbeatDegraded.getAndSet(false)) {
+                    this.getLogger().info("StarX empty-server heartbeat recovered");
+                  }
+                  // 仍有积压（至少 1 条）时，立即触发下轮心跳，实现实时推送
+                  if (reply.hasCommand() && reply.queuedRemaining() > 0) {
+                    this.publishHeartbeatInternal(client, session);
+                  }
+                  return;
+                }
+                this.handleHeartbeatError(exchangeError);
+              });
         });
+  }
+
+  private void handleHeartbeatError(Throwable error) {
+    this.requestHeartbeatEndpointRefresh();
+    if (this.heartbeatDegraded.compareAndSet(false, true)) {
+      this.getLogger().log(
+          Level.WARNING,
+          "StarX empty-server heartbeat failed; player-carried bridge remains available: {0}",
+          heartbeatFailureMessage(error));
+    }
   }
 
   private void requestHeartbeatEndpointRefresh() {

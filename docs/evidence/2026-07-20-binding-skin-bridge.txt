@@ -1,0 +1,37 @@
+timestamp=2026-07-20T10:04:35+08:00
+status=PASS
+velocity_build=606
+java_version=21.0.10
+client_version=1.21.11
+artifact_sha256=82C86F4334E2535D995063830B42E4026AB246C05FFC33D1A8E89D7C83546F92
+installed_sha256=82C86F4334E2535D995063830B42E4026AB246C05FFC33D1A8E89D7C83546F92
+
+binding_username=SkinProbe
+binding_uuid=a77946af-36d5-3cf0-beb8-5b784f8498ed
+binding_code_shape=6-digit SecureRandom code
+binding_first_resolve_status=200
+binding_first_resolve_identity=SkinProbe/a77946af-36d5-3cf0-beb8-5b784f8498ed
+binding_replay_status=404
+binding_replay_error=Invalid or expired code
+website_guest_return_state=preserved pathname, tab, username, uuid and code
+
+online_skin_client=PASS
+online_skin_url_host=textures.minecraft.net
+online_skin_provider=skinsrestorer
+online_skin_uuid=a77946af-36d5-3cf0-beb8-5b784f8498ed
+
+empty_server_online_players=0
+empty_server_transport=heartbeat-http
+empty_server_http_commands_accepted=1
+empty_server_http_commands_delivered=1
+empty_server_http_commands_queued=0
+empty_server_skin_found=true
+empty_server_skin_provider=skinsrestorer
+empty_server_texture_value_length=408
+texture_value_logged=false
+texture_signature_logged=false
+
+runtime_velocity_pid=52520
+runtime_paper_pid=57528
+runtime_velocity_ports=25579,8788
+runtime_paper_port=25565

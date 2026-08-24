@@ -64,13 +64,33 @@ implements SkinRepository {
         this.skinStorage = skinStorageTmp;
     }
 
+    private volatile boolean allowMojangApi = true;
+
+    /**
+     * 设置是否允许触发 Mojang API 网络请求。
+     * 当设置为 false 时，findByPlayer 仅查询本地缓存，不会触发任何网络 I/O。
+     * 适用于中国大陆等 Mojang API 无法访问的环境。
+     */
+    public void setAllowMojangApi(boolean allow) {
+        this.allowMojangApi = allow;
+    }
+
     @Override
     public Optional<SkinDto> findByPlayer(UUID uuid, String name) {
+        return this.findByPlayer(uuid, name, this.allowMojangApi);
+    }
+
+    /**
+     * 查找玩家皮肤。allowMojangApi=false 时仅查询本地缓存，
+     * 不触发 SkinsRestorer 内部的 Mojang API 网络请求（适用于受限网络环境）。
+     */
+    public Optional<SkinDto> findByPlayer(UUID uuid, String name, boolean allowMojangApi) {
         if (!this.available || this.playerStorage == null) {
             return Optional.empty();
         }
         try {
-            Optional<?> current = SkinsRestorerSkinRepository.tryCurrentApi(this.playerStorage, uuid, name);
+            Optional<?> current = SkinsRestorerSkinRepository.tryCurrentApi(
+                this.playerStorage, uuid, name, allowMojangApi);
             if (current != null && current.isPresent()) {
                 Object data = current.get();
                 String skinId = SkinsRestorerSkinRepository.optionalSkinIdentifier(this.playerStorage, uuid);
@@ -79,6 +99,10 @@ implements SkinRepository {
                     SkinsRestorerSkinRepository.readString(data, "getSignature", "signature"), null));
             }
             if (this.skinStorage == null) {
+                return Optional.empty();
+            }
+            // Only query skinStorage if Mojang API is allowed (skinStorage methods may also trigger network calls)
+            if (!allowMojangApi) {
                 return Optional.empty();
             }
             Optional skinId = SkinsRestorerSkinRepository.invokeOptional(this.playerStorage, "getSkinIdOfPlayer", uuid);
@@ -299,10 +323,10 @@ implements SkinRepository {
         return Optional.of((T)value);
     }
 
-    private static Optional<?> tryCurrentApi(Object storage, UUID uuid, String name) throws ReflectiveOperationException {
+    private static Optional<?> tryCurrentApi(Object storage, UUID uuid, String name, boolean allowMojangApi) throws ReflectiveOperationException {
         Optional<?> byUuid = null;
         try {
-            // The name overload may call Mojang for UUIDs that are not Mojang profiles.
+            // getSkinOfPlayer may trigger Mojang API for UUID-based lookup
             byUuid = SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinOfPlayer", uuid);
             if (byUuid.isPresent()) {
                 return byUuid;
@@ -310,6 +334,11 @@ implements SkinRepository {
         }
         catch (NoSuchMethodException ignored) {
             // Fall through to the name lookup exposed by older storage implementations.
+        }
+        // Only attempt name-based lookup if Mojang API access is allowed.
+        // In China or restricted networks, Mojang API is unreachable, causing threads to hang.
+        if (!allowMojangApi) {
+            return Optional.empty();
         }
         try {
             return SkinsRestorerSkinRepository.invokeOptional(storage, "getSkinForPlayer", uuid, name);

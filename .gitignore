@@ -157,3 +157,7 @@ desktop.ini
 # External reference repositories kept outside the product source tree
 /插件开发/
 /重构/starmc/public/pixel2motion/
+
+# 本地构建缓存与历史备份（不入库）
+/gradle-user-home/
+/重构/

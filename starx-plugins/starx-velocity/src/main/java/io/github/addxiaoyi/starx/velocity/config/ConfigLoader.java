@@ -123,6 +123,7 @@ public final class ConfigLoader {
         child(root, "website-sync"));
     NetworkAutomationConfig networkAutomation = parseNetworkAutomationConfig(
         child(root, "network-automation"));
+    UpdateConfig update = parseUpdateConfig(child(root, "update"));
 
     return new StarxConfig(
         apiKey,
@@ -137,7 +138,23 @@ public final class ConfigLoader {
         playerList,
         websiteSync,
         networkAutomation,
+        update,
         modules);
+  }
+
+  private static UpdateConfig parseUpdateConfig(Map<String, Object> node) {
+    boolean enabled = booleanValue(node, "enabled", false);
+    if (!enabled) {
+      return UpdateConfig.disabled();
+    }
+    return new UpdateConfig(
+        true,
+        stringValue(node, "source", UpdateConfig.SOURCE_GITHUB),
+        stringValue(node, "github-owner", ""),
+        stringValue(node, "github-repo", ""),
+        stringValue(node, "maven-group", ""),
+        stringValue(node, "maven-artifact", ""),
+        integer(node, "check-interval-minutes", 60));
   }
 
   private static void persistMiniMotdMigration(Path path, Map<String, Object> root)

@@ -1,0 +1,19 @@
+{
+  "browser": {
+    "launchOptions": {
+      "headless": false,
+      "args": [
+        "--proxy-server=direct://",
+        "--proxy-bypass-list=*",
+        "--host-resolver-rules=MAP star-web.top 121.196.161.249"
+      ]
+    },
+    "contextOptions": {
+      "ignoreHTTPSErrors": true,
+      "viewport": {
+        "width": 1440,
+        "height": 960
+      }
+    }
+  }
+}

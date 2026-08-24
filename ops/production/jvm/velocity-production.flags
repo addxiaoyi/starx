@@ -1,0 +1,14 @@
+# Velocity: small heap, deterministic encoding, Java 25 unsafe compatibility.
+-Xms512M
+-Xmx1G
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=100
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=${LOG_ROOT}/velocity-heapdump.hprof
+-Xlog:gc*,safepoint:file=${LOG_ROOT}/velocity-gc.log:time,uptime,level,tags:filecount=5,filesize=20M
+--sun-misc-unsafe-memory-access=allow
+-Dfile.encoding=UTF-8
+-Dsun.stdout.encoding=UTF-8
+-Dsun.stderr.encoding=UTF-8
+-Dterminal.jline=false
+-Dterminal.ansi=false

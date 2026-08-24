@@ -32,7 +32,8 @@ public final class ConfigLayout {
       "auth.yml",
       "network.yml",
       "modules.yml",
-      "uworld.yml");
+      "uworld.yml",
+      "update.yml");
 
   private static final Pattern YAML_KEY =
       Pattern.compile("^(\\s*)([^#][^:]*):(?:\\s*(.*))?$");
@@ -51,7 +52,8 @@ public final class ConfigLayout {
       Map.entry("napcat", "network.yml"),
       Map.entry("modules", "modules.yml"),
       Map.entry("player-list", "modules.yml"),
-      Map.entry("uworld", "uworld.yml"));
+      Map.entry("uworld", "uworld.yml"),
+      Map.entry("update", "update.yml"));
 
   private ConfigLayout() {
   }

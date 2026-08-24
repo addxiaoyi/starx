@@ -23,6 +23,7 @@ public final class StarxConfig {
     private final PlayerListConfig playerList;
     private final WebsiteSyncConfig websiteSync;
     private final NetworkAutomationConfig networkAutomation;
+    private final UpdateConfig update;
     private final Map<String, ModuleConfig> modules;
 
     public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, Map<String, ModuleConfig> modules) {
@@ -41,6 +42,11 @@ public final class StarxConfig {
     }
 
     public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, PlayerListConfig playerList, WebsiteSyncConfig websiteSync, NetworkAutomationConfig networkAutomation, Map<String, ModuleConfig> modules) {
+        this(apiKey, http, webhook, database, uniauth, napcat, totp, uworld, auth, playerList,
+                websiteSync, networkAutomation, UpdateConfig.disabled(), modules);
+    }
+
+    public StarxConfig(String apiKey, HttpConfig http, WebhookConfig webhook, DatabaseConfig database, UniAuthConfig uniauth, NapcatConfig napcat, TotpConfig totp, UworldConfig uworld, AuthConfig auth, PlayerListConfig playerList, WebsiteSyncConfig websiteSync, NetworkAutomationConfig networkAutomation, UpdateConfig update, Map<String, ModuleConfig> modules) {
         this.apiKey = apiKey;
         this.http = Objects.requireNonNull(http, "http");
         this.webhook = webhook;
@@ -57,6 +63,7 @@ public final class StarxConfig {
         this.networkAutomation = networkAutomation == null
                 ? NetworkAutomationConfig.defaults()
                 : networkAutomation;
+        this.update = update == null ? UpdateConfig.disabled() : update;
         this.modules = modules == null ? Map.of() : Map.copyOf(modules);
     }
 
@@ -106,6 +113,10 @@ public final class StarxConfig {
 
     public NetworkAutomationConfig networkAutomation() {
         return this.networkAutomation;
+    }
+
+    public UpdateConfig update() {
+        return this.update;
     }
 
     public Map<String, ModuleConfig> modules() {

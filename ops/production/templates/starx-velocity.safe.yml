@@ -1,0 +1,121 @@
+api-key: "${API_KEY}"
+http:
+  bind: "${HTTP_BIND}"
+  port: ${HTTP_PORT}
+  frp-public-url: ""
+webhook:
+  url: ""
+  secret: ""
+database:
+  type: "sqlite"
+  database: "plugins/starx/data.db"
+  username: "starx"
+  password: ""
+  pool-max-size: 4
+  connection-timeout-ms: 30000
+uniauth:
+  enabled: false
+  api-url: "https://api.example.com/uniauth/"
+  api-key: ""
+  timeout-ms: 5000
+  bridge-mode: false
+auth:
+  allow-offline-default: false
+modules:
+  starx.auth:
+    enabled: false
+  starx.auth.yggdrasil:
+    enabled: false
+  starx.auth.uniauth:
+    enabled: false
+  starx.player-list:
+    enabled: false
+  starx.player-sessions:
+    enabled: false
+  starx.auth.migration:
+    enabled: false
+  starx.auth.migration.commands:
+    enabled: false
+  starx.skin-bridge:
+    enabled: false
+  starx.chat:
+    enabled: false
+  starx.maintenance:
+    enabled: true
+  starx.motd:
+    enabled: true
+  starx.redirect:
+    enabled: false
+  starx.queue:
+    enabled: false
+  starx.tutorial:
+    enabled: false
+  starx.hub:
+    enabled: false
+  starx.uworld:
+    enabled: false
+  starx.reconnect:
+    enabled: true
+  starx.info:
+    enabled: true
+  starx.forge:
+    enabled: false
+  starx.proxytools.raknet:
+    enabled: ${BEDROCK_ENABLED}
+    port: ${BEDROCK_PORT}
+    debug: false
+    require-provider: ${BEDROCK_ENABLED}
+  starx.online:
+    enabled: true
+  starx.backend-bridge:
+    enabled: true
+  starx.messaging:
+    enabled: true
+  starx.welcome:
+    enabled: false
+  starx.admin:
+    enabled: true
+  starx.enhanced:
+    enabled: false
+  starx.proxytools.filecleaner:
+    enabled: false
+  starx.security.bot:
+    enabled: true
+  starx.security.crash:
+    enabled: true
+  starx.security.risk:
+    enabled: true
+  starx.security.anticheat:
+    enabled: false
+  starx.security.blossom:
+    enabled: false
+  starx.security.smart-rate:
+    enabled: false
+  starx.security.smart-alert:
+    enabled: false
+  starx.proxytools.smart-queue:
+    enabled: false
+  starx.integrations.qq:
+    enabled: false
+  starx.integrations.plan:
+    enabled: false
+  starx.integrations.mapmod:
+    enabled: false
+  starx.integrations.napcat:
+    enabled: false
+  starx.integrations.luckperms:
+    enabled: false
+  starx.integrations.floodgate:
+    enabled: ${BEDROCK_ENABLED}
+  starx.integrations.tab:
+    enabled: false
+  starx.vote:
+    enabled: false
+totp:
+  enabled: false
+uworld:
+  enabled: false
+  auth:
+    target-server: "${TARGET_SERVER}"
+  diagnostics:
+    enabled: false

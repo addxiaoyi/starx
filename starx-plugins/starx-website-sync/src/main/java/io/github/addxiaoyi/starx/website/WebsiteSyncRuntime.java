@@ -111,11 +111,11 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     this.textureBackoff = new ExponentialBackoff(Duration.ofSeconds(15), MAX_BACKOFF);
     this.scheduler = new ScheduledThreadPoolExecutor(2, daemonFactory("starx-website-schedule"));
     this.workers = new ThreadPoolExecutor(
-        2,
-        2,
-        30,
+        4,
+        8,
+        60,
         TimeUnit.SECONDS,
-        new ArrayBlockingQueue<>(32),
+        new java.util.concurrent.LinkedBlockingQueue<>(64),
         daemonFactory("starx-website-http"),
         new ThreadPoolExecutor.AbortPolicy());
   }

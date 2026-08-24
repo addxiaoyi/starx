@@ -34,7 +34,11 @@ final class VelocityWebsiteSyncConfigParser {
             bool(textures, "enabled", true),
             string(textures, "source", "skinsrestorer"),
             integer(textures, "manifest-interval-seconds", 300),
-            integer(textures, "batch-size", 500)));
+            integer(textures, "batch-size", 500)),
+        new WebsiteSyncConfig.CircuitBreakerConfig(
+            bool(node, "circuit-breaker.enabled", true),
+            integer(node, "circuit-breaker.failure-threshold", 10),
+            integer(node, "circuit-breaker.open-timeout-seconds", 60)));
   }
 
   private static Map<String, Object> child(Map<String, Object> node, String key) {

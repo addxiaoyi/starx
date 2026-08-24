@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "paths": {
+    "velocityHome": "D:/StarMC/runtime/velocity",
+    "paperHome": "D:/StarMC/runtime/paper",
+    "releaseRoot": "D:/StarMC/releases",
+    "backupRoot": "D:/StarMC/backups",
+    "stateRoot": "D:/StarMC/state",
+    "logRoot": "D:/StarMC/logs"
+  },
+  "artifacts": {
+    "velocityJar": "velocity.jar",
+    "paperJar": "paper.jar",
+    "universalPlugin": "plugins/starx-universal.jar"
+  },
+  "java": {
+    "velocityExecutable": "C:/Program Files/Java/jdk-25.0.3/bin/java.exe",
+    "paperExecutable": "C:/Program Files/Zulu/zulu-21/bin/java.exe",
+    "velocityFlagsFile": "jvm/velocity-production.flags",
+    "paperFlagsFile": "jvm/paper-production.flags"
+  },
+  "network": {
+    "bindAddress": "0.0.0.0",
+    "javaPort": 25565,
+    "backendAddress": "127.0.0.1",
+    "backendPort": 25571,
+    "bedrockEnabled": true,
+    "bedrockPort": 19132,
+    "httpAddress": "127.0.0.1",
+    "httpPort": 8800,
+    "rconAddress": "127.0.0.1",
+    "rconPort": 25575,
+    "healthUrl": "http://127.0.0.1:8800/v1/health"
+  },
+  "server": {
+    "nodeId": "lobby",
+    "serverType": "lobby",
+    "targetServer": "lobby",
+    "motd": "StarMC Production",
+    "maxPlayers": 100
+  },
+  "security": {
+    "velocityOnlineMode": true,
+    "allowInsecurePublicOffline": false,
+    "rconPasswordFile": "secrets/rcon-password.txt",
+    "apiKeyFile": "secrets/api-key.txt",
+    "forwardingSecretFile": "secrets/forwarding-secret.txt"
+  },
+  "startup": {
+    "velocityTimeoutSeconds": 240,
+    "paperTimeoutSeconds": 240,
+    "gracefulStopSeconds": 20
+  },
+  "backup": {
+    "retentionCount": 14,
+    "mirrorRoot": null,
+    "mirrorRetentionCount": 30,
+    "releaseRetentionCount": 8,
+    "dataSets": [
+      { "name": "paper-world", "root": "paper", "path": "world", "required": true },
+      { "name": "paper-world-nether", "root": "paper", "path": "world_nether", "required": false },
+      { "name": "paper-world-end", "root": "paper", "path": "world_the_end", "required": false },
+      { "name": "paper-plugins-data", "root": "paper", "path": "plugins", "required": true },
+      { "name": "paper-config", "root": "paper", "path": "config", "required": true },
+      { "name": "paper-properties", "root": "paper", "path": "server.properties", "required": true },
+      { "name": "velocity-plugins-data", "root": "velocity", "path": "plugins", "required": true },
+      { "name": "velocity-config", "root": "velocity", "path": "velocity.toml", "required": true },
+      { "name": "velocity-forwarding-secret", "root": "velocity", "path": "forwarding.secret", "required": true }
+    ]
+  },
+  "watchdog": {
+    "pollSeconds": 30,
+    "restartLimit": 3,
+    "restartWindowSeconds": 300,
+    "breakerCooldownSeconds": 1800,
+    "autoRollbackAfterFailedRestarts": 2
+  }
+}

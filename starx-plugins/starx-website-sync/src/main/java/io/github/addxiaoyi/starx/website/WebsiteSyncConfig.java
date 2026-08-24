@@ -13,7 +13,8 @@ public record WebsiteSyncConfig(
     SecretValue bootstrapToken,
     SecretValue nodeToken,
     Heartbeat heartbeat,
-    Textures textures
+    Textures textures,
+    CircuitBreakerConfig circuitBreaker
 ) {
   private static final Pattern NODE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{1,63}");
   private static final Pattern SOURCE = Pattern.compile("[a-z0-9._-]{1,40}");
@@ -30,6 +31,46 @@ public record WebsiteSyncConfig(
     nodeToken = nodeToken == null ? SecretValue.empty() : nodeToken;
     heartbeat = heartbeat == null ? Heartbeat.defaults() : heartbeat;
     textures = textures == null ? Textures.defaults() : textures;
+    circuitBreaker = circuitBreaker == null ? CircuitBreakerConfig.defaults() : circuitBreaker;
+  }
+
+  /** 紧凑构造器：兼容旧调用点（无熔断配置）。 */
+  public WebsiteSyncConfig(
+      boolean enabled,
+      URI siteUrl,
+      String nodeId,
+      WebsitePlatform platform,
+      SecretValue bootstrapToken,
+      SecretValue nodeToken,
+      Heartbeat heartbeat,
+      Textures textures
+  ) {
+    this(enabled, siteUrl, nodeId, platform, bootstrapToken, nodeToken,
+        heartbeat, textures, null);
+  }
+
+  /**
+   * 熔断器配置：连续失败达到阈值后打开熔断，冷却期后半开试探恢复。
+   */
+  public record CircuitBreakerConfig(
+      boolean enabled,
+      int failureThreshold,
+      int openTimeoutSeconds
+  ) {
+    public CircuitBreakerConfig {
+      if (failureThreshold < 1) {
+        throw new IllegalArgumentException(
+            "website-sync.circuit-breaker.failure-threshold must be at least 1");
+      }
+      if (openTimeoutSeconds < 5 || openTimeoutSeconds > 3600) {
+        throw new IllegalArgumentException(
+            "website-sync.circuit-breaker.open-timeout-seconds must be between 5 and 3600");
+      }
+    }
+
+    public static CircuitBreakerConfig defaults() {
+      return new CircuitBreakerConfig(true, 10, 60);
+    }
   }
 
   public static WebsiteSyncConfig disabled(String nodeId, WebsitePlatform platform) {
@@ -42,6 +83,23 @@ public record WebsiteSyncConfig(
         SecretValue.empty(),
         Heartbeat.defaults(),
         Textures.defaults());
+  }
+
+  /**
+   * Returns a copy of this config with texture synchronization disabled.
+   * Useful for environments where the texture CDN or Mojang API is unreachable.
+   */
+  public WebsiteSyncConfig withTexturesDisabled() {
+    return new WebsiteSyncConfig(
+        this.enabled,
+        this.siteUrl,
+        this.nodeId,
+        this.platform,
+        this.bootstrapToken,
+        this.nodeToken,
+        this.heartbeat,
+        new Textures(false, this.textures.source(), this.textures.manifestIntervalSeconds(),
+            this.textures.batchSize()));
   }
 
   public boolean needsEnrollment() {

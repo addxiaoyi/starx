@@ -7,6 +7,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 final class BackendHeartbeatExchange {
+  private static final int MAX_EXCHANGES = 32;
+  private static final int MIN_EXCHANGES = 1;
 
   private BackendHeartbeatExchange() {
   }
@@ -37,8 +39,9 @@ final class BackendHeartbeatExchange {
     Objects.requireNonNull(session, "session");
     Objects.requireNonNull(outbound, "outbound");
     Objects.requireNonNull(commandExecutor, "commandExecutor");
-    if (maxExchanges < 1 || maxExchanges > 32) {
-      throw new IllegalArgumentException("maxExchanges must be between 1 and 32");
+    if (maxExchanges < MIN_EXCHANGES || maxExchanges > MAX_EXCHANGES) {
+      throw new IllegalArgumentException(
+          "maxExchanges must be between " + MIN_EXCHANGES + " and " + MAX_EXCHANGES);
     }
     return exchange(client, session, outbound, maxExchanges, commandExecutor);
   }

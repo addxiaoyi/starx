@@ -16,3 +16,4 @@ config-files:
     - network.yml
     - modules.yml
     - uworld.yml
+    - update.yml

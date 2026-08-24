@@ -11,8 +11,10 @@ import io.github.addxiaoyi.starx.velocity.bridge.BackendNode;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendNodeRegistry;
 import io.github.addxiaoyi.starx.velocity.bridge.VelocityBackendBridge;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.MaintenanceModule;
+import io.github.addxiaoyi.starx.website.CircuitBreaker;
 import io.github.addxiaoyi.starx.website.NodeCapabilities;
 import io.github.addxiaoyi.starx.website.NodeSnapshot;
+import io.github.addxiaoyi.starx.website.SyncMetrics;
 import io.github.addxiaoyi.starx.website.ServerSnapshot;
 import io.github.addxiaoyi.starx.website.TextureSource;
 import io.github.addxiaoyi.starx.website.WebsiteNodeStatus;
@@ -40,6 +42,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
   private final VelocityBackendBridge bridge;
   private final MaintenanceModule maintenance;
   private final WebsiteSyncRuntime runtime;
+  private final WebsiteSyncHttpClient httpClient;
 
   public VelocityWebsiteSync(
       StarxVelocityPlugin plugin,
@@ -52,9 +55,14 @@ public final class VelocityWebsiteSync implements AutoCloseable {
     this.bridge = Objects.requireNonNull(bridge, "bridge");
     this.maintenance = Objects.requireNonNull(maintenance, "maintenance");
     WebsiteSyncConfig config = plugin.config().websiteSync();
+    SyncMetrics syncMetrics = new SyncMetrics();
+    CircuitBreaker circuitBreaker = new CircuitBreaker(
+        config.circuitBreaker().failureThreshold(),
+        java.time.Duration.ofSeconds(config.circuitBreaker().openTimeoutSeconds()));
+    this.httpClient = new WebsiteSyncHttpClient(config, syncMetrics, circuitBreaker);
     this.runtime = new WebsiteSyncRuntime(
         config,
-        new WebsiteSyncHttpClient(config),
+        this.httpClient,
         new YamlWebsiteCredentialStore(plugin.dataDirectory().resolve("config.yml")),
         this::currentSnapshot,
         textureSource(
@@ -86,6 +94,10 @@ public final class VelocityWebsiteSync implements AutoCloseable {
           "Unsupported Velocity website texture source: " + config.textures().source());
     }
     Consumer<String> logger = plugin.logger()::info;
+    SkinsRestorerSkinRepository skinRepository = new SkinsRestorerSkinRepository();
+    // 中国大陆等受限网络下 Mojang API 不可达，纹理同步只读 SkinsRestorer 本地缓存，
+    // 避免 JDK HttpClient 线程卡死在 SSL 握手并无限堆积。
+    skinRepository.setAllowMojangApi(false);
     return new SkinsRestorerTextureSource(
         () -> SkinsRestorerTextureSource.mergePlayers(
             historicalPlayers(userRepository, accountIdentities::knownMinecraftUuids, logger),
@@ -93,7 +105,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
                 .map(player -> new SkinsRestorerTextureSource.PlayerRef(
                     player.getUniqueId(), player.getUsername()))
                 .toList()),
-        new SkinsRestorerSkinRepository(),
+        skinRepository,
         config.heartbeat(),
         logger);
   }
@@ -117,6 +129,27 @@ public final class VelocityWebsiteSync implements AutoCloseable {
 
   public void start() {
     this.runtime.start();
+  }
+
+  /**
+   * 获取网站同步的运行时状态，包括指标与熔断器状态。
+   */
+  public WebsiteSyncRuntime.Snapshot snapshot() {
+    return this.runtime.snapshot();
+  }
+
+  /**
+   * 获取 HTTP 客户端指标快照。
+   */
+  public SyncMetrics.Snapshot metrics() {
+    return this.httpClient.getMetrics();
+  }
+
+  /**
+   * 获取熔断器当前状态。
+   */
+  public CircuitBreaker.State circuitState() {
+    return this.httpClient.getCircuitState();
   }
 
   public WebsiteSyncRuntime.Snapshot status() {

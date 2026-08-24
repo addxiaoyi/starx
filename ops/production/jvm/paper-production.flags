@@ -1,0 +1,17 @@
+# Paper: tune heap size after load testing; these values are safe defaults, not capacity claims.
+-Xms4G
+-Xmx4G
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:+ParallelRefProcEnabled
+-XX:+DisableExplicitGC
+-XX:+AlwaysPreTouch
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=${LOG_ROOT}/paper-heapdump.hprof
+-Xlog:gc*,safepoint:file=${LOG_ROOT}/paper-gc.log:time,uptime,level,tags:filecount=8,filesize=32M
+-Dfile.encoding=UTF-8
+-Dsun.stdout.encoding=UTF-8
+-Dsun.stderr.encoding=UTF-8
+-Djava.awt.headless=true
+-Dterminal.jline=false
+-Dterminal.ansi=false
