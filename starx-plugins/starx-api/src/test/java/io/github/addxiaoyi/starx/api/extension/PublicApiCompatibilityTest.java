@@ -3,13 +3,14 @@ package io.github.addxiaoyi.starx.api.extension;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 /** Removal or signature changes to the 1.0 public baseline must fail this test. */
-class PublicApiCompatibilityTest {
+public class PublicApiCompatibilityTest {
   @Test
   void apiOneBaselineRemainsBinaryVisible() throws Exception {
     assertNotNull(StarxService.class.getMethod("apiVersion"));

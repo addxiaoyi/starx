@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-class ApiVersionTest {
+public class ApiVersionTest {
   @Test
   void parsesAndComparesSemanticVersions() {
     assertEquals(new ApiVersion(1, 2, 3), ApiVersion.parse("1.2.3"));
