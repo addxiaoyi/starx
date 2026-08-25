@@ -210,7 +210,7 @@ public final class HttpApiServer implements RouteRegistrar {
         // 严格控制资源：核心2线程，最大8线程（减少CPU竞争），队列64（快速反馈），饱和策略调用者运行
         this.executor = new ThreadPoolExecutor(
                 2, 8, 60L, java.util.concurrent.TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(64), threads,
+                new ArrayBlockingQueue<>(256), threads,
                 new ThreadPoolExecutor.CallerRunsPolicy());
         this.server.setExecutor(this.executor);
         this.get("/v1/health", this::health);
