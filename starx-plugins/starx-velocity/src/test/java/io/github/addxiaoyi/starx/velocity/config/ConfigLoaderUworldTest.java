@@ -365,6 +365,7 @@ final class ConfigLoaderUworldTest {
                 "starx.redirect", "starx.queue", "starx.tutorial", "starx.hub", "starx.uworld", "starx.reconnect",
                 "starx.info", "starx.forge", "starx.proxytools.raknet", "starx.online",
                 "starx.backend-bridge", "starx.messaging", "starx.welcome", "starx.admin",
+                "starx.tab-list", "starx.uworld.diagnostics",
                 "starx.enhanced", "starx.proxytools.filecleaner", "starx.security.bot",
                 "starx.security.crash", "starx.security.risk", "starx.security.anticheat",
                 "starx.security.blossom", "starx.security.smart-rate",

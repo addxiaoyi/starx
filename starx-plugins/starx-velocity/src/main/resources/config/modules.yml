@@ -113,8 +113,6 @@ modules:
     enabled: false
   starx.proxytools.smart-queue:
     enabled: false
-  starx.auth-commands:
-    enabled: true
   starx.integrations.floodgate:
     enabled: true
   starx.tab-list:
@@ -134,8 +132,6 @@ modules:
     # NapCat 具体地址仍在 network.yml 配置。
     enabled: false
   starx.integrations.luckperms:
-    enabled: true
-  starx.integrations.floodgate:
     enabled: true
   starx.integrations.tab:
     enabled: true
