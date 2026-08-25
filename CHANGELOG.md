@@ -2,6 +2,12 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [0.5.2.1] - 2026-08-26
+
+### Security
+
+- **YAML 加载器加固**：限制 `setMaxAliasesForCollections(100)`，防止 YAML BOMB（深度放大）攻击。
+
 ## [0.5.2] - 2026-08-25
 
 ### Fixed
