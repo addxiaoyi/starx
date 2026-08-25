@@ -100,12 +100,18 @@ public final class UpdateManager {
 
       DownloadResult result = fetchToFile(info.downloadUrl(), temp);
       if (!result.success()) {
+        deleteQuietly(temp);
         this.logger.accept("StarX update download failed for "
             + info.version().raw() + ": " + result.errorMessage());
         return CheckResult.DOWNLOAD_FAILED;
       }
       // 原子替换，避免半写入文件被插件加载
-      Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      try {
+        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      } catch (IOException moveError) {
+        deleteQuietly(temp);
+        throw moveError;
+      }
       this.logger.accept("StarX update " + info.version().raw()
           + " downloaded to " + target.getFileName()
           + "; restart to apply (" + (result.bytes() / 1024) + " KiB)");
@@ -113,6 +119,14 @@ public final class UpdateManager {
     } catch (IOException error) {
       this.logger.accept("StarX update I/O failed: " + error.getClass().getSimpleName());
       return CheckResult.DOWNLOAD_FAILED;
+    }
+  }
+
+  private static void deleteQuietly(Path file) {
+    try {
+      Files.deleteIfExists(file);
+    } catch (IOException ignored) {
+      // 清理失败不影响主流程；残留文件会在下次下载时被覆盖
     }
   }
 
@@ -172,7 +186,11 @@ public final class UpdateManager {
   /**
    * 距上次检查是否已超过指定间隔。
    */
-  public boolean isCheckDue(Duration interval) {
+  /**
+   * 距上次检查是否已超过指定间隔。
+   * 与 {@link #checkAndUpdate()} 共用同一把锁，保证读取 lastCheckMillis 的可见性与一致性。
+   */
+  public synchronized boolean isCheckDue(Duration interval) {
     Duration effective = interval.compareTo(MIN_CHECK_INTERVAL) < 0 ? MIN_CHECK_INTERVAL : interval;
     if (this.lastCheckMillis == 0) {
       return true;

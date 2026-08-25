@@ -26,7 +26,6 @@ public final class CircuitBreaker {
 
   private volatile State state = State.CLOSED;
   private final AtomicInteger failureCount = new AtomicInteger(0);
-  private final AtomicLong lastFailureTime = new AtomicLong(0);
   private final AtomicLong openStartTime = new AtomicLong(0);
 
   public CircuitBreaker(int failureThreshold, Duration timeout) {
@@ -60,7 +59,7 @@ public final class CircuitBreaker {
   public void recordFailure() {
     int failures = this.failureCount.incrementAndGet();
     if (this.state == State.OPEN) {
-      return; // 已经处于熔断状态
+      return; // 已经处于熔断状态，无需重复计数
     }
     if (failures >= this.failureThreshold) {
       this.state = State.OPEN;

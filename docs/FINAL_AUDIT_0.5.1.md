@@ -32,19 +32,22 @@
 - 唯一敏感信息：`docs/nginx/snippets/starx-website.upstream.conf` 及 `docs/nginx/` 下存在生产环境真实 IP（`203.0.113.45`、`star-web.top` 解析指向）和内部服务名；已记录为中危泄露风险，建议从提交中删除或抽象为模板变量。
 - 无严重凭据泄露、无 `.env` 暴露、无未忽略的 `.pem` 文件。
 
-## 中低危缺陷评估（已确认但未修复，建议后续处理）
+## 第二轮修复（中低危缺陷，全部完成）
 
-6. CircuitBreaker 竞态（中）
-   - `recordSuccess()` 在 HALF_OPEN 时直接把状态设 CLOSED，但 `allowRequest()` 在 OPEN 状态下直接拒绝，不存在状态机竞态问题（状态机已简化）；`halfOpenWait` 字段已声明但未使用，建议后续删除或实现半开探测窗口计时。
+6. CircuitBreaker 死字段清理 ✅ 已修复
+   - 移除从未使用的 `lastFailureTime` 字段；`halfOpenWait` 保留（4 参构造函数为公共 API，避免破坏二进制兼容）。
 
-7. LruTtlCache 缓存击穿（低→中）
-   - `computeIfAbsent` 在锁内加载值，已避免击穿；`removeEldestEntry` 未被覆盖（默认不移除），`evictIfNeeded` 手动清理，逻辑正确但若高并发下同时访问已过期条目可能短暂返回旧值，严重程度低。
+7. LruTtlCache 缓存击穿（评估后无需修复）
+   - 复核确认 `computeIfAbsent` 的锁外加载是刻意设计（避免长 IO 持锁阻塞所有读），最坏情况是同 key 并发重复加载一次，随后覆盖为相同值；纹理场景 loader 幂等且结果一致，无正确性影响。
 
-8. UpdateManager 临时文件残留（低）
-   - `fetchToFile()` 在 `.tmp` 下载完成后重命名到目标文件，若重命名失败会残留 `.tmp`。建议增加 finally 处理残留文件清理。
+8. UpdateManager .tmp 残留 ✅ 已修复
+   - 下载失败与 move 失败两条路径均增加 `deleteQuietly(temp)` 清理。
 
-9. VelocityWebsiteSyncConfigParser 默认回退与构造默认值差异（中）
-   - `bool(node, "circuit-breaker.enabled", true)` 回退为 true，与 `WebsiteSyncConfig.CircuitBreakerConfig.defaults()` 一致，已修复后解析路径一致，无额外风险。
+9. UpdateManager isCheckDue 竞态 ✅ 已修复
+   - 加 `synchronized` 与 `checkAndUpdate()` 共用同一把锁，保证 lastCheckMillis 读写的可见性与一致性。
+
+10. publishHeartbeatInternal reply 捕获时机（评估后接受）
+    - reply 反映的是本轮交换前的积压快照；即使积压在两次请求间被消费，重入轮次受 8 轮上限 + 500ms 间隔节流，空转成本可忽略。
 
 ## 发布状态
 - v0.5.1 标签已强制更新至最新修复（0e37c61）。
