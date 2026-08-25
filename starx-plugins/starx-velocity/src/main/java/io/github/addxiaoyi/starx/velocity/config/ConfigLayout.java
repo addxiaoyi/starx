@@ -20,9 +20,15 @@ import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 
 public final class ConfigLayout {
+
+  private static final LoaderOptions SECURE_LOADER_OPTIONS = new LoaderOptions() {{
+      // 限制别名数量防止 YAML BOMB 木马攻击和深度放大
+      setMaxAliasesForCollections(100);
+    }};
 
   static final String DEFAULT_INDEX_RESOURCE = "/default-config.yml";
   static final String CONFIG_FILES_KEY = "config-files";
@@ -307,7 +313,7 @@ public final class ConfigLayout {
   }
 
   private static Map<String, Object> readRoot(InputStream input, String label) throws IOException {
-    Object loaded = new Yaml().load(input);
+    Object loaded = new Yaml(SECURE_LOADER_OPTIONS).load(input);
     if (loaded == null) {
       return new LinkedHashMap<>();
     }

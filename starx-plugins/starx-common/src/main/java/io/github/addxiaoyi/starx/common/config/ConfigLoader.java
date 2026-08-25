@@ -16,9 +16,18 @@ import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 
 public final class ConfigLoader {
+    private static LoaderOptions createSecureOptions() {
+        LoaderOptions opts = new LoaderOptions();
+        // 限制别名在集合中的数量，防止 YAML BOMB 木马攻击和深度放大
+        opts.setMaxAliasesForCollections(100);
+        return opts;
+    }
+    private static final LoaderOptions SECURE_LOADER_OPTIONS = createSecureOptions();
+
     private ConfigLoader() {
     }
 
@@ -28,7 +37,7 @@ public final class ConfigLoader {
             return StarxConfig.defaults();
         }
         try (InputStream in = Files.newInputStream(path, new OpenOption[0]);){
-            root = (Map<String, Object>)new Yaml().load(in);
+            root = (Map<String, Object>)new Yaml(SECURE_LOADER_OPTIONS).load(in);
         }
         if (root == null) {
             root = Map.of();
