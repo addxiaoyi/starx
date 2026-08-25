@@ -77,7 +77,9 @@ public final class SmartCache<K, V> {
     }
 
     public void put(K key, V value) {
-        this.cache.put(key, new CacheEntry(this, value, System.currentTimeMillis() + this.ttlMillis));
+        int accessCount = this.accessCounts.getOrDefault(key, 0);
+        long extendedTtl = this.ttlMillis + Math.min(accessCount * 1000L, this.ttlMillis);
+        this.cache.put(key, new CacheEntry(value, System.currentTimeMillis() + extendedTtl, accessCount));
         this.evictIfNeeded();
     }
 
@@ -147,10 +149,16 @@ public final class SmartCache<K, V> {
     private final class CacheEntry {
         final V value;
         final long expiresAt;
+        final int accessCount;
 
         CacheEntry(SmartCache smartCache, V value, long expiresAt) {
+            this(value, expiresAt, 0);
+        }
+
+        CacheEntry(V value, long expiresAt, int accessCount) {
             this.value = value;
             this.expiresAt = expiresAt;
+            this.accessCount = accessCount;
         }
 
         boolean isExpired() {
