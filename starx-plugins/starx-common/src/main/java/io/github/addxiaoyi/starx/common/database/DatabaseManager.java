@@ -28,6 +28,7 @@ implements AutoCloseable {
         hikariConfig.setUsername(config.username());
         hikariConfig.setPassword(config.password());
         hikariConfig.setConnectionTimeout(config.connectionTimeoutMs());
+        hikariConfig.setLeakDetectionThreshold(config.poolTimeoutMs());
         boolean isH2 = config.jdbcUrl().startsWith("jdbc:h2:");
         boolean isSqlite = config.isSqlite();
         if (isH2) {
