@@ -142,7 +142,18 @@ public final class SmartCache<K, V> {
 
     private void evictIfNeeded() {
         while (this.cache.size() > this.maxSize) {
-            this.cache.entrySet().stream().min((a, b) -> Long.compare(((CacheEntry)a.getValue()).expiresAt, ((CacheEntry)b.getValue()).expiresAt)).ifPresent(e -> this.cache.remove(e.getKey()));
+            this.cache.entrySet().stream()
+                .min((a, b) -> {
+                    CacheEntry entryA = a.getValue();
+                    CacheEntry entryB = b.getValue();
+                    long scoreA = entryA.expiresAt + (entryA.accessCount * 1000L);
+                    long scoreB = entryB.expiresAt + (entryB.accessCount * 1000L);
+                    return Long.compare(scoreA, scoreB);
+                })
+                .ifPresent(e -> {
+                    this.cache.remove(e.getKey());
+                    this.accessCounts.remove(e.getKey());
+                });
         }
     }
 
