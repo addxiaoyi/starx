@@ -53,7 +53,7 @@ public final class SessionManager {
             throw new IllegalArgumentException("maxSessions must be positive");
         }
         this.maxSessions = maxSessions;
-        this.sessions = new ConcurrentHashMap<UUID, AuthSession>(1024);
+        this.sessions = new ConcurrentHashMap<>(INITIAL_CAPACITY);
         this.cleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "starx-session-cleanup");
             t.setDaemon(true);
