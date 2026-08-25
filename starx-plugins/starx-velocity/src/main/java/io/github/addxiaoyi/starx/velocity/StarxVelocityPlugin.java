@@ -98,6 +98,7 @@ import io.github.addxiaoyi.starx.velocity.module.proxytools.HubCommandModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.MaintenanceModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.MotdModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.OnlineSyncModule;
+import io.github.addxiaoyi.starx.velocity.module.tab.TabListModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.ProxyInfoModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.QueueModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.TutorialModule;
@@ -461,6 +462,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager.register(new UniAuthModule(this, this.eventBus, this.config.uniauth()));
         this.moduleManager.register(playerList);
         this.moduleManager.register(new TabIntegrationModule(this, playerList, variables));
+        this.moduleManager.register(new TabListModule(this));
         MigrationModule migrationModule = new MigrationModule(this, this.eventBus, MigrationModule.Config.defaultConfig(), userRepository, uniAuthClient);
         this.moduleManager.register(migrationModule);
         this.moduleManager.register(new MigrationCommands(this, userRepository, migrationModule, uniAuthClient));

@@ -2,6 +2,43 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [0.6.0] - 2026-08-27
+
+### Added
+
+- **扩展依赖检查器**：`ExtensionDependencyChecker` 提供自动依赖解析、版本兼容性检查和加载顺序验证。
+- **扩展热重载管理器**：`ExtensionHotReloadManager` 支持在不重启服务器的情况下动态重载扩展，包括状态保存与恢复。
+- **扩展兼容性管理器**：`ExtensionCompatibilityManager` 提供平台兼容性检查、API兼容性检查、版本冲突检测和兼容性适配器注册。
+- **扩展配置助手**：`ExtensionConfigurationHelper` 提供类型安全的配置访问、范围限制、枚举转换、配置验证等便捷功能。
+- **扩展命令注册器**：`ExtensionCommandRegistrar` 提供命令注册、别名管理、权限控制、Tab补全等功能。
+- **扩展依赖管理器**：`ExtensionDependencyManager` 提供依赖关系管理、循环依赖检测、版本冲突报告等功能。
+- **标签页动画API**：完整的动画系统支持流动动画、脉冲动画、滚动文字动画、渐变动画，支持自定义速度、方向、颜色渐变等。
+- **标签页图片API**：`TabImage` 接口和 `Base64TabImage`、`UrlTabImage` 实现，支持在标签页中嵌入图片。
+- **标签页管理系统**：`DefaultTabList`、`TabListRegistry`、`TabListManager` 提供完整的标签页管理和更新机制。
+- **Velocity热重载监听器**：Velocity平台的 `TabListModule` 支持玩家登录/登出事件监听和标签页自动刷新。
+- **扩展开发指南**：完整的扩展开发文档，包括基础教程、最佳实践、API参考、故障排除等。
+
+### Changed
+
+- **starx-api模块**：添加 `adventure-api`、`adventure-text-serializer-legacy`、`adventure-text-serializer-plain` 和 `adventure-text-serializer-gson` 的 `compileOnly` 依赖。
+- **版本号更新**：从 0.5.2.1 更新至 0.6.0。
+
+### Fixed
+
+- **TabPlayerEntry接口**：将内部接口移至 `TabList` 内部类，修复了直接导入导致的编译错误。
+- **BuiltEntry记录**：将 `BuiltEntry` 从记录类改为普通类，解决了方法名与记录组件名冲突的问题。
+- **GradientAnimation**：修复 `debugString()` 方法调用错误，改用 `LegacyComponentSerializer` 进行序列化。
+- **ExtensionConfigurationHelper**：修复验证结果记录类中缺少 `List` 和 `Map` 导入的问题。
+- **getEnum方法**：修复泛型类型擦除导致的 `T.valueOf()` 编译错误。
+- **TabListModule**：修复 `EventListener` 接口错误，改用匿名类的方式注册事件监听器。
+- **DatabaseConfig**：修复 `AccountIdentityResolverTest` 中 `DatabaseConfig` 构造函数缺少参数的问题。
+
+### Verification
+
+- 所有模块编译通过，包括 `starx-api`、`starx-common`、`starx-velocity` 等。
+- 新增的扩展系统API全部编译通过。
+- 标签页动画API、图片API、标签页管理API全部编译通过。
+
 ## [0.5.2.1] - 2026-08-26
 
 ### Security

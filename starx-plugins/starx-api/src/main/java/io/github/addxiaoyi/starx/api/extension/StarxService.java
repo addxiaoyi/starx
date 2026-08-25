@@ -89,4 +89,24 @@ public interface StarxService {
    * @return idempotent subscription handle
    */
   StarxEventSubscription subscribe(String eventType, Consumer<StarxServiceEvent> listener);
+
+  /**
+   * Publishes an event on the service event stream.
+   *
+   * @param eventType event type identifier
+   * @param payload event payload
+   * @since 0.5.0
+   */
+  default void publish(String eventType, java.util.Map<String, ?> payload) {
+    // Default implementation does nothing; platforms may override to support event publishing.
+  }
+
+  /**
+   * Returns the auto-completer registry for this service.
+   *
+   * @return the auto-completer registry
+   */
+  default StarxAutoCompleterRegistry autoCompleterRegistry() {
+    return new StarxAutoCompleterRegistry.DefaultRegistry();
+  }
 }

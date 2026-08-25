@@ -16,12 +16,10 @@ public final class ExampleStarxExtension implements StarxExtension {
   private final AtomicInteger observedLifecycleEvents = new AtomicInteger();
 
   public static StarxExtensionDescriptor descriptor(String implementationVersion) {
-    return new StarxExtensionDescriptor(
+    return StarxExtensionDescriptor.create(
         EXTENSION_ID,
         "StarX Extension Example",
-        implementationVersion,
-        StarxApi.VERSION,
-        Set.of(StarxCapabilities.EVENTS));
+        implementationVersion);
   }
 
   @Override

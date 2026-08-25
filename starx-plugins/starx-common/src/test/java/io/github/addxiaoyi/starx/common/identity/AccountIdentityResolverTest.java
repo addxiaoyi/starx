@@ -25,7 +25,7 @@ class AccountIdentityResolverTest {
   void lazilyCreatesStableAccountWithoutChangingMinecraftUuid() {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
-        "jdbc:sqlite:" + tempDir.resolve("identity.db").toAbsolutePath(), 1, 10_000L);
+        "jdbc:sqlite:" + tempDir.resolve("identity.db").toAbsolutePath(), 1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -48,7 +48,7 @@ class AccountIdentityResolverTest {
   void refreshesTheCurrentNameWhenAnExistingPremiumIdentityChangesName() {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
-        "jdbc:sqlite:" + tempDir.resolve("renamed-identity.db").toAbsolutePath(), 1, 10_000L);
+        "jdbc:sqlite:" + tempDir.resolve("renamed-identity.db").toAbsolutePath(), 1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -72,7 +72,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("untrusted-identity-rename.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -93,7 +93,7 @@ class AccountIdentityResolverTest {
   void migratesAnOfflineAccountToTheVerifiedOnlineUuidIdentity() {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
-        "jdbc:sqlite:" + tempDir.resolve("offline-migration.db").toAbsolutePath(), 1, 10_000L);
+        "jdbc:sqlite:" + tempDir.resolve("offline-migration.db").toAbsolutePath(), 1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -124,7 +124,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("first-premium-migration.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -148,7 +148,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("case-variant-premium-migration.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -171,7 +171,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("migrated-name-change.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -195,7 +195,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("migrated-full-name.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -223,7 +223,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("repeated-offline-migration.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -256,7 +256,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("offline-alias-rename.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -287,7 +287,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("offline-identity-isolation.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -311,7 +311,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("untrusted-offline-migration.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -333,7 +333,7 @@ class AccountIdentityResolverTest {
   void databaseRejectsCaseVariantUsernames() {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
-        "jdbc:sqlite:" + tempDir.resolve("username-uniqueness.db").toAbsolutePath(), 1, 10_000L);
+        "jdbc:sqlite:" + tempDir.resolve("username-uniqueness.db").toAbsolutePath(), 1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       users.save(UserDto.builder().uuid(UUID.randomUUID()).username("Alex")
@@ -350,7 +350,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("floodgate-identity-source.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -373,7 +373,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("floodgate-account-resolution.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =
@@ -397,7 +397,7 @@ class AccountIdentityResolverTest {
     DatabaseConfig config = new DatabaseConfig(
         "sqlite", "", 0, "", "", "",
         "jdbc:sqlite:" + tempDir.resolve("floodgate-migration-alias.db").toAbsolutePath(),
-        1, 10_000L);
+        1, 10_000L, 10_000L);
     try (DatabaseManager database = new DatabaseManager(config)) {
       JdbcUserRepository users = new JdbcUserRepository(database.getDataSource());
       JdbcAccountIdentityRepository identities =

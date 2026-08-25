@@ -1,5 +1,11 @@
 package io.github.addxiaoyi.starx.runtime.extension;
 
+import io.github.addxiaoyi.starx.api.extension.StarxAutoCompleter;
+import io.github.addxiaoyi.starx.api.extension.StarxAutoCompleterProvider;
+import io.github.addxiaoyi.starx.api.extension.StarxAutoCompleterRegistry;
+import io.github.addxiaoyi.starx.runtime.autocomplete.CommandCompleter;
+import io.github.addxiaoyi.starx.runtime.autocomplete.ConfigCompleter;
+import io.github.addxiaoyi.starx.runtime.autocomplete.ExtensionCompleter;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
 import io.github.addxiaoyi.starx.api.extension.ApiVersion;
 import io.github.addxiaoyi.starx.api.extension.StarxApi;
@@ -30,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /** Platform-neutral StarX extension runtime. This module is not part of the public API contract. */
-public final class DefaultStarxService implements StarxService, AutoCloseable {
+public final class DefaultStarxService implements StarxService, StarxAutoCompleterProvider, AutoCloseable {
   private static final System.Logger LOG = System.getLogger(DefaultStarxService.class.getName());
   private final String implementationVersion;
   private final PlatformKind platform;
@@ -39,6 +45,7 @@ public final class DefaultStarxService implements StarxService, AutoCloseable {
   private final List<Registration> registrationOrder = new CopyOnWriteArrayList<>();
   private final Map<String, CopyOnWriteArrayList<Consumer<StarxServiceEvent>>> listeners =
       new ConcurrentHashMap<>();
+  private final StarxAutoCompleterRegistry autoCompleterRegistry = new StarxAutoCompleterRegistry.DefaultRegistry();
   private final AtomicBoolean closed = new AtomicBoolean();
 
   public DefaultStarxService(
@@ -52,12 +59,25 @@ public final class DefaultStarxService implements StarxService, AutoCloseable {
       platformCapabilities.forEach(value -> values.add(StarxCapabilities.requireValid(value)));
     }
     this.capabilities = Set.copyOf(values);
+    registerAutoCompleters(this.autoCompleterRegistry);
   }
 
   @Override public ApiVersion apiVersion() { return StarxApi.VERSION; }
   @Override public String implementationVersion() { return this.implementationVersion; }
   @Override public PlatformKind platform() { return this.platform; }
   @Override public Set<String> capabilities() { return this.capabilities; }
+
+  @Override
+  public StarxAutoCompleterRegistry autoCompleterRegistry() {
+    return this.autoCompleterRegistry;
+  }
+
+  @Override
+  public void registerAutoCompleters(StarxAutoCompleterRegistry registry) {
+    registry.register("config", new ConfigCompleter());
+    registry.register("command", new CommandCompleter(this));
+    registry.register("extension", new ExtensionCompleter(this));
+  }
 
   @Override
   public StarxExtensionRegistration registerExtension(
