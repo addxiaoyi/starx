@@ -14,6 +14,7 @@ final class VelocityWebsiteSyncConfigParser {
   static WebsiteSyncConfig parse(Map<String, Object> node) {
     Map<String, Object> heartbeat = child(node, "heartbeat");
     Map<String, Object> textures = child(node, "textures");
+    Map<String, Object> circuitBreaker = child(node, "circuit-breaker");
     WebsitePlatform platform = WebsitePlatform.parse(string(node, "platform", "velocity"));
     if (platform != WebsitePlatform.VELOCITY) {
       throw new IllegalArgumentException(
@@ -36,9 +37,9 @@ final class VelocityWebsiteSyncConfigParser {
             integer(textures, "manifest-interval-seconds", 300),
             integer(textures, "batch-size", 500)),
         new WebsiteSyncConfig.CircuitBreakerConfig(
-            bool(node, "circuit-breaker.enabled", true),
-            integer(node, "circuit-breaker.failure-threshold", 10),
-            integer(node, "circuit-breaker.open-timeout-seconds", 60)));
+            bool(circuitBreaker, "enabled", true),
+            integer(circuitBreaker, "failure-threshold", 10),
+            integer(circuitBreaker, "open-timeout-seconds", 60)));
   }
 
   private static Map<String, Object> child(Map<String, Object> node, String key) {

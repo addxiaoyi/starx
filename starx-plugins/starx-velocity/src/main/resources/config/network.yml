@@ -92,6 +92,13 @@ website-sync:
     # 资源清单同步间隔和每批数量。
     manifest-interval-seconds: 300
     batch-size: 500
+  circuit-breaker:
+    # 熔断器开关，防止频繁失败请求拖垮外部服务。
+    enabled: true
+    # 允许连续失败次数后触发熔断。
+    failure-threshold: 10
+    # 熔断后多少秒进入半开状态再试探。
+    open-timeout-seconds: 60
 
 napcat:
   # 是否启用 NapCat QQ 群消息桥接；没有 NapCat 服务时必须保持 false。
