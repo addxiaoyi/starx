@@ -23,11 +23,12 @@ final class JdbcSchema {
       Connection connection, String table, String name, boolean unique, String columns)
       throws SQLException {
     if (indexExists(connection, table, name)) return;
-    String sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX " + name
+    String sql = "CREATE " + (unique ? "UNIQUE " : "") + "INDEX IF NOT EXISTS " + name
         + " ON " + table + "(" + columns + ")";
     try (Statement statement = connection.createStatement()) {
       statement.execute(sql);
     } catch (SQLException error) {
+      if (isDuplicateConstraint(error)) return;
       if (!indexExists(connection, table, name)) throw error;
     }
   }
