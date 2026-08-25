@@ -1,55 +1,72 @@
 package io.github.addxiaoyi.starx.common.platform;
 
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
 public final class NodeHealthStateMachine {
   private static final int[] WARMING_WEIGHTS = {10, 25, 50, 100};
 
-  private State state = State.HEALTHY;
-  private int missed;
-  private int warmingStep;
-  private int admissionWeight = 100;
+  private final AtomicReference<State> state = new AtomicReference<>(State.HEALTHY);
+  private final AtomicInteger missed = new AtomicInteger(0);
+  private final AtomicInteger warmingStep = new AtomicInteger(0);
+  private final AtomicInteger admissionWeight = new AtomicInteger(100);
 
-  public synchronized Snapshot missedHeartbeat() {
-    this.missed++;
-    this.warmingStep = 0;
-    if (this.missed == 1) {
-      this.state = State.SUSPECT;
-      this.admissionWeight = 50;
-    } else if (this.missed == 2) {
-      this.state = State.DRAINING;
-      this.admissionWeight = 0;
+  public Snapshot missedHeartbeat() {
+    int currentMissed = missed.incrementAndGet();
+    warmingStep.set(0);
+    
+    State newState;
+    int newWeight;
+    if (currentMissed == 1) {
+      newState = State.SUSPECT;
+      newWeight = 50;
+    } else if (currentMissed == 2) {
+      newState = State.DRAINING;
+      newWeight = 0;
     } else {
-      this.state = State.OFFLINE;
-      this.admissionWeight = 0;
+      newState = State.OFFLINE;
+      newWeight = 0;
     }
-    return this.snapshot();
+    
+    state.set(newState);
+    admissionWeight.set(newWeight);
+    return snapshot();
   }
 
-  public synchronized Snapshot healthyHeartbeat() {
-    if (this.state == State.SUSPECT) {
-      this.resetHealthy();
-      return this.snapshot();
+  public Snapshot healthyHeartbeat() {
+    State currentState = state.get();
+    
+    if (currentState == State.SUSPECT) {
+      resetHealthy();
+      return snapshot();
     }
-    if (this.state == State.DRAINING || this.state == State.OFFLINE || this.state == State.WARMING) {
-      this.state = State.WARMING;
-      this.missed = 0;
-      this.admissionWeight = WARMING_WEIGHTS[this.warmingStep];
-      this.warmingStep++;
-      if (this.warmingStep == WARMING_WEIGHTS.length) this.resetHealthy();
-      return this.snapshot();
+    
+    if (currentState == State.DRAINING || currentState == State.OFFLINE || currentState == State.WARMING) {
+      state.set(State.WARMING);
+      missed.set(0);
+      
+      int currentWarmingStep = warmingStep.getAndIncrement();
+      admissionWeight.set(WARMING_WEIGHTS[currentWarmingStep]);
+      
+      if (currentWarmingStep + 1 == WARMING_WEIGHTS.length) {
+        resetHealthy();
+      }
+      return snapshot();
     }
-    this.resetHealthy();
-    return this.snapshot();
+    
+    resetHealthy();
+    return snapshot();
   }
 
-  public synchronized Snapshot snapshot() {
-    return new Snapshot(this.state, this.admissionWeight, this.missed, this.warmingStep);
+  public Snapshot snapshot() {
+    return new Snapshot(state.get(), admissionWeight.get(), missed.get(), warmingStep.get());
   }
 
   private void resetHealthy() {
-    this.state = State.HEALTHY;
-    this.missed = 0;
-    this.warmingStep = 0;
-    this.admissionWeight = 100;
+    state.set(State.HEALTHY);
+    missed.set(0);
+    warmingStep.set(0);
+    admissionWeight.set(100);
   }
 
   public enum State {
