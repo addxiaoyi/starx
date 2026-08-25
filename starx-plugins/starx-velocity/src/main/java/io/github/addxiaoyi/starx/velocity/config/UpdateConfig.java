@@ -12,7 +12,8 @@ public record UpdateConfig(
     String githubRepo,
     String mavenGroup,
     String mavenArtifact,
-    int checkIntervalMinutes
+    int checkIntervalMinutes,
+    boolean notifyEnabled
 ) {
   public static final String SOURCE_GITHUB = "github";
   public static final String SOURCE_MAVEN = "maven";
@@ -33,7 +34,7 @@ public record UpdateConfig(
   }
 
   public static UpdateConfig disabled() {
-    return new UpdateConfig(false, SOURCE_GITHUB, "", "", "", "", MIN_INTERVAL_MINUTES);
+    return new UpdateConfig(false, SOURCE_GITHUB, "", "", "", "", MIN_INTERVAL_MINUTES, false);
   }
 
   public Duration checkInterval() {

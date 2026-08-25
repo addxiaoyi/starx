@@ -154,7 +154,8 @@ public final class ConfigLoader {
         stringValue(node, "github-repo", ""),
         stringValue(node, "maven-group", ""),
         stringValue(node, "maven-artifact", ""),
-        integer(node, "check-interval-minutes", 60));
+        integer(node, "check-interval-minutes", 60),
+        booleanValue(node, "notify-enabled", true));
   }
 
   private static void persistMiniMotdMigration(Path path, Map<String, Object> root)

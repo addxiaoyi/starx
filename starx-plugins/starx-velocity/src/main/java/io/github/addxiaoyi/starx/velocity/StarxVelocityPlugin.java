@@ -18,6 +18,8 @@ import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.scheduler.ScheduledTask;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
 import io.github.addxiaoyi.starx.api.dto.UserDto;
 import io.github.addxiaoyi.starx.api.event.EventBus;
@@ -637,13 +639,28 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             this.dataDirectory.resolve("updates"),
             this.logger::info);
         long intervalMinutes = updateConfig.checkInterval().toMinutes();
+        boolean notifyEnabled = updateConfig.notifyEnabled();
         this.proxy.getScheduler().buildTask(this, () -> {
             io.github.addxiaoyi.starx.common.update.UpdateManager.CheckResult result = this.updateManager.checkAndUpdate();
             switch (result) {
-                case UPDATE_DOWNLOADED -> this.logger.info(
-                    "StarX update downloaded; restart to apply");
-                case UPDATE_AVAILABLE -> this.logger.info(
-                    "New version " + this.updateManager.latestKnownVersion() + " available");
+                case UPDATE_DOWNLOADED -> {
+                    this.logger.info(
+                        "StarX update downloaded; restart to apply");
+                    if (notifyEnabled) {
+                        notifyUpdate("StarX 已下载更新至 "
+                            + this.updateManager.latestKnownVersion()
+                            + "，请重启服务器以应用");
+                    }
+                }
+                case UPDATE_AVAILABLE -> {
+                    this.logger.info(
+                        "New version " + this.updateManager.latestKnownVersion() + " available");
+                    if (notifyEnabled) {
+                        notifyUpdate("StarX 可用更新至 "
+                            + this.updateManager.latestKnownVersion()
+                            + "，服务器将在下次重启时自动更新");
+                    }
+                }
                 case CHECK_FAILED -> this.logger.fine("Update check failed");
                 default -> { /* UP_TO_DATE, DOWNLOAD_FAILED */ }
             }
@@ -655,6 +672,11 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         return this.proxy.getPluginManager().fromInstance(this)
             .flatMap(container -> container.getDescription().getVersion())
             .orElse("unknown");
+    }
+
+    private void notifyUpdate(String message) {
+        this.proxy.getAllPlayers().forEach(player -> 
+            player.sendMessage(Component.text(message, NamedTextColor.YELLOW)));
     }
 
     @Subscribe
