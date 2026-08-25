@@ -164,7 +164,11 @@ class WebsiteSyncHttpClientTest {
         this.baseUrl,
         Duration.ofSeconds(2),
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(1)).build(),
-        new Gson());
+        new Gson(),
+        new SyncMetrics(),
+        new CircuitBreaker(10, java.time.Duration.ofSeconds(60)),
+        false,
+        false);
   }
 
   private void handle(HttpExchange exchange) throws IOException {
