@@ -34,7 +34,6 @@ public final class UpdateManager {
   private final Path updateDirectory;
   private final Consumer<String> logger;
   private final long maxJarSizeBytes;
-
   private volatile long lastCheckMillis = 0;
   private volatile String latestKnownVersion = "";
 

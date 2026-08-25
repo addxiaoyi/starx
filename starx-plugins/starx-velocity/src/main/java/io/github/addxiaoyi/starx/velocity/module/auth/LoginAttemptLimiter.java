@@ -2,16 +2,17 @@ package io.github.addxiaoyi.starx.velocity.module.auth;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.function.Predicate;
 
 final class LoginAttemptLimiter {
   private final int capacity;
   private final int maxAttempts;
   private final Duration resetAfter;
-  private final Map<UUID, Attempt> attempts = new HashMap<>();
+  private final ConcurrentMap<UUID, Attempt> attempts = new ConcurrentHashMap<>();
 
   LoginAttemptLimiter(int capacity, int maxAttempts, Duration resetAfter) {
     if (capacity < 1 || maxAttempts < 1) {
@@ -25,39 +26,52 @@ final class LoginAttemptLimiter {
     }
   }
 
-  synchronized boolean allow(UUID playerId, Instant now) {
+  boolean allow(UUID playerId, Instant now) {
     Objects.requireNonNull(playerId, "playerId");
     Objects.requireNonNull(now, "now");
+    
+    // 先尝试移除过期条目
     Attempt current = attempts.get(playerId);
     if (current != null && !now.isBefore(current.resetAt())) {
       attempts.remove(playerId);
       current = null;
     }
+    
     if (current == null) {
+      // 容量检查和清理
       if (attempts.size() >= capacity) {
-        attempts.entrySet().removeIf(entry -> !now.isBefore(entry.getValue().resetAt()));
+        cleanExpired(now);
       }
       if (attempts.size() >= capacity) {
         return false;
       }
-      attempts.put(playerId, new Attempt(1, now.plus(resetAfter)));
-      return true;
+      Attempt newAttempt = new Attempt(1, now.plus(resetAfter));
+      Attempt existing = attempts.putIfAbsent(playerId, newAttempt);
+      return existing == null;
     }
-    Attempt next = new Attempt(current.count() + 1, current.resetAt());
+    
+    // 更新尝试次数
+    int newCount = current.count() + 1;
+    Attempt next = new Attempt(newCount, current.resetAt());
     attempts.put(playerId, next);
-    return next.count() <= maxAttempts;
+    return newCount <= maxAttempts;
   }
 
-  synchronized void remove(UUID playerId) {
+  void remove(UUID playerId) {
     attempts.remove(playerId);
   }
 
-  synchronized void clear() {
+  void clear() {
     attempts.clear();
   }
 
-  synchronized int size() {
+  int size() {
     return attempts.size();
+  }
+
+  private void cleanExpired(Instant now) {
+    Predicate<Attempt> isExpired = attempt -> !now.isBefore(attempt.resetAt());
+    attempts.entrySet().removeIf(entry -> isExpired.test(entry.getValue()));
   }
 
   private record Attempt(int count, Instant resetAt) {}
