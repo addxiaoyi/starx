@@ -1,17 +1,18 @@
-# 插件自动更新配置（示例）
+# 插件自动更新配置
 # 默认禁用；启用后每 check-interval-minutes 检查一次。
-enabled: false
+update:
+  enabled: false
 
-# 更新源：github 或 maven
-source: github
+  # 更新源：github 或 maven
+  source: github
 
-# GitHub Releases 参数（source=github 时生效）
-github-owner: addxiaoyi
-github-repo: starmc-website
+  # GitHub Releases 参数（source=github 时生效）
+  github-owner: addxiaoyi
+  github-repo: starmc-website
 
-# Maven Central 参数（source=maven 时生效）
-maven-group: io.github.addxiaoyi
-maven-artifact: starx-velocity
+  # Maven Central 参数（source=maven 时生效）
+  maven-group: io.github.addxiaoyi
+  maven-artifact: starx-velocity
 
-# 检查间隔（分钟），最小 30，最大 1440
-check-interval-minutes: 60
+  # 检查间隔（分钟），最小 30，最大 1440
+  check-interval-minutes: 60
