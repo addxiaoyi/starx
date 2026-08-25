@@ -14,12 +14,12 @@ import io.github.addxiaoyi.starx.velocity.messaging.VelocityMessageBridge;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -31,8 +31,9 @@ implements VelocityModule {
     private final VelocityMessageBridge messageBridge;
     private final Config config;
     private final AtomicBoolean collecting = new AtomicBoolean(false);
-    private final List<Map<String, Object>> dataPoints = Collections.synchronizedList(new ArrayList());
-    private final Map<String, Map<String, Object>> backendStats = new ConcurrentHashMap<String, Map<String, Object>>();
+    private final ConcurrentLinkedDeque<Map<String, Object>> dataPoints = new ConcurrentLinkedDeque<>();
+    private final Map<String, Map<String, Object>> backendStats = new ConcurrentHashMap<>();
+    private volatile int dataPointsCount = 0;
     private ScheduledTask scheduledTask;
     private final Consumer<StarxEvent> statsSubscriber = this::onBackendStats;
 
@@ -67,6 +68,8 @@ implements VelocityModule {
             this.scheduledTask = null;
         }
         this.backendStats.clear();
+        this.dataPoints.clear();
+        this.dataPointsCount = 0;
     }
 
     public boolean isCollecting() {
@@ -76,20 +79,24 @@ implements VelocityModule {
     void onBackendStats(StarxEvent event) {
         Map<String, Object> payload = event.payload();
         String serverName = String.valueOf(payload.getOrDefault("server", "unknown"));
-        this.backendStats.put(serverName, payload);
+        backendStats.put(serverName, payload);
     }
 
     public void collectDataPoint() {
         int excess;
         int onlinePlayers = this.plugin.proxy().getPlayerCount();
-        LinkedHashMap<String, Object> point = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> point = new LinkedHashMap<>();
         point.put("timestamp", Instant.now().toString());
         point.put("online_players", onlinePlayers);
         point.put("server_count", this.plugin.proxy().getAllServers().size());
-        point.put("backend_stats", new LinkedHashMap<String, Map<String, Object>>(this.backendStats));
+        point.put("backend_stats", new LinkedHashMap<>(this.backendStats));
         this.dataPoints.add(point);
-        if (this.dataPoints.size() > this.config.maxDataPoints() && (excess = this.dataPoints.size() - this.config.maxDataPoints()) > 0) {
-            this.dataPoints.subList(0, excess).clear();
+        this.dataPointsCount++;
+        if (this.dataPointsCount > this.config.maxDataPoints() && (excess = this.dataPointsCount - this.config.maxDataPoints()) > 0) {
+            for (int i = 0; i < excess; i++) {
+                this.dataPoints.pollFirst();
+            }
+            this.dataPointsCount = this.config.maxDataPoints();
         }
     }
 
@@ -97,10 +104,7 @@ implements VelocityModule {
      * WARNING - Removed try catching itself - possible behaviour change.
      */
     public List<Map<String, Object>> getDataPoints() {
-        List<Map<String, Object>> list = this.dataPoints;
-        synchronized (list) {
-            return List.copyOf(this.dataPoints);
-        }
+        return List.copyOf(this.dataPoints);
     }
 
     public Map<String, Map<String, Object>> getBackendStats() {
