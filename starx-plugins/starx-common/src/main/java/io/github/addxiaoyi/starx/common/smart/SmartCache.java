@@ -14,6 +14,8 @@ import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import io.github.addxiaoyi.starx.common.metrics.PerformanceMetrics;
+
 public final class SmartCache<K, V> {
     private static final Logger logger = Logger.getLogger(SmartCache.class.getName());
     private static final ScheduledExecutorService preloader = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -26,13 +28,23 @@ public final class SmartCache<K, V> {
     private final ConcurrentHashMap<K, CacheEntry> cache;
     private final Function<K, V> loader;
     private final ConcurrentHashMap<K, Integer> accessCounts;
+    private final PerformanceMetrics.LatencyTracker loadTracker;
+    private final PerformanceMetrics.RateCounter hitCounter;
+    private final PerformanceMetrics.RateCounter missCounter;
 
     public SmartCache(int maxSize, long ttlMillis, Function<K, V> loader) {
+        this(maxSize, ttlMillis, loader, "SmartCache");
+    }
+
+    public SmartCache(int maxSize, long ttlMillis, Function<K, V> loader, String metricsName) {
         this.maxSize = maxSize;
         this.ttlMillis = ttlMillis;
         this.cache = new ConcurrentHashMap(Math.min(maxSize, 64));
         this.loader = loader;
         this.accessCounts = new ConcurrentHashMap();
+        this.loadTracker = PerformanceMetrics.defaultRegistry().latencyTracker(metricsName + ".loadLatency");
+        this.hitCounter = PerformanceMetrics.defaultRegistry().rateCounter(metricsName + ".hits");
+        this.missCounter = PerformanceMetrics.defaultRegistry().rateCounter(metricsName + ".misses");
         // 每 30 秒定时清理过期条目，避免过期条目长期占用内存
         long cleanupInterval = Math.max(ttlMillis / 2, 30_000L);
         preloader.scheduleAtFixedRate(this::evictExpired, cleanupInterval, cleanupInterval, TimeUnit.MILLISECONDS);
@@ -46,8 +58,10 @@ public final class SmartCache<K, V> {
         CacheEntry entry = this.cache.get(key);
         if (entry != null && !entry.isExpired()) {
             this.accessCounts.merge(key, 1, Integer::sum);
+            this.hitCounter.increment();
             return entry.value;
         }
+        this.missCounter.increment();
         return this.loadAndCache(key);
     }
 
@@ -55,8 +69,10 @@ public final class SmartCache<K, V> {
         CacheEntry entry = this.cache.get(key);
         if (entry != null && !entry.isExpired()) {
             this.accessCounts.merge(key, 1, Integer::sum);
+            this.hitCounter.increment();
             return entry.value;
         }
+        this.missCounter.increment();
         return null;
     }
 
