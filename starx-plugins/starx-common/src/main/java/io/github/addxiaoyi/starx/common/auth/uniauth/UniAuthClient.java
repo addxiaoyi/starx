@@ -322,15 +322,19 @@ public final class UniAuthClient {
     return message.length() > 240 ? message.substring(0, 240) : message;
   }
 
+  private static final char[] HEX_ARRAY = "0123456789abcdef".toCharArray();
+
   private static String sha256(String data) {
     try {
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
       byte[] hash = digest.digest(data.getBytes(StandardCharsets.UTF_8));
-      StringBuilder result = new StringBuilder(hash.length * 2);
-      for (byte value : hash) {
-        result.append(String.format("%02x", value));
+      char[] hexChars = new char[hash.length * 2];
+      for (int i = 0; i < hash.length; i++) {
+        int v = hash[i] & 0xFF;
+        hexChars[i * 2] = HEX_ARRAY[v >>> 4];
+        hexChars[i * 2 + 1] = HEX_ARRAY[v & 0x0F];
       }
-      return result.toString();
+      return new String(hexChars);
     } catch (Exception exception) {
       throw new IllegalStateException("SHA-256 not available", exception);
     }
