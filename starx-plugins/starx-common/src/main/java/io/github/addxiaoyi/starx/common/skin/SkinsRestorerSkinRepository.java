@@ -11,6 +11,8 @@ import java.lang.reflect.Modifier;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -19,11 +21,16 @@ public final class SkinsRestorerSkinRepository
 implements SkinRepository {
     private static final Logger DEFAULT_LOGGER = Logger.getLogger(SkinsRestorerSkinRepository.class.getName());
     private static final String PROVIDER_CLASS = "net.skinsrestorer.api.SkinsRestorerProvider";
+    private static final ConcurrentMap<CacheKey, Method> METHOD_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<Class<?>, Method[]> ALL_METHODS_CACHE = new ConcurrentHashMap<>();
+    
     private final boolean available;
     private final Object playerStorage;
     private final Object skinStorage;
     private final Logger logger;
     private final AtomicBoolean failureLogged = new AtomicBoolean();
+    
+    private static final record CacheKey(Class<?> clazz, String methodName, Class<?>... paramTypes) {}
 
     public SkinsRestorerSkinRepository() {
         this(DEFAULT_LOGGER);
@@ -411,7 +418,8 @@ implements SkinRepository {
     }
 
     private static boolean hasMethod(Object target, String name, int parameterCount) {
-        for (Method method : target.getClass().getMethods()) {
+        Method[] methods = ALL_METHODS_CACHE.computeIfAbsent(target.getClass(), Class::getMethods);
+        for (Method method : methods) {
             if (method.getName().equals(name) && method.getParameterCount() == parameterCount) {
                 return true;
             }
@@ -546,10 +554,27 @@ implements SkinRepository {
     }
 
     private static Method findMethod(Class<?> clazz, String name, Object ... args) throws NoSuchMethodException {
+        // Create cache key based on method name and argument types
+        Class<?>[] argTypes = new Class<?>[args.length];
+        for (int i = 0; i < args.length; i++) {
+            argTypes[i] = args[i] == null ? null : args[i].getClass();
+        }
+        CacheKey cacheKey = new CacheKey(clazz, name, argTypes);
+        
+        // Try to get from cache first
+        Method cached = METHOD_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        
+        // Find method
         Method selected = null;
         int selectedScore = -1;
         String selectedKey = null;
-        for (Method method : clazz.getMethods()) {
+        
+        Method[] methods = ALL_METHODS_CACHE.computeIfAbsent(clazz, Class::getMethods);
+        
+        for (Method method : methods) {
             Class<?>[] paramTypes;
             if (!method.getName().equals(name) || (paramTypes = method.getParameterTypes()).length != args.length) continue;
             int score = 0;
@@ -569,7 +594,11 @@ implements SkinRepository {
                 selectedKey = key;
             }
         }
-        if (selected != null) return selected;
+        if (selected != null) {
+            // Cache the result
+            METHOD_CACHE.put(cacheKey, selected);
+            return selected;
+        }
         throw new NoSuchMethodException(name + " in " + String.valueOf(clazz));
     }
 

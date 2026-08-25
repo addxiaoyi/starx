@@ -351,7 +351,7 @@ public final class AuthService {
         return removed;
     }
 
-    public synchronized void bindWebLoginApprovalGateway(WebLoginApprovalGateway gateway) {
+    public void bindWebLoginApprovalGateway(WebLoginApprovalGateway gateway) {
         Objects.requireNonNull(gateway, "gateway");
         if (this.webLoginApprovals != null) {
             throw new IllegalStateException("Web login approval gateway is already bound");
