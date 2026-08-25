@@ -168,6 +168,12 @@ public interface ExtensionCommandRegistrar {
 
     /**
      * 命令帮助信息
+     *
+     * @param name 命令名称
+     * @param description 命令描述
+     * @param usage 命令用法
+     * @param aliases 命令别名列表
+     * @param subcommands 子命令帮助列表
      */
     record CommandHelp(
         String name,
@@ -178,6 +184,10 @@ public interface ExtensionCommandRegistrar {
     ) {
         /**
          * 命令子命令帮助
+         *
+         * @param name 子命令名称
+         * @param description 子命令描述
+         * @param usage 子命令用法
          */
         record CommandSubcommand(
             String name,

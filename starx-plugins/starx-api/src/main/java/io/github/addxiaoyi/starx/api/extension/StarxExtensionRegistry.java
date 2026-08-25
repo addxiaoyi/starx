@@ -385,6 +385,9 @@ public interface StarxExtensionRegistry {
 
     /**
      * Default implementation of extension context.
+     *
+     * @param service the StarX service
+     * @param descriptor the extension descriptor
      */
     record DefaultExtensionContext(
         StarxService service,

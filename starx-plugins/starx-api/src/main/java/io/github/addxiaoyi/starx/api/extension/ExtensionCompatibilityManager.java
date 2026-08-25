@@ -81,6 +81,13 @@ public interface ExtensionCompatibilityManager {
 
     /**
      * 兼容性结果
+     *
+     * @param isCompatible 是否兼容
+     * @param issues 兼容性问题列表
+     * @param warnings 兼容性警告列表
+     * @param requiredAdapters 所需适配器映射
+     * @param platformVersion 平台版本
+     * @param extensionVersion 扩展版本
      */
     record CompatibilityResult(
         boolean isCompatible,
@@ -105,6 +112,14 @@ public interface ExtensionCompatibilityManager {
 
     /**
      * 兼容性问题
+     *
+     * @param issueId 问题ID
+     * @param description 问题描述
+     * @param severity 严重程度
+     * @param affectedComponent 受影响的组件
+     * @param extensionId 扩展ID
+     * @param platformVersion 平台版本
+     * @param extensionVersion 扩展版本
      */
     record CompatibilityIssue(
         String issueId,
@@ -126,6 +141,11 @@ public interface ExtensionCompatibilityManager {
 
     /**
      * 兼容性警告
+     *
+     * @param warningId 警告ID
+     * @param message 警告消息
+     * @param component 相关组件
+     * @param suggestedAction 建议操作
      */
     record CompatibilityWarning(
         String warningId,
@@ -136,6 +156,13 @@ public interface ExtensionCompatibilityManager {
 
     /**
      * 兼容性解决方案
+     *
+     * @param solutionId 解决方案ID
+     * @param description 解决方案描述
+     * @param issueId 对应问题ID
+     * @param steps 解决步骤列表
+     * @param isAutomatic 是否自动应用
+     * @param adapterClass 适配器类名
      */
     record CompatibilitySolution(
         String solutionId,
@@ -194,6 +221,14 @@ public interface ExtensionCompatibilityManager {
 
     /**
      * 兼容性配置
+     *
+     * @param backwardCompatibilityEnabled 是否启用向后兼容性
+     * @param autoApplyAdapters 是否自动应用适配器
+     * @param logCompatibilityWarnings 是否记录兼容性警告
+     * @param logCompatibilityErrors 是否记录兼容性错误
+     * @param enabledAdapters 已启用的适配器列表
+     * @param disabledAdapters 已禁用的适配器列表
+     * @param adapterVersions 适配器版本映射
      */
     record CompatibilityConfig(
         boolean backwardCompatibilityEnabled,

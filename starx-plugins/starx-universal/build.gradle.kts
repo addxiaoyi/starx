@@ -22,6 +22,8 @@ val canonicalServerApiEntries = listOf(
 val canonicalServerApiPrefixes = listOf(
     "io/github/addxiaoyi/starx/api/compat/",
     "io/github/addxiaoyi/starx/api/extension/",
+    "io/github/addxiaoyi/starx/api/tab/",
+    "io/github/addxiaoyi/starx/runtime/autocomplete/",
     "io/github/addxiaoyi/starx/runtime/extension/",
     "io/github/addxiaoyi/starx/website/"
 )
@@ -65,6 +67,8 @@ val universalJar = tasks.register<Jar>("universalJar") {
             *canonicalServerApiEntries.toTypedArray(),
             "io/github/addxiaoyi/starx/api/compat/**",
             "io/github/addxiaoyi/starx/api/extension/**",
+            "io/github/addxiaoyi/starx/api/tab/**",
+            "io/github/addxiaoyi/starx/runtime/autocomplete/**",
             "io/github/addxiaoyi/starx/runtime/extension/**",
             "io/github/addxiaoyi/starx/website/**"
         )

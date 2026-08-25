@@ -58,13 +58,13 @@ tasks.jar {
     enabled = false
 }
 
-tasks.shadowJar {
-    archiveFileName.set("starx-velocity.jar")
-    exclude("META-INF/*.RSA", "META-INF/*.DSA", "META-INF/*.SF")
-    relocate("net.elytrium.limboapi.thirdparty.fastprepare", "io.github.addxiaoyi.starx.limbo.thirdparty.fastprepare")
+	tasks.shadowJar {
+	    archiveFileName.set("starx-velocity.jar")
+	    exclude("META-INF/*.RSA", "META-INF/*.DSA", "META-INF/*.SF")
+	    relocate("net.elytrium.limboapi.thirdparty.fastprepare", "io.github.addxiaoyi.starx.limbo.thirdparty.fastprepare")
     relocate("net.elytrium.limboapi.thirdparty.commons", "io.github.addxiaoyi.starx.limbo.thirdparty.commons")
-    relocate("net.elytrium.commons", "io.github.addxiaoyi.starx.limbo.thirdparty.commons")
-}
+	    relocate("net.elytrium.commons", "io.github.addxiaoyi.starx.limbo.thirdparty.commons")
+	}
 
 val verifyVelocityRuntimeJar = tasks.register("verifyVelocityRuntimeJar") {
     group = "verification"

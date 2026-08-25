@@ -16,18 +16,20 @@ public final class EnhancedCompatibilityRules {
   private static final Pattern VERSION = Pattern.compile("(?<!\\d)(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?");
   private static final Pattern VELOCITY_BUILD = Pattern.compile("(?:build\\s*|[-.]b)(\\d+)", Pattern.CASE_INSENSITIVE);
 
-  // 自动补全相关的常量
+  /** 自动补全上下文：兼容性 */
   public static final String CONTEXT_COMPATIBILITY = "compatibility";
+  /** 自动补全上下文：平台 */
   public static final String CONTEXT_PLATFORM = "platform";
+  /** 自动补全上下文：集成 */
   public static final String CONTEXT_INTEGRATION = "integration";
 
-  // 支持的 Java 版本
+  /** 支持的 Java 版本列表 */
   public static final List<String> SUPPORTED_JAVA_VERSIONS = List.of("21", "25");
 
-  // 支持的 Velocity 版本
+  /** 支持的 Velocity 版本列表 */
   public static final List<String> SUPPORTED_VELOCITY_VERSIONS = List.of("3.5.0", "3.5.0-SNAPSHOT");
 
-  // 支持的 Minecraft 版本
+  /** 支持的 Minecraft 版本列表 */
   public static final List<String> SUPPORTED_MINECRAFT_VERSIONS = List.of(
       "1.21.0", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5", "1.21.6", "1.21.7", "1.21.8", "1.21.9", "1.21.10", "1.21.11",
       "1.21",
@@ -35,8 +37,8 @@ public final class EnhancedCompatibilityRules {
       "26.2.0", "26.2.1", "26.2.2"
   );
 
-  // 支持的插件集成
-  public static final java.util.Map<String, List<String>> SUPPORTED_INTEGRATIONS = java.util.Map.of(
+  /** 支持的插件集成列表，键为插件ID，值为支持的版本列表 */
+  public static final java.util.Map<String, java.util.List<String>> SUPPORTED_INTEGRATIONS = java.util.Map.of(
       "luckperms", List.of("5.0", "5.1", "5.2", "5.3", "5.4", "5.5", "5.x"),
       "floodgate", List.of("2.0", "2.1", "2.2", "2.x"),
       "tab", List.of("5.0", "5.1", "5.2", "6.0", "6.1", "6.2", "5.x", "6.x"),

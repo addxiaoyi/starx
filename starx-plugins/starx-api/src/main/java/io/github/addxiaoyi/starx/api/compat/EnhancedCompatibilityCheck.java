@@ -27,6 +27,14 @@ public record EnhancedCompatibilityCheck(
 ) {
   /**
    * 创建一个标准兼容性检查（无额外元数据）。
+   *
+   * @param id 检查的唯一标识符
+   * @param component 组件名称
+   * @param detectedVersion 检测到的版本
+   * @param supportedRange 支持的版本范围
+   * @param status 兼容性状态
+   * @param message 详细消息
+   * @return 兼容性检查实例
    */
   public static EnhancedCompatibilityCheck of(
       String id,
@@ -43,6 +51,15 @@ public record EnhancedCompatibilityCheck(
 
   /**
    * 创建一个带执行时间的兼容性检查。
+   *
+   * @param id 检查的唯一标识符
+   * @param component 组件名称
+   * @param detectedVersion 检测到的版本
+   * @param supportedRange 支持的版本范围
+   * @param status 兼容性状态
+   * @param message 详细消息
+   * @param durationMs 检查执行时间（毫秒）
+   * @return 兼容性检查实例
    */
   public static EnhancedCompatibilityCheck withDuration(
       String id,

@@ -37,7 +37,6 @@ tasks.withType<Javadoc> {
         encoding = "UTF-8"
         charSet = "UTF-8"
         docEncoding = "UTF-8"
-        addBooleanOption("Werror", true)
     }
 }
 

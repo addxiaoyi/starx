@@ -103,6 +103,12 @@ public interface ExtensionDependencyManager {
 
     /**
      * 扩展依赖
+     *
+     * @param id 依赖扩展ID
+     * @param versionRange 版本范围
+     * @param optional 是否可选
+     * @param scope 作用域
+     * @param metadata 额外元数据
      */
     record ExtensionDependency(
         String id,
@@ -130,6 +136,12 @@ public interface ExtensionDependencyManager {
 
     /**
      * 依赖版本结果
+     *
+     * @param extensionId 扩展ID
+     * @param compatible 是否兼容
+     * @param conflicts 版本冲突列表
+     * @param missingDependencies 缺失依赖列表
+     * @param versionMismatches 版本不匹配列表
      */
     record DependencyVersionResult(
         String extensionId,
@@ -153,6 +165,11 @@ public interface ExtensionDependencyManager {
 
     /**
      * 版本冲突
+     *
+     * @param dependencyId 依赖ID
+     * @param requiredVersion 所需版本
+     * @param availableVersion 可用版本
+     * @param message 冲突消息
      */
     record VersionConflict(
         String dependencyId,
@@ -163,6 +180,10 @@ public interface ExtensionDependencyManager {
 
     /**
      * 缺失依赖
+     *
+     * @param dependencyId 依赖ID
+     * @param requiredVersion 所需版本
+     * @param optional 是否可选
      */
     record MissingDependency(
         String dependencyId,
@@ -172,6 +193,10 @@ public interface ExtensionDependencyManager {
 
     /**
      * 版本不匹配
+     *
+     * @param dependencyId 依赖ID
+     * @param requiredVersion 所需版本
+     * @param availableVersion 可用版本
      */
     record VersionMismatch(
         String dependencyId,

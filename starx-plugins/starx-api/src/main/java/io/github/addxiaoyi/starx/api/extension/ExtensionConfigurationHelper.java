@@ -181,6 +181,11 @@ public interface ExtensionConfigurationHelper {
 
     /**
      * 验证结果
+     *
+     * @param isValid 是否有效
+     * @param errors 错误列表
+     * @param warnings 警告列表
+     * @param suggestions 建议映射
      */
     record ValidationResult(
         boolean isValid,

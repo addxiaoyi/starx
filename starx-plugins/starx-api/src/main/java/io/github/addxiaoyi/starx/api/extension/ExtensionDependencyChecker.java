@@ -63,6 +63,12 @@ public interface ExtensionDependencyChecker {
 
     /**
      * 检查结果
+     *
+     * @param canLoad 是否可以加载
+     * @param missingDependencies 缺失的依赖列表
+     * @param incompatibleDependencies 不兼容的依赖列表
+     * @param warnings 警告列表
+     * @param errorMessage 错误信息
      */
     record CheckResult(
         boolean canLoad,
@@ -86,6 +92,12 @@ public interface ExtensionDependencyChecker {
 
     /**
      * 依赖信息
+     *
+     * @param extensionId 依赖扩展ID
+     * @param extensionName 依赖扩展名称
+     * @param requiredVersion 所需版本
+     * @param actualVersion 实际版本
+     * @param isOptional 是否可选
      */
     record DependencyInfo(
         String extensionId,

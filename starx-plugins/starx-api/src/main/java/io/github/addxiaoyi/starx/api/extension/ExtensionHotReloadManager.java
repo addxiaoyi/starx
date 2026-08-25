@@ -40,11 +40,14 @@ public interface ExtensionHotReloadManager {
 
     /**
      * 检查是否启用热重载
+     *
+     * @return 是否启用热重载
      */
     boolean isHotReloadEnabled();
 
     /**
      * 热重载指定扩展
+     *
      * @param extensionId 扩展ID
      * @return 是否成功重载
      */
@@ -152,6 +155,12 @@ public interface ExtensionHotReloadManager {
 
     /**
      * 热重载结果
+     *
+     * @param extensionId 扩展ID
+     * @param success 是否成功
+     * @param errorMessage 错误信息
+     * @param durationMillis 持续时间(毫秒)
+     * @param warnings 警告列表
      */
     record HotReloadResult(
         String extensionId,

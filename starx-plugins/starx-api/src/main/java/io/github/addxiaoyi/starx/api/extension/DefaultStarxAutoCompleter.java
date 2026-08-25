@@ -36,6 +36,8 @@ public class DefaultStarxAutoCompleter implements StarxAutoCompleter {
 
   /**
    * 创建一个 Java 版本自动补全器。
+   *
+   * @return Java 版本自动补全器实例
    */
   public static DefaultStarxAutoCompleter javaVersionCompleter() {
     return new DefaultStarxAutoCompleter(
@@ -48,6 +50,8 @@ public class DefaultStarxAutoCompleter implements StarxAutoCompleter {
 
   /**
    * 创建一个 Velocity 版本自动补全器。
+   *
+   * @return Velocity 版本自动补全器实例
    */
   public static DefaultStarxAutoCompleter velocityVersionCompleter() {
     return new DefaultStarxAutoCompleter(
@@ -60,6 +64,8 @@ public class DefaultStarxAutoCompleter implements StarxAutoCompleter {
 
   /**
    * 创建一个 Minecraft 版本自动补全器。
+   *
+   * @return Minecraft 版本自动补全器实例
    */
   public static DefaultStarxAutoCompleter minecraftVersionCompleter() {
     return new DefaultStarxAutoCompleter(
