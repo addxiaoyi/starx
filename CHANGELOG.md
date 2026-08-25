@@ -2,6 +2,21 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [0.5.2] - 2026-08-25
+
+### Fixed
+
+- **ConfigLoaderUworldTest 断言损坏**：update.yml 分片未包裹在顶级 `update:` 键下，导致 config root 多出 7 个键，keySet 断言失败。
+- **VelocityWebsiteSyncConfigParser 点号键解析错误**：解析器读取 `"circuit-breaker.enabled"` 等点号键，但 YAML 实际是嵌套结构，导致熔断器配置永远用默认值。
+- **AsyncHttpClient.sync 最终块误记成功**：`finally` 块在异常情况下仍调用 `recordHeartbeatSuccess`，导致失败请求被错误计为成功。
+- **publishHeartbeatInternal 无节流重入**：积压拉取循环在异常状态下可能形成持续紧密异步重入，导致 CPU 飙升；加 8 轮上限 + 500ms 间隔节流。
+- **CircuitBreaker 死字段清理**：移除从来使用的 `lastFailureTime` 字段。
+- **UpdateManager .tmp 残留**：下载失败或文件移动失败时不清理临时文件。
+
+### Added
+
+- 插件自动更新检查器（GitHub Releases / Maven Central），disabled by default。
+
 ## [0.5.1] - 2026-08-25
 
 ### Fixed
