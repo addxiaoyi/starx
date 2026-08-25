@@ -49,6 +49,8 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
   private volatile Duration heartbeatTimeout;
   private ScheduledTask heartbeatTask;
   private final AtomicBoolean heartbeatDegraded = new AtomicBoolean();
+  private volatile long lastPullbackMillis = 0;
+  private static final long MIN_PULLBACK_INTERVAL_MS = 500;
   private final AtomicBoolean heartbeatEndpointRefreshScheduled = new AtomicBoolean();
   private volatile boolean heartbeatEndpointRefreshEnabled;
   private BackendMaintenanceState maintenance;
@@ -254,6 +256,28 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
       BackendHeartbeatClient client,
       BackendBridgeSession session
   ) {
+    this.publishHeartbeatInternal(client, session, 0);
+  }
+
+  /**
+   * 积压拉取循环：每轮交换后若 Velocity 端仍有积压则立即重入，
+   * 但受最大连续轮数与最小间隔双重节流，防止积压状态异常时形成紧密空转。
+   */
+  private void publishHeartbeatInternal(
+      BackendHeartbeatClient client,
+      BackendBridgeSession session,
+      int pullbackRound
+  ) {
+    // 单次触发最多连续拉取 8 轮；超过后放弃，等待下一个正常心跳周期。
+    if (pullbackRound >= 8) {
+      return;
+    }
+    long now = System.currentTimeMillis();
+    long sinceLast = now - this.lastPullbackMillis;
+    if (sinceLast < MIN_PULLBACK_INTERVAL_MS) {
+      return;
+    }
+    this.lastPullbackMillis = now;
     client.sendWithBacklog(session.statusReport(UUID.randomUUID().toString()))
         .whenComplete((reply, error) -> {
           if (error != null) {
@@ -283,7 +307,7 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
                   }
                   // 仍有积压（至少 1 条）时，立即触发下轮心跳，实现实时推送
                   if (reply.hasCommand() && reply.queuedRemaining() > 0) {
-                    this.publishHeartbeatInternal(client, session);
+                    this.publishHeartbeatInternal(client, session, pullbackRound + 1);
                   }
                   return;
                 }

@@ -267,14 +267,17 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
       try {
         T result = future.get(requestTimeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
         this.circuitBreaker.recordSuccess();
+        this.metrics.recordHeartbeatSuccess(System.currentTimeMillis() - startMillis);
         return result;
       } catch (java.util.concurrent.TimeoutException e) {
         this.circuitBreaker.recordFailure();
+        this.metrics.recordHeartbeatFailure();
         logger.accept("StarX website sync: request timed out after " + requestTimeout.toMillis() + "ms");
         throw new WebsiteSyncApiException("Request timed out", e);
       } catch (java.util.concurrent.ExecutionException e) {
         Throwable cause = e.getCause() != null ? e.getCause() : e;
         this.circuitBreaker.recordFailure();
+        this.metrics.recordHeartbeatFailure();
         if (cause instanceof WebsiteSyncApiException apiEx) {
           throw apiEx;
         }
@@ -284,13 +287,11 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
         throw new WebsiteSyncApiException("Request failed", cause);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
+        this.metrics.recordHeartbeatFailure();
         throw new WebsiteSyncApiException("Request interrupted", e);
       }
     } finally {
       concurrentRequests.release();
-      long elapsed = System.currentTimeMillis() - startMillis;
-      // 记录延迟供指标查询
-      this.metrics.recordHeartbeatSuccess(elapsed);
     }
   }
 
