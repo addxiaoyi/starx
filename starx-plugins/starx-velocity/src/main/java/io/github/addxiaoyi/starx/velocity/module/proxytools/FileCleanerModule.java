@@ -9,7 +9,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -145,7 +144,7 @@ implements VelocityModule {
     private void deleteByAge(List<File> fileList, int age) {
         ArrayList<File> toRemove = new ArrayList<File>();
         long cutoff = (long)age * 24L * 60L * 60L * 1000L;
-        long now = new Date().getTime();
+        long now = System.currentTimeMillis();
         for (File file : fileList) {
             if (now - file.lastModified() <= cutoff) continue;
             this.deleteFile(file);
@@ -185,7 +184,7 @@ implements VelocityModule {
         int age = fileCfg.age();
         if (age > -1) {
             long cutoff = (long)age * 24L * 60L * 60L * 1000L;
-            if (new Date().getTime() - file.lastModified() > cutoff) {
+            if (System.currentTimeMillis() - file.lastModified() > cutoff) {
                 this.deleteFile(file);
                 return;
             }
