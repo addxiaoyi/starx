@@ -80,7 +80,7 @@ public class TabListModule implements VelocityModule {
         }
         this.playerTasks.clear();
 
-        this.plugin.proxy().getEventManager().unregisterListener(this.playerListener);
+        this.plugin.proxy().getEventManager().unregisterListener(this.plugin, this.playerListener);
 
         for (Player player : this.plugin.proxy().getAllPlayers()) {
             player.sendPlayerListHeaderAndFooter(Component.empty(), Component.empty());
