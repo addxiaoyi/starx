@@ -10,14 +10,14 @@ import java.time.Duration;
  * 统一超时设置，避免线程长时间挂起。
  */
 final class HttpFetchers {
+  private static final java.net.http.HttpClient SHARED_CLIENT = java.net.http.HttpClient.newBuilder()
+      .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+      .build();
+
   private HttpFetchers() {
   }
 
   static InputStream fetchWithTimeout(URI uri, Duration timeout) throws IOException {
-    java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-        .connectTimeout(timeout)
-        .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-        .build();
     java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
         .uri(uri)
         .timeout(timeout)
@@ -26,7 +26,7 @@ final class HttpFetchers {
         .GET()
         .build();
     try {
-      java.net.http.HttpResponse<InputStream> response = client.send(
+      java.net.http.HttpResponse<InputStream> response = SHARED_CLIENT.send(
           request, java.net.http.HttpResponse.BodyHandlers.ofInputStream());
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
         response.body().close();

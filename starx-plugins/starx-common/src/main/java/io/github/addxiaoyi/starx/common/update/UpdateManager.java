@@ -23,6 +23,14 @@ import java.util.function.Consumer;
 public final class UpdateManager {
   private static final Duration MIN_CHECK_INTERVAL = Duration.ofMinutes(30);
   private static final long MAX_JAR_SIZE_BYTES = 64L * 1024 * 1024; // 64 MiB
+  private static final java.net.http.HttpClient SHARED_HTTP_CLIENT = java.net.http.HttpClient.newBuilder()
+      .connectTimeout(Duration.ofSeconds(10))
+      .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+      .build();
+  private static final java.net.http.HttpClient SHARED_HTTP_CLIENT_HTTP = java.net.http.HttpClient.newBuilder()
+      .connectTimeout(Duration.ofSeconds(10))
+      .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+      .build();
 
   private final String currentVersion;
   private final RepositoryClient repository;
@@ -141,10 +149,7 @@ public final class UpdateManager {
   }
 
   private DownloadResult fetchToFile(URI uri, Path target) throws IOException {
-    java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-        .build();
+    java.net.http.HttpClient client = SHARED_HTTP_CLIENT;
     java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
         .uri(uri)
         .timeout(Duration.ofSeconds(60))
