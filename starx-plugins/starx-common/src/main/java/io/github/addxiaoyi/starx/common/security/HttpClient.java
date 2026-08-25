@@ -16,7 +16,7 @@ import java.util.logging.Logger;
 public final class HttpClient {
     private static final Logger logger = Logger.getLogger(HttpClient.class.getName());
     private static final Gson gson = new Gson();
-    private static final java.net.http.HttpClient sharedClient = java.net.http.HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5L)).build();
+    private static final java.net.http.HttpClient sharedClient = java.net.http.HttpClient.newBuilder().connectTimeout(HttpConstants.DEFAULT_CONNECT_TIMEOUT).build();
     private final java.net.http.HttpClient client;
     private final String url;
     private final String method;
@@ -54,7 +54,7 @@ public final class HttpClient {
 
     public <T> Response<T> send(Class<T> responseType) {
         try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(this.url)).timeout(Duration.ofSeconds(10L)).header("Content-Type", "application/json").header("Accept", "application/json");
+            HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(this.url)).timeout(HttpConstants.DEFAULT_REQUEST_TIMEOUT).header("Content-Type", "application/json").header("Accept", "application/json");
             if (this.bearerToken != null) {
                 builder.header("Authorization", "Bearer " + this.bearerToken);
             }

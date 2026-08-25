@@ -640,6 +640,7 @@ public final class ConfigLoader {
         stringValue(node, "password", defaults.password()),
         stringValue(node, "url", defaults.url()),
         integer(node, "pool-max-size", defaults.poolMaxSize()),
-        longValue(node, "connection-timeout-ms", defaults.connectionTimeoutMs()));
+        longValue(node, "connection-timeout-ms", defaults.connectionTimeoutMs()),
+        longValue(node, "pool-timeout-ms", defaults.poolTimeoutMs()));
   }
 }
