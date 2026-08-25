@@ -3,7 +3,7 @@
  */
 package io.github.addxiaoyi.starx.common.config;
 
-public record DatabaseConfig(String type, String host, int port, String database, String username, String password, String url, int poolMaxSize, long connectionTimeoutMs) {
+public record DatabaseConfig(String type, String host, int port, String database, String username, String password, String url, int poolMaxSize, long connectionTimeoutMs, long poolTimeoutMs) {
     public DatabaseConfig {
         type = type == null || type.isBlank() ? "sqlite" : type;
         host = host == null ? "" : host;
@@ -14,10 +14,11 @@ public record DatabaseConfig(String type, String host, int port, String database
         url = url == null ? "" : url;
         poolMaxSize = poolMaxSize <= 0 ? 2 : poolMaxSize;
         connectionTimeoutMs = connectionTimeoutMs <= 0L ? 30000L : connectionTimeoutMs;
+        poolTimeoutMs = poolTimeoutMs <= 0L ? 30000L : poolTimeoutMs;
     }
 
     public static DatabaseConfig defaults() {
-        return new DatabaseConfig("sqlite", "", 3306, "plugins/starx/data.db", "starx", "", "", 2, 30000L);
+        return new DatabaseConfig("sqlite", "", 3306, "plugins/starx/data.db", "starx", "", "", 2, 30000L, 30000L);
     }
 
     public boolean hasUrl() {

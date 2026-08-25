@@ -124,7 +124,7 @@ public final class ConfigLoader {
 
     private static DatabaseConfig loadDatabase(Map<String, Object> node) {
         DatabaseConfig defaults = DatabaseConfig.defaults();
-        return new DatabaseConfig(ConfigLoader.str(node, "type", defaults.type()), ConfigLoader.str(node, "host", defaults.host()), ConfigLoader.integer(node, "port", defaults.port()), ConfigLoader.str(node, "database", defaults.database()), ConfigLoader.str(node, "username", defaults.username()), ConfigLoader.str(node, "password", defaults.password()), ConfigLoader.str(node, "url", defaults.url()), ConfigLoader.integer(node, "pool-max-size", defaults.poolMaxSize()), ConfigLoader.longVal(node, "connection-timeout-ms", defaults.connectionTimeoutMs()));
+        return new DatabaseConfig(ConfigLoader.str(node, "type", defaults.type()), ConfigLoader.str(node, "host", defaults.host()), ConfigLoader.integer(node, "port", defaults.port()), ConfigLoader.str(node, "database", defaults.database()), ConfigLoader.str(node, "username", defaults.username()), ConfigLoader.str(node, "password", defaults.password()), ConfigLoader.str(node, "url", defaults.url()), ConfigLoader.integer(node, "pool-max-size", defaults.poolMaxSize()), ConfigLoader.longVal(node, "connection-timeout-ms", defaults.connectionTimeoutMs()), ConfigLoader.longVal(node, "pool-timeout-ms", defaults.poolTimeoutMs()));
     }
 
     private static Map<String, ModuleConfig> loadModules(Map<String, Object> node) {

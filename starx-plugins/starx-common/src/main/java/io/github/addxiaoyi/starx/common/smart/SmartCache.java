@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -32,6 +33,9 @@ public final class SmartCache<K, V> {
         this.cache = new ConcurrentHashMap(Math.min(maxSize, 64));
         this.loader = loader;
         this.accessCounts = new ConcurrentHashMap();
+        // 每 30 秒定时清理过期条目，避免过期条目长期占用内存
+        long cleanupInterval = Math.max(ttlMillis / 2, 30_000L);
+        preloader.scheduleAtFixedRate(this::evictExpired, cleanupInterval, cleanupInterval, TimeUnit.MILLISECONDS);
     }
 
     public static <K, V> SmartCache<K, V> withDefaults(Function<K, V> loader) {
@@ -89,6 +93,19 @@ public final class SmartCache<K, V> {
     public void clear() {
         this.cache.clear();
         this.accessCounts.clear();
+    }
+
+    /**
+     * 定时清理所有过期条目
+     */
+    private void evictExpired() {
+        try {
+            long now = System.currentTimeMillis();
+            this.cache.entrySet().removeIf(entry -> entry.getValue().expiresAt <= now);
+            logger.log(Level.FINE, "SmartCache evicted expired entries, current size: {0}", this.cache.size());
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "SmartCache evictExpired failed", e);
+        }
     }
 
     private V loadAndCache(K key) {
