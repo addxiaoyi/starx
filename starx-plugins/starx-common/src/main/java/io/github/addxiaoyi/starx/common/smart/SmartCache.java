@@ -108,6 +108,12 @@ public final class SmartCache<K, V> {
         return this.cache.size();
     }
 
+    public V remove(K key) {
+        this.accessCounts.remove(key);
+        CacheEntry entry = this.cache.remove(key);
+        return entry != null ? entry.value : null;
+    }
+
     public void clear() {
         this.cache.clear();
         this.accessCounts.clear();

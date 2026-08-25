@@ -6,6 +6,7 @@ package io.github.addxiaoyi.starx.velocity.module.auth;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import io.github.addxiaoyi.starx.api.event.EventBus;
+import io.github.addxiaoyi.starx.common.auth.PremiumResolver;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.net.URI;
@@ -20,19 +21,33 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public final class YggdrasilModule
 implements VelocityModule {
+    private static final long PREMIUM_CACHE_TTL_MS = 3600000L;
+    private static final long AUTH_CACHE_TTL_MS = 300000L;
+    
     private final StarxVelocityPlugin plugin;
     private final EventBus eventBus;
     private final Config config;
     private final HttpClient httpClient;
+    private final PremiumResolver premiumResolver;
+    private final Logger logger;
 
     public YggdrasilModule(StarxVelocityPlugin plugin, EventBus eventBus, Config config) {
+        this(plugin, eventBus, config, null);
+    }
+    
+    public YggdrasilModule(StarxVelocityPlugin plugin, EventBus eventBus, Config config, PremiumResolver premiumResolver) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.config = Objects.requireNonNull(config, "config");
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(config.timeout())).build();
+        this.httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofMillis(config.timeout()))
+            .build();
+        this.premiumResolver = premiumResolver != null ? premiumResolver : new PremiumResolver();
+        this.logger = plugin.logger();
     }
 
     @Override
@@ -71,12 +86,16 @@ implements VelocityModule {
         String url = baseUrl + "session/minecraft/profile/" + uuid.toString().replace("-", "");
         ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
             if (response.statusCode() == 200) {
-                future.complete(matchesProfileUuid(response.body(), uuid));
+                boolean exists = matchesProfileUuid(response.body(), uuid);
+                if (exists) {
+                    this.premiumResolver.invalidate(uuid);
+                }
+                future.complete(exists);
             } else {
                 future.complete(false);
             }
         })).exceptionally(ex -> {
-            this.plugin.logger().log(Level.WARNING, "\u68c0\u67e5\u7528\u6237 " + username + " \u5728 " + serverName + " \u4e0a\u5931\u8d25: " + ((Throwable)ex).getMessage());
+            this.logger.log(Level.WARNING, "\u68c0\u67e5\u7528\u6237 " + username + " \u5728 " + serverName + " \u4e0a\u5931\u8d25: " + ((Throwable)ex).getMessage());
             future.complete(false);
             return null;
         });
