@@ -31,7 +31,7 @@ class DefaultStarxServiceTest {
     StarxExtensionRegistration registration = service.registerExtension(
         new StarxExtensionDescriptor(
             "example.test", "Example", "1.0.0", StarxApi.VERSION,
-            Set.of("starx.test.capability")),
+            Set.of("starx.test.capability"), List.of()),
         new StarxExtension() {
           @Override public void onEnable(StarxExtensionContext context) {
             context.publish("ready", Map.of("ok", true));
@@ -56,11 +56,11 @@ class DefaultStarxServiceTest {
     StarxExtension noop = context -> { };
     assertThrows(IllegalArgumentException.class, () -> service.registerExtension(
         new StarxExtensionDescriptor(
-            "example.future", "Future", "1", new ApiVersion(2, 0, 0), Set.of()), noop));
+            "example.future", "Future", "1", new ApiVersion(2, 0, 0), Set.of(), List.of()), noop));
     assertThrows(IllegalArgumentException.class, () -> service.registerExtension(
         new StarxExtensionDescriptor(
             "example.missing", "Missing", "1", StarxApi.VERSION,
-            Set.of("starx.missing")), noop));
+            Set.of("starx.missing"), List.of()), noop));
     StarxExtensionRegistration first = service.registerExtension(
         StarxExtensionDescriptor.create("example.duplicate", "Duplicate", "1"), noop);
     assertThrows(IllegalArgumentException.class, () -> service.registerExtension(
