@@ -139,3 +139,4 @@ class AuditRegressionTest {
     assertEquals(1, loads[0]);
     assertEquals("fresh", cache.get("x", now + 100));
   }
+}
