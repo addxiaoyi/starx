@@ -29,7 +29,7 @@ public class PublicApiCompatibilityTest {
     assertNotNull(StarxExtensionContext.class.getMethod("capabilities"));
     assertNotNull(StarxExtensionContext.class.getMethod("publish", String.class, Map.class));
     assertNotNull(StarxExtensionDescriptor.class.getConstructor(
-        String.class, String.class, String.class, ApiVersion.class, Set.class));
+        String.class, String.class, String.class, ApiVersion.class, Set.class, List.class));
     assertNotNull(PlatformKind.class.getMethod("values"));
   }
 }
