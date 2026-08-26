@@ -23,6 +23,18 @@ tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"
 }
 
+tasks.withType<Test> {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+tasks.withType<JavaExec> {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
 val velocityBuild606Artifact = layout.projectDirectory.file(
     "vendor/velocity/velocity-3.5.0-SNAPSHOT-606.jar"
 )
@@ -230,6 +242,13 @@ tasks.named("check") {
 }
 
 subprojects {
+    plugins.withId("java") {
+        extensions.configure<JavaPluginExtension> {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(25)
+            }
+        }
+    }
     tasks.withType<org.gradle.api.tasks.bundling.AbstractArchiveTask>().configureEach {
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
@@ -238,6 +257,14 @@ subprojects {
         dependsOn(rootProject.tasks.named("prepareVelocityBuild606Compile"))
     }
     tasks.withType<Test>().configureEach {
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
         dependsOn(rootProject.tasks.named("prepareVelocityBuild606Compile"))
+    }
+    tasks.withType<JavaExec>().configureEach {
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
     }
 }

@@ -28,6 +28,13 @@ jobs:
           java-version: "25"
           cache: gradle
 
+      - name: Verify build toolchain matches release requirements
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          java -version 2>&1 | grep '"25' || { echo "ERROR: CI must run on JDK 25"; exit 1; }
+          echo "Build toolchain OK (JDK 25)"
+
       - name: Verify all modules and universal plugin
         if: runner.os != 'Windows'
         run: |

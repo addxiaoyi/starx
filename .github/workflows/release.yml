@@ -24,6 +24,17 @@ jobs:
           java-version: "25"
           cache: gradle
 
+      - name: Verify build toolchain matches release requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          java_version="$(java -version 2>&1 | head -n 1)"
+          echo "System Java: $java_version"
+          if ! java -version 2>&1 | grep -q '"25'; then
+            echo "ERROR: Release builds must run on JDK 25 (bytecode compatibility contract)" >&2
+            exit 1
+          fi
+
       - name: Validate tag and project version
         id: version
         shell: bash
@@ -42,6 +53,16 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew clean check :starx-plugins:starx-universal:check --warning-mode all --no-daemon --console=plain --non-interactive
+
+      - name: Verify universal JAR bytecode targets Java 21 and loads under JDK 21
+        shell: bash
+        run: |
+          set -euo pipefail
+          jar="starx-plugins/starx-universal/build/libs/starx-universal.jar"
+          test -s "$jar"
+          # Extract a representative class and confirm major version 65 (Java 21)
+          unzip -p "$jar" io/github/addxiaoyi/starx/velocity/StarxVelocityPlugin.class \
+            | od -An -tu1 | head -n 1 | awk '{if ($8 != 65) { print "ERROR: bytecode major version is not 65 (Java 21): " $8; exit 1 } else { print "Bytecode target OK (major 65 / Java 21)" }}'
 
       - name: Prepare release assets
         env:
