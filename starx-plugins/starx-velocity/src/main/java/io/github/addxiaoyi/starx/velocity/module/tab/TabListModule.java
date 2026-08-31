@@ -173,7 +173,7 @@ public class TabListModule implements VelocityModule {
             
             // 延迟刷新以确保登录完成
             ScheduledTask task = TabListModule.this.plugin.proxy().getScheduler()
-                .buildTask(TabListModule.this, () -> {
+                .buildTask(TabListModule.this.plugin, () -> {
                     refreshPlayer(player);
                     TabListModule.this.playerTasks.remove(playerId);
                 })

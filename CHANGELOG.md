@@ -2,6 +2,63 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [0.6.2] - 2026-08-31
+
+### Fixed
+
+- **Velocity 登录崩溃**：修复 TabList 模块在 `PostLoginEvent` 中使用未注册模块实例创建调度任务的问题，改用已注册的 StarX 插件实例作为任务 owner。
+
+## [0.6.1] - 2026-07-26
+
+### Security
+
+- **身份认证硬化**：修复 5 个安全漏洞
+  - `AuthService.deleteUser` 添加操作者身份验证（密码+TOTP）和级联清理
+  - `SessionManager` 添加会话固定攻击保护，防止会话被恶意覆盖
+  - `TotpGenerator` 添加 TOTP 验证码重放保护，验证码只能用一次
+  - `AuthService.logout` 添加可选的 lease 验证，新增 `forceLogoutInternal` 方法供系统内部使用
+  - 恢复码消费添加 `synchronized` 锁，防止并发竞态条件
+
+### Added
+
+- **安全测试套件**：`SecurityVulnerabilityFixesTest` 提供 9 个安全修复验证测试
+- **独立压力测试**：`StressTestRunner` 提供数据库和密码验证压力测试
+- **压力测试套件**：
+  - `JdbcSchemaStressTest` (5 tests) - 数据库并发索引创建、列添加、约束检测
+  - `AuthServicePasswordVerificationStressTest` (7 tests) - BCrypt 密码哈希并发验证
+
+### Changed
+
+- **版本号更新**：从 0.5.3 更新至 0.6.1
+- **公共扩展 API**：保持 1.0.0 兼容性
+
+### Verification
+
+- 所有 27 个测试全部通过（数据库并发测试 5/5、安全测试 9/9、密码验证测试 7/7、独立压力测试 6/6）
+- 所有模块编译通过
+- 建议所有用户尽快升级以获取安全修复
+
+## [0.5.3] - 2026-07-26
+
+### Security
+
+- **身份认证硬化**：修复 3 个高危安全漏洞
+  - `AuthService.deleteUser` 添加操作者身份验证（密码+TOTP）和级联清理
+  - `SessionManager` 添加会话固定攻击保护，防止会话被恶意覆盖
+  - `TotpGenerator` 添加 TOTP 验证码重放保护，验证码只能用一次
+  - `AuthService.logout` 添加可选的 lease 验证，新增 `forceLogoutInternal` 方法供系统内部使用
+  - 恢复码消费添加 `synchronized` 锁，防止并发竞态条件
+
+### Added
+
+- **安全测试套件**：`SecurityVulnerabilityFixesTest` 提供 9 个安全修复验证测试
+- **独立压力测试**：`StressTestRunner` 提供数据库和密码验证压力测试
+
+### Verification
+
+- 所有 27 个测试全部通过（数据库并发测试 5/5、安全测试 9/9、密码验证测试 7/7、独立压力测试 6/6）
+- 所有模块编译通过
+
 ## [0.6.0] - 2026-08-27
 
 ### Added
