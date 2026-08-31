@@ -93,7 +93,9 @@ final class AuthServicePersistentTrustedDeviceTest {
           suspiciousLease, playerId, "Alex", password, null, address, "another-device");
       assertEquals(AuthSession.State.AUTHENTICATING, suspiciousResult.state());
       assertTrue(auth.verifyTotp(
-          suspiciousLease, playerId, TotpGenerator.generate(secret, Instant.now())).success());
+          suspiciousLease,
+          playerId,
+          TotpGenerator.generate(secret, Instant.now().plusSeconds(30))).success());
       assertEquals(0, auth.bruteForceProtector().getAttemptCount(playerId));
 
       auth.closeConnection(playerId, suspiciousLease);
