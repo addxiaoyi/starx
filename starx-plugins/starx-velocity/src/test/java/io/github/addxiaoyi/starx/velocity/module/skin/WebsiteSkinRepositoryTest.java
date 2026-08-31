@@ -66,7 +66,7 @@ final class WebsiteSkinRepositoryTest {
 
       assertEquals(firstUuid, first.ownerUuid());
       assertEquals(secondUuid, second.ownerUuid());
-      assertEquals(2, requests.get());
+      assertEquals(1, requests.get());
     } finally {
       server.stop(0);
     }

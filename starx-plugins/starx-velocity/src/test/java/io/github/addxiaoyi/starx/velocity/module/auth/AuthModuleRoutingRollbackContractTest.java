@@ -17,8 +17,8 @@ class AuthModuleRoutingRollbackContractTest {
     String finish = source.substring(finishStart, routeStart);
     String route = source.substring(routeStart);
 
-    assertTrue(finish.contains("authService.logout(player.getUniqueId())"));
-    assertTrue(route.contains("authService.logout(player.getUniqueId())"));
+    assertTrue(finish.contains("authService.forceLogoutInternal(player.getUniqueId()"));
+    assertTrue(route.contains("authService.forceLogoutInternal(player.getUniqueId()"));
   }
 
   @Test

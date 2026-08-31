@@ -14,7 +14,7 @@ class AccountDeletionSessionWiringTest {
 
     int erase = source.indexOf("accountEraser.eraseAndComplete(");
     int aliases = source.indexOf("knownUuids = deletionKnownMinecraftUuids.get().apply(playerUuid)");
-    int logout = source.indexOf("auth.logout(sessionUuid)", erase);
+    int logout = source.indexOf("auth.forceLogoutInternal(sessionUuid, \"account-deleted\")", erase);
     int bind = source.indexOf("deletionAuth.set(authModule.authService())");
     assertTrue(aliases >= 0 && aliases < erase && logout > erase && bind > logout);
   }

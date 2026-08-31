@@ -17,7 +17,7 @@ class DeleteUserHandlerErasureContractTest {
     assertTrue(source.contains("Set<UUID> sessionUuids = knownSessionUuids"));
     assertTrue(source.indexOf("Set<UUID> sessionUuids = knownSessionUuids")
         < source.indexOf("accountEraser.eraseAndCompletePending"));
-    assertTrue(source.contains("this.authService.logout"));
+    assertTrue(source.contains("this.authService.forceLogoutInternal"));
     assertTrue(source.contains("knownMinecraftUuidsResolver"));
     assertTrue(source.contains("logoutKnownSessions"));
     assertTrue(source.contains("disconnectKnownSessions"));
