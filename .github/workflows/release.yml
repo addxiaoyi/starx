@@ -62,7 +62,7 @@ jobs:
           test -s "$jar"
           # Extract a representative class and confirm major version 65 (Java 21)
           unzip -p "$jar" io/github/addxiaoyi/starx/velocity/StarxVelocityPlugin.class \
-            | od -An -tu1 | head -n 1 | awk '{if ($8 != 65) { print "ERROR: bytecode major version is not 65 (Java 21): " $8; exit 1 } else { print "Bytecode target OK (major 65 / Java 21)" }}'
+            | od -An -tu1 -N8 | awk '{if ($8 != 65) { print "ERROR: bytecode major version is not 65 (Java 21): " $8; exit 1 } else { print "Bytecode target OK (major 65 / Java 21)" }}'
 
       - name: Prepare release assets
         env:
