@@ -267,13 +267,8 @@ public final class HttpApiServer implements RouteRegistrar {
             new BindingUnlinkHandler(
                 this.bindingRepo, this.canonicalUuidResolver, this.knownMinecraftUuidsResolver)
                     .register(this, sensitiveAuth);
-            new AccountDeletionHandler(
-                this.accountDeletions,
-                this.userRepository,
-                this.identityAwareUserResolver,
-                this.canonicalUuidResolver,
-                this.knownMinecraftUuidsResolver)
-                    .register(this, sensitiveAuth);
+            // The HTTP API authenticates the calling service, not an end user. Do not expose
+            // account-deletion routes until the request protocol carries a verified user subject.
         }
         new BanHandler(
             this.userRepository,

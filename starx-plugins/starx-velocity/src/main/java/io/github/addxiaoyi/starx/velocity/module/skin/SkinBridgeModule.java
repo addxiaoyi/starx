@@ -22,6 +22,10 @@ import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
+import com.velocitypowered.api.util.GameProfile;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.api.repository.SkinRepository;
 import io.github.addxiaoyi.starx.common.skin.NoopSkinRepository;
@@ -35,10 +39,16 @@ import io.github.addxiaoyi.starx.website.WebsiteSyncHttpClient;
 import io.github.addxiaoyi.starx.website.WebsiteSyncApiException;
 import java.time.Duration;
 import java.time.Instant;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
@@ -47,6 +57,8 @@ import net.kyori.adventure.text.Component;
 public final class SkinBridgeModule
 implements VelocityModule {
     private static final Logger LOGGER = Logger.getLogger(SkinBridgeModule.class.getName());
+    private static final long REFRESH_DEDUPLICATION_MS = 5000L;
+    private static final int MAX_RECENT_REFRESHES = 4096;
     private final StarxVelocityPlugin plugin;
     private final ProxyServer proxy;
     private final EventBus eventBus;
@@ -61,6 +73,8 @@ implements VelocityModule {
     private final VelocityBackendBridge backendBridge;
     private final BackendSkinFallbackCache backendSkinCache;
     private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
+    private final ConcurrentMap<UUID, Long> recentSkinRefreshes = new ConcurrentHashMap<>();
+    private final ConcurrentMap<UUID, String> appliedSkinProviders = new ConcurrentHashMap<>();
     private Listener listener;
     private CommandMeta skinCommandMeta;
 
@@ -205,21 +219,24 @@ implements VelocityModule {
     }
 
     public void refreshSkin(UUID uuid) {
-        this.refreshSkin(uuid, uuid.toString());
+        String playerName = this.proxy.getPlayer(uuid)
+            .map(Player::getUsername)
+            .orElse(uuid.toString());
+        this.refreshSkin(uuid, playerName);
     }
 
     public void refreshSkin(UUID uuid, String playerName) {
         Objects.requireNonNull(uuid, "uuid");
         Objects.requireNonNull(playerName, "playerName");
+        Optional<Player> player = this.proxy.getPlayer(uuid);
+        if (player.isPresent()) {
+            this.refreshSkin(player.get(), null);
+            return;
+        }
         if (this.skinService == null) {
             return;
         }
         if (this.websiteRepository != null && this.applyWebsiteSkin(uuid, playerName)) {
-            return;
-        }
-        Optional<Player> player = this.proxy.getPlayer(uuid);
-        if (player.isPresent()) {
-            this.refreshSkin(player.get(), null);
             return;
         }
         if (this.backendBridge != null
@@ -237,6 +254,10 @@ implements VelocityModule {
         }
         if (this.websiteRepository != null
             && this.applyWebsiteSkin(player.getUniqueId(), player.getUsername())) {
+            return;
+        }
+        if (hasExistingTexture(player.getGameProfileProperties())) {
+            this.appliedSkinProviders.putIfAbsent(player.getUniqueId(), "登录档案皮肤");
             return;
         }
         if (this.backendBridge != null
@@ -289,6 +310,9 @@ implements VelocityModule {
     private void applyBackendSkinData(BackendSkinData skin, boolean cached) {
         this.proxy.getPlayer(skin.uuid()).ifPresent(player -> {
             player.setGameProfileProperties(skin.merge(player.getGameProfileProperties()));
+            this.appliedSkinProviders.put(skin.uuid(), cached
+                ? skin.provider() + " (缓存)"
+                : skin.provider());
             LOGGER.info(backendSkinAppliedMessage(
                 skin.uuid(), cached ? skin.provider() + "-cache" : skin.provider()));
             this.eventBus.publish("skin:updated", java.util.Map.of(
@@ -330,27 +354,45 @@ implements VelocityModule {
         if (this.websiteRepository == null) {
             return false;
         }
-        return this.applyWebsiteSkin(uuid, playerName);
+        return this.applyWebsiteSkin(uuid, playerName, true);
     }
 
     private boolean applyWebsiteSkin(UUID uuid, String playerName) {
-        Optional<WebsiteSkinProfile> profile = this.websiteRepository.findProfile(playerName);
+        return this.applyWebsiteSkin(uuid, playerName, false);
+    }
+
+    private boolean applyWebsiteSkin(UUID uuid, String playerName, boolean forceRefresh) {
+        Optional<WebsiteSkinProfile> profile = this.websiteRepository.findProfile(playerName, forceRefresh);
         if (profile.isEmpty()) {
             LOGGER.fine("Website skin profile not found for " + playerName);
             return false;
         }
         WebsiteSkinProfile websiteProfile = profile.get();
-        String value = websiteProfile.textureValue(uuid, playerName);
+        if (!websiteProfile.belongsTo(uuid, playerName)) {
+            LOGGER.warning("Ignoring website skin profile with mismatched identity for " + playerName);
+            return false;
+        }
+        return this.deliverSkin(uuid, playerName, websiteProfile, "website", "网站绑定皮肤");
+    }
+
+    private boolean deliverSkin(
+        UUID uuid,
+        String playerName,
+        WebsiteSkinProfile profile,
+        String provider,
+        String providerLabel
+    ) {
+        String value = profile.textureValue(uuid, playerName);
         boolean locallyPersisted = false;
         SkinRepository writable = this.writableSkinRepository;
         if (writable != null) {
             try {
                 locallyPersisted = writable.trySetSkinData(uuid, value, "");
                 if (!locallyPersisted) {
-                    LOGGER.warning("Website skin repository is unavailable for " + playerName);
+                    LOGGER.warning("Skin repository is unavailable for " + playerName);
                 }
             } catch (RuntimeException error) {
-                LOGGER.warning("Website skin could not be persisted locally for " + playerName
+                LOGGER.warning("Skin could not be persisted locally for " + playerName
                     + ": " + error.getClass().getSimpleName());
             }
         }
@@ -360,7 +402,7 @@ implements VelocityModule {
                 backendTargets = this.backendBridge.broadcastSkinUpdate(
                     uuid, playerName, value, "").size();
             } catch (RuntimeException error) {
-                LOGGER.warning("Website skin could not be broadcast for " + playerName
+                LOGGER.warning("Skin could not be broadcast for " + playerName
                     + ": " + error.getClass().getSimpleName());
             }
         }
@@ -368,20 +410,21 @@ implements VelocityModule {
         boolean appliedToOnlinePlayer = online.isPresent();
         if (appliedToOnlinePlayer) {
             Player player = online.get();
-            player.setGameProfileProperties(websiteProfile.merge(
+            player.setGameProfileProperties(profile.merge(
                 uuid,
                 playerName,
                 player.getGameProfileProperties()));
             this.eventBus.publish("skin:applied", java.util.Map.of(
-                "uuid", uuid.toString(), "provider", "website"));
+                "uuid", uuid.toString(), "provider", provider));
         }
         if (!isWebsiteSkinApplied(locallyPersisted, backendTargets, appliedToOnlinePlayer)) {
-            LOGGER.warning("Website skin was found but no delivery target accepted it for " + playerName);
+            LOGGER.warning("Skin was found but no delivery target accepted it for " + playerName);
             return false;
         }
+        this.appliedSkinProviders.put(uuid, providerLabel);
         this.eventBus.publish("skin:updated", java.util.Map.of(
             "uuid", uuid.toString(),
-            "provider", "website",
+            "provider", provider,
             "localPersisted", Boolean.toString(locallyPersisted),
             "backendTargets", Integer.toString(backendTargets)));
         return true;
@@ -437,6 +480,53 @@ implements VelocityModule {
         }).schedule();
     }
 
+    private void applyExternalSkin(Player player, String skinUrl) {
+        Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.externalSkin(
+            player.getUniqueId(), player.getUsername(), skinUrl);
+        if (profile.isEmpty()) {
+            player.sendMessage(Component.text("外部皮肤地址无效：仅允许 Minecraft 官方纹理地址。"));
+            return;
+        }
+        this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
+            boolean applied = this.deliverSkin(
+                player.getUniqueId(), player.getUsername(), profile.get(),
+                "external-url", "外部皮肤站");
+            player.sendMessage(Component.text(applied
+                ? "外部皮肤已应用并同步。"
+                : "外部皮肤无法持久化，将在下次刷新时重试。"));
+        }).schedule();
+    }
+
+    private void refreshSkinAsync(Player player, RegisteredServer connectedServer) {
+        UUID uuid = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        Long previous = this.recentSkinRefreshes.put(uuid, now);
+        if (previous != null && now - previous < REFRESH_DEDUPLICATION_MS) {
+            return;
+        }
+        if (this.recentSkinRefreshes.size() > MAX_RECENT_REFRESHES) {
+            this.recentSkinRefreshes.entrySet().removeIf(entry ->
+                now - entry.getValue() >= REFRESH_DEDUPLICATION_MS);
+        }
+        this.plugin.proxy().getScheduler().buildTask(this.plugin,
+            () -> this.refreshSkin(player, connectedServer)).schedule();
+    }
+
+    private void sendSkinStatus(CommandSource source, Player player) {
+        boolean hasTextures = player.getGameProfileProperties().stream()
+            .anyMatch(property -> property.getName().equals("textures"));
+        String website = this.websiteRepository == null ? "关闭" : "启用（缓存 5 分钟）";
+        String skinsRestorer = this.skinsRestorerAvailable ? "可用" : "不可用";
+        String bridge = this.backendBridge == null ? "关闭" : "启用";
+        String provider = this.appliedSkinProviders.getOrDefault(player.getUniqueId(), "尚未确认");
+        source.sendMessage(Component.text("皮肤诊断：" + player.getUsername()
+            + " UUID=" + player.getUniqueId()));
+        source.sendMessage(Component.text("网站档案=" + website
+            + "，SkinsRestorer=" + skinsRestorer + "，后端桥接=" + bridge));
+        source.sendMessage(Component.text("当前纹理属性=" + (hasTextures ? "已设置" : "未设置")
+            + "，最近确认来源=" + provider));
+    }
+
     static boolean shouldRefreshAfterConnect(
         boolean backendBridgeAvailable,
         boolean proxyProviderAvailable,
@@ -456,14 +546,54 @@ implements VelocityModule {
         return locallyPersisted || backendTargets > 0;
     }
 
+    static boolean hasExistingTexture(List<GameProfile.Property> properties) {
+        if (properties == null) {
+            return false;
+        }
+        for (GameProfile.Property property : properties) {
+            if (!property.getName().equals("textures") || property.getValue().isBlank()) {
+                continue;
+            }
+            try {
+                String decoded = new String(
+                    Base64.getDecoder().decode(property.getValue()), StandardCharsets.UTF_8);
+                JsonElement root = JsonParser.parseString(decoded);
+                JsonElement textures = root.isJsonObject()
+                    ? root.getAsJsonObject().get("textures") : null;
+                JsonElement skin = textures != null && textures.isJsonObject()
+                    ? textures.getAsJsonObject().get("SKIN") : null;
+                if (skin != null && skin.isJsonObject() && isHttpsTextureUrl(skin.getAsJsonObject())) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+                // Ignore malformed profile properties and continue to the configured fallback.
+            }
+        }
+        return false;
+    }
+
+    private static boolean isHttpsTextureUrl(JsonObject skin) {
+        JsonElement url = skin.get("url");
+        if (url == null || !url.isJsonPrimitive() || !url.getAsJsonPrimitive().isString()) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(url.getAsString());
+            return "https".equalsIgnoreCase(uri.getScheme())
+                && uri.getHost() != null
+                && !uri.getHost().isBlank()
+                && uri.getUserInfo() == null
+                && uri.getFragment() == null;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
     private final class Listener {
         @Subscribe
         public void onPostLogin(PostLoginEvent event) {
-            if (SkinBridgeModule.this.websiteRepository != null) {
-                Player player = event.getPlayer();
-                SkinBridgeModule.this.applyWebsiteSkin(
-                    player.getUniqueId(), player.getUsername());
-            }
+            Player player = event.getPlayer();
+            SkinBridgeModule.this.refreshSkinAsync(player, null);
         }
 
         @Subscribe
@@ -474,7 +604,7 @@ implements VelocityModule {
                 SkinBridgeModule.this.isWebsiteSkinAvailable())) {
                 return;
             }
-            SkinBridgeModule.this.refreshSkin(event.getPlayer(), event.getServer());
+            SkinBridgeModule.this.refreshSkinAsync(event.getPlayer(), event.getServer());
         }
     }
 
@@ -493,16 +623,30 @@ implements VelocityModule {
                         SkinBridgeModule.this.applyCatalogSkin(player, arguments[1]);
                         return;
                     }
-                    source.sendMessage(Component.text("用法：/sxskin 或 /sxskin apply <皮肤编号>"));
+                    if (arguments.length == 1 && "status".equalsIgnoreCase(arguments[0])) {
+                        SkinBridgeModule.this.sendSkinStatus(source, player);
+                        return;
+                    }
+                    if (arguments.length == 2 && "url".equalsIgnoreCase(arguments[0])) {
+                        if (!source.hasPermission("starx.skin.external-url")) {
+                            source.sendMessage(Component.text("你没有使用外部皮肤地址的权限。"));
+                            return;
+                        }
+                        SkinBridgeModule.this.applyExternalSkin(player, arguments[1]);
+                        return;
+                    }
+                    source.sendMessage(Component.text(
+                        "用法：/sxskin、/sxskin status、/sxskin apply <皮肤编号> 或 /sxskin url <HTTPS纹理地址>"));
                     return;
                 }
                 if (SkinBridgeModule.this.skinProfileBaseUrl != null && !SkinBridgeModule.this.skinProfileBaseUrl.isBlank()) {
-                    source.sendMessage((Component)Component.text((String)("正在从网站获取 " + player.getUsername() + " 的皮肤……")));
-                    SkinBridgeModule.this.refreshSkinFromWebsite(player.getUniqueId(), player.getUsername());
-                    source.sendMessage((Component)Component.text((String)"已提交网站皮肤刷新请求。"));
+                    source.sendMessage((Component)Component.text((String)("正在刷新 " + player.getUsername()
+                        + " 的皮肤；未绑定网站角色时将回退正版皮肤……")));
+                    SkinBridgeModule.this.refreshSkinAsync(player, null);
+                    source.sendMessage((Component)Component.text((String)"已提交皮肤刷新请求。"));
                 } else {
                     source.sendMessage((Component)Component.text((String)("正在刷新 " + player.getUsername() + " 的皮肤……")));
-                    SkinBridgeModule.this.skinService.refreshSkin(player.getUniqueId(), player.getUsername());
+                    SkinBridgeModule.this.refreshSkinAsync(player, null);
                     source.sendMessage((Component)Component.text((String)"已提交皮肤刷新请求。"));
                 }
             }

@@ -312,7 +312,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
                 for (UUID sessionUuid : affectedUuids) {
                     if (sessionUuid == null) continue;
                     if (auth != null) {
-                        auth.logout(sessionUuid);
+                        auth.forceLogoutInternal(sessionUuid, "account-deleted");
                     }
                     this.proxy.getPlayer(sessionUuid).ifPresent(player -> player.disconnect(
                         net.kyori.adventure.text.Component.text(

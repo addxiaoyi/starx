@@ -515,11 +515,11 @@ public final class AuthModule implements VelocityModule {
     RegisteredServer target = this.targetServer;
     if (target == null) {
       this.logMissingTarget();
-      this.authService.logout(player.getUniqueId());
+      this.authService.forceLogoutInternal(player.getUniqueId(), "target-unavailable");
       return Optional.of(TARGET_UNAVAILABLE);
     }
     if (!this.flows.route(player, target)) {
-      this.authService.logout(player.getUniqueId());
+      this.authService.forceLogoutInternal(player.getUniqueId(), "route-failed");
       return Optional.of(AUTH_ERROR);
     }
     return Optional.empty();
@@ -710,14 +710,14 @@ public final class AuthModule implements VelocityModule {
     RegisteredServer target = this.targetServer;
     if (target == null) {
       this.logMissingTarget();
-      this.authService.logout(player.getUniqueId());
+      this.authService.forceLogoutInternal(player.getUniqueId(), "target-unavailable");
       this.flows.deny(player, TARGET_UNAVAILABLE);
       this.uworld.session(player).ifPresent(session -> session.fail(TARGET_UNAVAILABLE));
       player.disconnect(TARGET_UNAVAILABLE);
       return false;
     }
     if (!this.flows.route(player, target)) {
-      this.authService.logout(player.getUniqueId());
+      this.authService.forceLogoutInternal(player.getUniqueId(), "route-failed");
       this.flows.deny(player, AUTH_ERROR);
       player.disconnect(AUTH_ERROR);
       return false;
@@ -725,7 +725,7 @@ public final class AuthModule implements VelocityModule {
 
     UworldFlowSession session = this.uworld.session(player).orElse(null);
     if (session == null || !session.complete(target)) {
-      this.authService.logout(player.getUniqueId());
+      this.authService.forceLogoutInternal(player.getUniqueId(), "session-failed");
       this.flows.deny(player, TARGET_UNAVAILABLE);
       player.disconnect(TARGET_UNAVAILABLE);
       return false;

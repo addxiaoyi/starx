@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.velocity.module.skin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
 import io.github.addxiaoyi.starx.api.dto.SkinDto;
@@ -15,12 +16,36 @@ import org.junit.jupiter.api.Test;
 final class WebsiteSkinRepositoryTest {
 
   @Test
+  void cachesAnUnboundWebsiteProfileLookup() throws Exception {
+    AtomicInteger requests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/unbound.json", exchange -> {
+      requests.incrementAndGet();
+      exchange.sendResponseHeaders(404, -1);
+      exchange.close();
+    });
+    server.start();
+
+    try {
+      WebsiteSkinRepository repository = new WebsiteSkinRepository(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          Logger.getLogger(WebsiteSkinRepositoryTest.class.getName()));
+
+      assertTrue(repository.findProfile("unbound").isEmpty());
+      assertTrue(repository.findProfile("UNBOUND").isEmpty());
+      assertEquals(1, requests.get());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void doesNotReuseSkinDtoForAnotherUuidWithTheSameName() throws Exception {
     AtomicInteger requests = new AtomicInteger();
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/player.json", exchange -> {
       requests.incrementAndGet();
-      byte[] body = "{\"id\":\"website-profile\",\"name\":\"player\",\"textures\":{\"SKIN\":{\"url\":\"https://example.invalid/skin.png\"}}}"
+        byte[] body = "{\"id\":\"website-profile\",\"name\":\"player\",\"textures\":{\"SKIN\":{\"url\":\"https://textures.minecraft.net/texture/skin\"}}}"
           .getBytes(StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(200, body.length);
       try (OutputStream output = exchange.getResponseBody()) {

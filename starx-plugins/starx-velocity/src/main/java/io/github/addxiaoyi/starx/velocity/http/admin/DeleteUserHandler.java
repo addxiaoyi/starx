@@ -157,7 +157,7 @@ implements AdminHandler {
 
     private void logoutKnownSessions(Set<UUID> sessionUuids) {
         for (UUID sessionUuid : sessionUuids) {
-            this.authService.logout(sessionUuid);
+            this.authService.forceLogoutInternal(sessionUuid, "admin-deleted");
         }
     }
 

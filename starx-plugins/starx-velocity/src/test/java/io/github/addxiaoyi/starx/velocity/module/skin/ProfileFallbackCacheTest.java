@@ -12,7 +12,7 @@ final class ProfileFallbackCacheTest {
   void servesARecentVerifiedProfileAfterTheWebsiteFails() {
     WebsiteSkinProfile profile = WebsiteSkinProfile.parse(
         "{\"id\":\"abc\",\"name\":\"Alex\",\"textures\":{\"SKIN\":{\"url\":\"https://textures.minecraft.net/texture/abc\"}}}",
-        new Gson()).orElseThrow();
+        new Gson(), TextureUrlPolicy.officialTexturesOnly()).orElseThrow();
     Instant now = Instant.parse("2026-07-22T00:00:00Z");
     ProfileFallbackCache cache = new ProfileFallbackCache(Duration.ofHours(24));
     cache.put("Alex", profile, now);
@@ -36,6 +36,6 @@ final class ProfileFallbackCacheTest {
     return WebsiteSkinProfile.parse(
         "{\"id\":\"" + id + "\",\"name\":\"" + name
             + "\",\"textures\":{\"SKIN\":{\"url\":\"https://textures.minecraft.net/texture/"
-            + id + "\"}}}", new Gson()).orElseThrow();
+            + id + "\"}}}", new Gson(), TextureUrlPolicy.officialTexturesOnly()).orElseThrow();
   }
 }

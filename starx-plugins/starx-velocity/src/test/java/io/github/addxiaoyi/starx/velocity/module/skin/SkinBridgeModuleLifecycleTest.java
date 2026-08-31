@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
+import com.velocitypowered.api.util.GameProfile;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -53,6 +56,18 @@ final class SkinBridgeModuleLifecycleTest {
   @Test
   void doesNotTreatAnOnlineOnlySkinChangeAsDurablyApplied() {
     assertFalse(SkinBridgeModule.isWebsiteSkinApplied(false, 0, true));
+  }
+
+  @Test
+  void recognizesTexturePropertiesProvidedByAnAuthenticatedSkinAccount() {
+    assertTrue(SkinBridgeModule.hasExistingTexture(java.util.List.of(
+        new GameProfile.Property("textures", Base64.getEncoder().encodeToString("""
+            { "textures": { "SKIN": { "url": "https://littleskin.cn/texture/alex" } } }
+            """.getBytes(StandardCharsets.UTF_8)), "signature"))));
+    assertFalse(SkinBridgeModule.hasExistingTexture(java.util.List.of(
+        new GameProfile.Property("textures", "", "signature"))));
+    assertFalse(SkinBridgeModule.hasExistingTexture(java.util.List.of(
+        new GameProfile.Property("textures", "external-skin-value", "signature"))));
   }
 
   @Test

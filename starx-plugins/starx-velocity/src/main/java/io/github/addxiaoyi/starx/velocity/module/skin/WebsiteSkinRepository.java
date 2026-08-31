@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -22,11 +23,15 @@ public final class WebsiteSkinRepository
 implements SkinRepository {
     private static final int CACHE_TTL_MS = 60000;
     private static final int CACHE_MAX_SIZE = 500;
+    private static final int PROFILE_CACHE_TTL_MS = 300000;
+    private static final int PROFILE_CACHE_MAX_SIZE = 2000;
     private final String skinProfileBaseUrl;
     private final Logger logger;
     private final HttpClient httpClient;
     private final Gson gson;
+    private final TextureUrlPolicy textureUrlPolicy;
     private final SmartCache<PlayerSkinKey, Optional<SkinDto>> cache;
+    private final SmartCache<String, Optional<WebsiteSkinProfile>> profileCache;
     private final ProfileFallbackCache fallbackCache;
 
     public WebsiteSkinRepository(String skinProfileBaseUrl, Logger logger) {
@@ -34,8 +39,11 @@ implements SkinRepository {
         this.logger = logger;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5L)).build();
         this.gson = new Gson();
+        this.textureUrlPolicy = TextureUrlPolicy.forWebsite(this.skinProfileBaseUrl);
         this.cache = new SmartCache<PlayerSkinKey, Optional<SkinDto>>(
             CACHE_MAX_SIZE, CACHE_TTL_MS, key -> Optional.empty());
+        this.profileCache = new SmartCache<String, Optional<WebsiteSkinProfile>>(
+            PROFILE_CACHE_MAX_SIZE, PROFILE_CACHE_TTL_MS, key -> Optional.empty());
         this.fallbackCache = new ProfileFallbackCache(Duration.ofHours(24));
     }
 
@@ -63,22 +71,8 @@ implements SkinRepository {
     }
 
     private Optional<SkinDto> fetchSkin(UUID uuid, String name) {
-        String url = this.skinProfileBaseUrl + "/" + name + ".json";
-        try {
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(5L)).GET().build();
-            HttpResponse<String> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                return this.fallbackCache.get(name, Instant.now())
-                    .map(profile -> new SkinDto(uuid, name, profile.id(), null, null, profile.textureUrl()));
-            }
-            Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.parse(response.body(), this.gson);
-            profile.ifPresent(value -> this.fallbackCache.put(name, value, Instant.now()));
-            return profile.map(value -> new SkinDto(uuid, name, value.id(), null, null, value.textureUrl()));
-        }
-        catch (Exception e) {
-            this.logger.log(Level.WARNING, "Failed to fetch skin from website for " + name, e);
-            return Optional.empty();
-        }
+        return this.findProfile(name)
+            .map(profile -> new SkinDto(uuid, name, profile.id(), null, null, profile.textureUrl()));
     }
 
     @Override
@@ -109,6 +103,28 @@ implements SkinRepository {
     }
 
     Optional<WebsiteSkinProfile> findProfile(String name) {
+        return this.findProfile(name, false);
+    }
+
+    Optional<WebsiteSkinProfile> findProfile(String name, boolean forceRefresh) {
+        String cacheKey = normalizeName(name);
+        if (cacheKey == null) {
+            return Optional.empty();
+        }
+        if (forceRefresh) {
+            this.profileCache.remove(cacheKey);
+        } else {
+            Optional<WebsiteSkinProfile> cached = this.profileCache.getIfPresent(cacheKey);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        Optional<WebsiteSkinProfile> profile = this.fetchProfile(name);
+        this.profileCache.put(cacheKey, profile);
+        return profile;
+    }
+
+    private Optional<WebsiteSkinProfile> fetchProfile(String name) {
         String url = this.skinProfileBaseUrl + "/" + name + ".json";
         try {
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(5L)).GET().build();
@@ -116,7 +132,8 @@ implements SkinRepository {
             if (response.statusCode() != 200) {
                 return this.fallbackCache.get(name, Instant.now());
             }
-            Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.parse(response.body(), this.gson);
+            Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.parse(
+                response.body(), this.gson, this.textureUrlPolicy);
             profile.ifPresent(value -> this.fallbackCache.put(name, value, Instant.now()));
             return profile.or(() -> this.fallbackCache.get(name, Instant.now()));
         }
@@ -124,6 +141,13 @@ implements SkinRepository {
             this.logger.log(Level.WARNING, "Failed to fetch website texture profile for " + name, e);
             return this.fallbackCache.get(name, Instant.now());
         }
+    }
+
+    private static String normalizeName(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return name.trim().toLowerCase(Locale.ROOT);
     }
 
     private record PlayerSkinKey(UUID uuid, String name) { }

@@ -78,6 +78,28 @@ public final class SessionManager {
         if (!this.sessions.containsKey(uuid) && this.sessions.size() >= this.maxSessions) {
             return null;
         }
+
+        // Security: If a session already exists for this UUID, verify the old lease
+        // to prevent session fixation attacks. An attacker should not be able to
+        // replace a victim's session with their own lease.
+        AuthSession existing = this.sessions.get(uuid);
+        if (existing != null) {
+            // If the existing session has a different lease, this is potentially
+            // a session fixation attempt. Reject unless the existing session is expired.
+            if (!existing.ownedBy(lease) && !existing.isExpired(this.clock.get(), this.timeout)) {
+                // Log the potential attack (caller should log at INFO level with context)
+                return null;
+            }
+            // If the existing session is owned by the same lease, refresh it
+            if (existing.ownedBy(lease)) {
+                AuthSession refreshed = new AuthSession(
+                    uuid, username, address, deviceId, lease, this.clock.get());
+                this.sessions.put(uuid, refreshed);
+                return refreshed;
+            }
+            // Existing session expired, allow replacement
+        }
+
         AuthSession session = new AuthSession(
             uuid, username, address, deviceId, lease, this.clock.get());
         this.sessions.put(uuid, session);

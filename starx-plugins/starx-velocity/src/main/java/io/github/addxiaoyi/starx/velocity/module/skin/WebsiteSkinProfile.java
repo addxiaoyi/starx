@@ -27,7 +27,7 @@ final class WebsiteSkinProfile {
     this.gson = gson;
   }
 
-  static Optional<WebsiteSkinProfile> parse(String body, Gson gson) {
+  static Optional<WebsiteSkinProfile> parse(String body, Gson gson, TextureUrlPolicy urlPolicy) {
     if (body == null || body.isBlank()) {
       return Optional.empty();
     }
@@ -36,20 +36,32 @@ final class WebsiteSkinProfile {
       return Optional.empty();
     }
     Map<String, TextureInfo> textures = new LinkedHashMap<>();
-    copyTexture(response.textures, textures, "SKIN");
-    copyTexture(response.textures, textures, "CAPE");
+    copyTexture(response.textures, textures, "SKIN", urlPolicy);
+    copyTexture(response.textures, textures, "CAPE", urlPolicy);
     if (textures.isEmpty()) {
       return Optional.empty();
     }
     return Optional.of(new WebsiteSkinProfile(response.id, response.name, textures, gson));
   }
 
+  static Optional<WebsiteSkinProfile> externalSkin(UUID uuid, String playerName, String skinUrl) {
+    if (uuid == null || playerName == null || playerName.isBlank()
+        || !TextureUrlPolicy.officialTexturesOnly().allows(skinUrl)) {
+      return Optional.empty();
+    }
+    TextureInfo skin = new TextureInfo();
+    skin.url = skinUrl.trim();
+    return Optional.of(new WebsiteSkinProfile(
+        uuid.toString(), playerName.trim(), Map.of("SKIN", skin), new Gson()));
+  }
+
   private static void copyTexture(
       Map<String, TextureInfo> source,
       Map<String, TextureInfo> target,
-      String type) {
+      String type,
+      TextureUrlPolicy urlPolicy) {
     TextureInfo texture = source.get(type);
-    if (texture != null && texture.url != null && !texture.url.isBlank()) {
+    if (texture != null && urlPolicy.allows(texture.url)) {
       target.put(type, texture);
     }
   }
@@ -115,6 +127,24 @@ final class WebsiteSkinProfile {
 
   String id() {
     return id;
+  }
+
+  boolean belongsTo(UUID uuid, String playerName) {
+    if (uuid == null || playerName == null || playerName.isBlank()
+        || id == null || id.isBlank() || name == null || name.isBlank()) {
+      return false;
+    }
+    try {
+      String compactId = id.replace("-", "");
+      if (!compactId.matches("[0-9a-fA-F]{32}")) {
+        return false;
+      }
+      UUID profileUuid = UUID.fromString(compactId.replaceFirst(
+          "^(.{8})(.{4})(.{4})(.{4})(.{12})$", "$1-$2-$3-$4-$5"));
+      return uuid.equals(profileUuid) && name.equalsIgnoreCase(playerName.trim());
+    } catch (IllegalArgumentException ignored) {
+      return false;
+    }
   }
 
   private String profileId(UUID uuid) {

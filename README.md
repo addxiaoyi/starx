@@ -1,8 +1,8 @@
 # StarX
 
-StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。项目只发布一个可部署文件：`starx-universal-0.6.2.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
+StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-0.6.3.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
 
-当前插件版本：**0.6.2**
+当前插件版本：**0.6.3**
 
 公共扩展 API：**1.0.0**
 
@@ -185,7 +185,7 @@ Velocity 内置 SQLite 存储和对应仓库，覆盖：
 | 用户查询 | `GET /v1/user/exists`、`GET /v1/user/detail`、`GET /v1/user/overview` |
 | 密码与 TOTP | `POST /v1/admin/reset-password`、`POST /v1/admin/totp/setup`、`POST /v1/admin/totp/confirm`、`POST /v1/admin/totp/disable`、`POST /v1/admin/totp/recovery-codes/rotate` |
 | 邮箱与审批 | `POST /v1/admin/email-challenge/send`、`POST /v1/admin/email-challenge/confirm`、`POST /v1/admin/approval/create`、`POST /v1/admin/approval/confirm` |
-| 账号删除 | `GET /v1/user/deletion/status`、`POST /v1/user/deletion/request`、`POST /v1/user/deletion/cancel`、`POST /v1/admin/delete-user` |
+| 账号删除 | `POST /v1/admin/delete-user`；自助删除接口在具备可验证终端用户身份协议前保持关闭 |
 | 绑定与外部账号 | `GET/POST /v1/admin/bindings`、`POST /v1/admin/bindings/verify-code`、`POST /v1/admin/bindings/verify`、`POST /v1/admin/bindings/resolve-code`、`POST /v1/user/bindings/unlink`、`POST /v1/admin/link-external-user` |
 | 封禁与处罚 | `GET /v1/ban`、`POST /v1/admin/ban`、`POST /v1/admin/ban/player`、`POST /v1/admin/kick`、`GET/POST /v1/admin/punishments` |
 | 举报、备注与公告 | `GET/POST /v1/admin/reports`、`POST /v1/admin/reports/resolve`、`POST /v1/admin/reports/dismiss`、`GET/POST /v1/admin/notes`、`GET/POST /v1/admin/announcements`、`POST /v1/admin/announcements/read` |
@@ -255,10 +255,10 @@ Extension API 1.0.0 提供版本协商、平台与能力查询、扩展注册、
 从 [GitHub Releases](https://github.com/addxiaoyi/starx/releases) 下载：
 
 ```text
-starx-universal-0.6.2.jar
+starx-universal-0.6.3.jar
 ```
 
-将同一个文件分别放入：
+下载附件可保留其版本化文件名；生产部署脚本会使用 `starx-universal.jar`。将同一个文件分别放入：
 
 ```text
 Velocity/plugins/
@@ -374,6 +374,9 @@ Paper/plugins/StarXServer/compatibility-report.json
 | Velocity | `/sxadmin bind qq` | 启动 QQ 绑定流程 |
 | Velocity | `/sxskin` | 查看皮肤桥状态/帮助 |
 | Velocity | `/sxskin apply <皮肤编号>` | 为已绑定角色应用网站目录皮肤 |
+| Velocity | `/sxskin url <Minecraft 官方纹理地址>` | 应用 `textures.minecraft.net` 的最终纹理地址；需要 `starx.skin.external-url` 权限 |
+
+皮肤桥会在网站未绑定角色时自动保留登录档案中已有的有效皮肤纹理，因此通过 LittleSkin、Blessing Skin、Ely.by 等 authlib-injector 账户登录的玩家无需再次设置皮肤。
 | Velocity | `/sxsecure` | 查看 TOTP 状态并打开账号安全入口；不接受敏感参数 |
 | Velocity | `/sxvote start <玩家> <原因>` | 发起投票 |
 | Velocity | `/sxvote <yes|no>` | 参与当前投票 |
@@ -484,6 +487,6 @@ REAL_CLIENT_UWORLD_ACCEPTANCE_VERIFIED
 ## 许可证
 
 StarX 自有代码采用 GNU Affero General Public License v3。内置或派生的第三方组件保留各自许可证和声明，见 `LICENSE`、`LICENSES/`、`NOTICE` 以及源码文件头。
-# 当前插件版本：**0.6.2**
+# 当前插件版本：**0.6.3**
 
-当前发布产物：`starx-universal-0.6.2.jar`
+本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-0.6.3.jar`

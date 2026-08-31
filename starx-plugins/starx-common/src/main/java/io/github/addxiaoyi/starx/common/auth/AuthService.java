@@ -66,6 +66,8 @@ public final class AuthService {
     private volatile java.util.function.Consumer<UUID> minecraftIdentityRollback = ignored -> { };
     private final Map<UUID, ProvisionedLogin> provisionedLogins = new ConcurrentHashMap<>();
     private final Map<UUID, PendingTotp> pendingTotp = new ConcurrentHashMap<>();
+    // Per-user mutex for recovery code consumption to prevent race conditions
+    private final ConcurrentHashMap<UUID, Object> recoveryCodeLocks = new ConcurrentHashMap<>();
     private final RiskDecisionEngine riskDecisions = new RiskDecisionEngine();
     private volatile WebLoginApprovalGateway webLoginApprovals;
     private volatile boolean totpAvailable = true;
@@ -741,7 +743,7 @@ public final class AuthService {
         if (loginDecision.action() != RiskDecisionEngine.Action.ALLOW) {
             if (loginDecision.action() == RiskDecisionEngine.Action.REQUIRE_TOTP
                 && totpCode != null
-                && TotpGenerator.verify(user.totpSecret(), totpCode, Instant.now())) {
+                && TotpGenerator.verifyAndConsume(uuid, user.totpSecret(), totpCode, Instant.now())) {
                 return this.authenticate(uuid, user, lease, AuthSession.State.GUEST);
             }
             AuthSession.State pendingState =
@@ -803,7 +805,7 @@ public final class AuthService {
             return AuthResult.failure("\u672a\u5f00\u542f\u4e8c\u6b65\u9a8c\u8bc1");
         }
         if (code == null || !code.matches("\\d{6}")
-            || !TotpGenerator.verify(user.totpSecret(), code, Instant.now())) {
+            || !TotpGenerator.verifyAndConsume(uuid, user.totpSecret(), code, Instant.now())) {
             this.recordBruteForceFailure(uuid);
             this.publishLoginFailed(uuid, user.username(), "\u4e8c\u6b65\u9a8c\u8bc1\u7801\u9519\u8bef");
             return AuthResult.failure("\u4e8c\u6b65\u9a8c\u8bc1\u7801\u9519\u8bef");
@@ -834,7 +836,41 @@ public final class AuthService {
         return this.authenticate(uuid, user, lease, AuthSession.State.WEB_APPROVAL_PENDING);
     }
 
+    /**
+     * 安全登出。
+     *
+     * <p>要求提供有效的 AuthLease 来验证请求者身份。
+     *
+     * @param uuid 玩家 UUID
+     * @param lease 认证租约
+     * @return 登出结果
+     */
+    public AuthResult logout(UUID uuid, AuthLease lease) {
+        if (uuid == null || lease == null) {
+            return AuthResult.failure("无效的会话参数");
+        }
+        Optional<AuthSession> session = this.sessionManager.get(uuid, lease);
+        if (session.isEmpty()) {
+            return AuthResult.failure("会话无效或已过期");
+        }
+        String username = session.get().username();
+        this.sessionManager.remove(uuid);
+        ProvisionedLogin provisioned = this.provisionedLogins.get(uuid);
+        if (provisioned != null) {
+            this.cleanupProvisionedLogin(uuid, provisioned.lease(), false);
+        }
+        this.eventBus.publish("player:logout", Map.of("uuid", uuid, "username", username));
+        return AuthResult.success("\u5df2\u767b\u51fa");
+    }
+
+    /**
+     * @deprecated 使用 {@link #logout(UUID, AuthLease)} 进行安全的登出。
+     */
+    @Deprecated
     public AuthResult logout(UUID uuid) {
+        if (uuid == null) {
+            return AuthResult.failure("无效的会话参数");
+        }
         Optional<AuthSession> session = this.sessionManager.get(uuid);
         String username = session.map(AuthSession::username).orElse("");
         this.sessionManager.remove(uuid);
@@ -843,6 +879,36 @@ public final class AuthService {
             this.cleanupProvisionedLogin(uuid, provisioned.lease(), false);
         }
         this.eventBus.publish("player:logout", Map.of("uuid", uuid, "username", username));
+        return AuthResult.success("\u5df2\u767b\u51fa");
+    }
+
+    /**
+     * 内部强制登出，仅供系统级调用使用（如账号删除、安全锁定等）。
+     *
+     * <p>此方法跳过 lease 验证，因为它是从系统内部调用的可信操作。
+     * 普通用户请求应使用 {@link #logout(UUID, AuthLease)}。
+     *
+     * @param uuid 玩家 UUID
+     * @param reason 登出原因（用于审计日志）
+     */
+    public AuthResult forceLogoutInternal(UUID uuid, String reason) {
+        if (uuid == null) {
+            return AuthResult.failure("无效的会话参数");
+        }
+        Optional<AuthSession> session = this.sessionManager.get(uuid);
+        String username = session.map(AuthSession::username).orElse("");
+        this.sessionManager.remove(uuid);
+        ProvisionedLogin provisioned = this.provisionedLogins.get(uuid);
+        if (provisioned != null) {
+            this.cleanupProvisionedLogin(uuid, provisioned.lease(), false);
+        }
+        this.eventBus.publish("player:logout", Map.of(
+            "uuid", uuid,
+            "username", username,
+            "reason", reason != null ? reason : "forced",
+            "forced", true));
+        logger.log(Level.INFO, "Forced logout for {0} (uuid={1}, reason={2})",
+            new Object[]{username, uuid, reason});
         return AuthResult.success("\u5df2\u767b\u51fa");
     }
 
@@ -1007,24 +1073,59 @@ public final class AuthService {
                 return AuthResult.failure("\u6062\u590d\u7801\u65e0\u6548");
             }
 
-            List<String> remaining = new ArrayList<>(hashes);
-            remaining.remove(matchedIndex);
-            String replacement = encodeRecoveryCodeHashes(remaining);
-            if (this.userRepository.replaceRecoveryCodes(user.uuid(), stored, replacement)) {
-                AuthResult result = this.authenticate(uuid, user, lease, AuthSession.State.AUTHENTICATING);
-                if (!result.success()) {
-                    try {
-                        if (!this.userRepository.restoreRecoveryCodesIfCurrent(
-                            user.uuid(), replacement, stored)) {
-                            result = AuthResult.failure(
-                                result.message() + "，恢复码状态已变化，请联系管理员");
-                        }
-                    } catch (RuntimeException rollbackError) {
-                        result = AuthResult.failure(
-                            result.message() + "，恢复码回滚失败，请联系管理员");
+            // Critical: Atomically consume the recovery code. We use a per-user mutex
+            // to prevent the race condition where two concurrent requests both match
+            // the same recovery code and both proceed to consume it.
+            // The check on the matched recovery code happens BEFORE acquiring the lock,
+            // and the database replace uses an optimistic check (stored -> replacement)
+            // which is the second layer of protection.
+            synchronized (this.recoveryCodeLocks.computeIfAbsent(
+                    user.uuid(), k -> new Object())) {
+                // Re-read user state inside the lock
+                if (!this.sessionManager.isState(
+                        uuid, lease, AuthSession.State.AUTHENTICATING)) {
+                    return AuthResult.failure("\u8bf7\u5148\u767b\u5f55");
+                }
+                Optional<StarxUser> currentOpt = this.resolveSessionUser(uuid, lease);
+                if (currentOpt.isEmpty()) {
+                    return AuthResult.failure("\u7528\u6237\u672a\u6ce8\u518c");
+                }
+                StarxUser currentUser = currentOpt.get();
+                String currentStored = currentUser.recoveryCodes();
+                // Verify the recovery code still matches the current stored value
+                // (in case it was already consumed by another concurrent request)
+                List<String> currentHashes = parseRecoveryCodeHashes(currentStored);
+                int currentMatchedIndex = -1;
+                for (int index = 0; index < currentHashes.size(); index++) {
+                    if (PasswordHasher.verify(candidate, currentHashes.get(index))) {
+                        currentMatchedIndex = index;
+                        break;
                     }
                 }
-                return result;
+                if (currentMatchedIndex < 0) {
+                    this.recordBruteForceFailure(uuid);
+                    return AuthResult.failure("\u6062\u590d\u7801\u65e0\u6548");
+                }
+
+                List<String> remaining = new ArrayList<>(currentHashes);
+                remaining.remove(currentMatchedIndex);
+                String replacement = encodeRecoveryCodeHashes(remaining);
+                if (this.userRepository.replaceRecoveryCodes(user.uuid(), currentStored, replacement)) {
+                    AuthResult result = this.authenticate(uuid, currentUser, lease, AuthSession.State.AUTHENTICATING);
+                    if (!result.success()) {
+                        try {
+                            if (!this.userRepository.restoreRecoveryCodesIfCurrent(
+                                currentUser.uuid(), replacement, currentStored)) {
+                                result = AuthResult.failure(
+                                    result.message() + "\uff0c\u6062\u590d\u7801\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458");
+                            }
+                        } catch (RuntimeException rollbackError) {
+                            result = AuthResult.failure(
+                                result.message() + "\uff0c\u6062\u590d\u7801\u56de\u6eda\u5931\u8d25\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458");
+                        }
+                    }
+                    return result;
+                }
             }
         }
         return AuthResult.failure("\u6062\u590d\u7801\u5df2\u66f4\u65b0\uff0c\u8bf7\u91cd\u8bd5");
@@ -1130,7 +1231,7 @@ public final class AuthService {
             return AuthResult.failure("二步验证设置已过期，请重新开始");
         }
         if (code == null || !code.matches("\\d{6}")
-            || !TotpGenerator.verify(pending.secret(), code, Instant.now())) {
+            || !TotpGenerator.verifyAndConsume(accountUuid, pending.secret(), code, Instant.now())) {
             return AuthResult.failure("验证码错误");
         }
         List<String> recoveryCodes = RecoveryCodeGenerator.generate();
@@ -1159,7 +1260,7 @@ public final class AuthService {
         if (user == null || user.totpSecret() == null || user.totpSecret().isBlank()) {
             return AuthResult.failure("二步验证未开启");
         }
-        if (code == null || !TotpGenerator.verify(user.totpSecret(), code.trim(), Instant.now())) {
+        if (code == null || !TotpGenerator.verifyAndConsume(uuid, user.totpSecret(), code.trim(), Instant.now())) {
             return AuthResult.failure("验证码错误");
         }
         List<String> recoveryCodes = RecoveryCodeGenerator.generate();
@@ -1387,10 +1488,134 @@ public final class AuthService {
         return AuthResult.success("\u90ae\u7bb1\u5df2\u7ed1\u5b9a");
     }
 
+    /**
+     * 安全地删除用户账户。
+     *
+     * <p>此方法执行以下安全操作：
+     * <ul>
+     *   <li>验证操作者身份（通过 AuthLease）</li>
+     *   <li>验证操作者密码</li>
+     *   <li>级联删除所有相关数据（通过 revokeSecurityTrust）</li>
+     *   <li>发布安全事件用于审计</li>
+     * </ul>
+     *
+     * @param operatorUuid 操作者（管理员）的 UUID
+     * @param operatorLease 操作者的 AuthLease
+     * @param targetUsername 要删除的目标用户名
+     * @param operatorPassword 操作者的密码（用于验证身份）
+     * @param operatorTotp 操作者的 TOTP 验证码（如果启用了二步验证）
+     * @return 删除结果
+     */
+    public AuthResult deleteUser(
+        UUID operatorUuid,
+        AuthLease operatorLease,
+        String targetUsername,
+        char[] operatorPassword,
+        String operatorTotp) {
+        // 1. 验证操作者身份
+        Optional<AuthSession> operatorSession = this.sessionManager.get(operatorUuid, operatorLease);
+        if (operatorSession.isEmpty()) {
+            logger.log(Level.WARNING, "deleteUser rejected: invalid operator lease for " + operatorUuid);
+            return AuthResult.failure("操作者会话无效或已过期");
+        }
+
+        AuthSession session = operatorSession.get();
+        if (session.state() == AuthSession.State.GUEST) {
+            logger.log(Level.WARNING, "deleteUser rejected: operator not authenticated " + operatorUuid);
+            return AuthResult.failure("操作者未完成认证");
+        }
+
+        // 2. 解析目标用户
+        Optional<StarxUser> targetOpt = this.usernameResolver.apply(targetUsername);
+        if (targetOpt.isEmpty()) {
+            return AuthResult.failure("目标用户不存在");
+        }
+        StarxUser targetUser = targetOpt.get();
+
+        // 3. 安全检查：防止用户删除自己（如果有其他验证需求可调整）
+        if (session.state() == AuthSession.State.AUTHENTICATED) {
+            Optional<StarxUser> operatorOpt = this.resolveConnectedUser(operatorUuid);
+            if (operatorOpt.isPresent() && operatorOpt.get().uuid().equals(targetUser.uuid())) {
+                logger.log(Level.WARNING, "deleteUser rejected: self-deletion attempt by " + operatorUuid);
+                return AuthResult.failure("不能删除自己的账户");
+            }
+        }
+
+        // 4. 验证操作者密码
+        Optional<StarxUser> operatorUserOpt = this.resolveConnectedUser(operatorUuid);
+        if (operatorUserOpt.isEmpty()) {
+            return AuthResult.failure("操作者账户信息无法解析");
+        }
+        StarxUser operatorUser = operatorUserOpt.get();
+
+        if (!PasswordHasher.verify(new String(operatorPassword), operatorUser.passwordHash())) {
+            this.recordBruteForceFailure(operatorUuid);
+            logger.log(Level.WARNING, "deleteUser rejected: wrong operator password for " + operatorUuid);
+            return AuthResult.failure("密码错误");
+        }
+
+        // 5. 如果操作者启用了 TOTP，验证 TOTP
+        if (operatorUser.totpSecret() != null && !operatorUser.totpSecret().isBlank()) {
+            if (operatorTotp == null || operatorTotp.isBlank()) {
+                return AuthResult.failure("请提供二步验证码");
+            }
+            if (!TotpGenerator.verifyAndConsume(operatorUuid, operatorUser.totpSecret(), operatorTotp, Instant.now())) {
+                this.recordBruteForceFailure(operatorUuid);
+                logger.log(Level.WARNING, "deleteUser rejected: wrong TOTP for " + operatorUuid);
+                return AuthResult.failure("二步验证码错误");
+            }
+        }
+
+        // 6. 记录要清除的会话
+        Set<UUID> sessions;
+        try {
+            sessions = new java.util.LinkedHashSet<>(this.knownMinecraftUuids(targetUser.uuid()));
+            sessions.addAll(this.sessionManager.sessionIdsForUsername(targetUser.username()));
+        } catch (RuntimeException error) {
+            logger.log(Level.WARNING, "Unable to resolve sessions before erasing " + targetUser.uuid(), error);
+            return AuthResult.failure("无法解析会话，请稍后重试");
+        }
+
+        // 7. 执行账户删除
+        try {
+            this.accountErasure.accept(targetUser.uuid());
+        } catch (RuntimeException error) {
+            logger.log(Level.WARNING, "Account erasure failed for " + targetUser.uuid(), error);
+            return AuthResult.failure("用户删除失败，请稍后重试");
+        }
+
+        // 8. 完整清理（使用 revokeSecurityTrust 进行级联清理）
+        try {
+            this.revokeSecurityTrust(targetUser.uuid(), null, "account-deleted", targetUser.username());
+        } catch (RuntimeException error) {
+            logger.log(Level.WARNING, "Security trust revocation failed for " + targetUser.uuid(), error);
+            // 继续执行，不阻塞删除流程
+        }
+
+        // 9. 发布审计事件
+        this.eventBus.publish("player:account:deleted", Map.of(
+            "targetUuid", targetUser.uuid(),
+            "targetUsername", targetUser.username(),
+            "operatorUuid", operatorUuid,
+            "operatorUsername", operatorUser.username(),
+            "sessionsRevoked", sessions.size(),
+            "deletedAt", Instant.now().toString()));
+
+        logger.log(Level.INFO, "Account deleted: {0} by operator {1} (uuid={2})",
+            new Object[]{targetUsername, operatorUser.username(), operatorUuid});
+
+        return AuthResult.success("用户 " + targetUsername + " 已删除");
+    }
+
+    /**
+     * @deprecated 使用 {@link #deleteUser(UUID, AuthLease, String, char[], String)} 进行安全的账户删除。
+     * 此方法不进行身份验证，仅供内部使用或迁移。
+     */
+    @Deprecated
     public AuthResult deleteUser(String username) {
         Optional<StarxUser> optional = this.usernameResolver.apply(username);
         if (optional.isEmpty()) {
-            return AuthResult.failure("\u7528\u6237\u4e0d\u5b58\u5728");
+            return AuthResult.failure("用户不存在");
         }
         StarxUser user = optional.get();
         UUID accountUuid = user.uuid();
@@ -1401,19 +1626,19 @@ public final class AuthService {
             sessions.addAll(this.sessionManager.sessionIdsForUsername(user.username()));
         } catch (RuntimeException error) {
             logger.log(Level.WARNING, "Unable to resolve sessions before erasing " + accountUuid, error);
-            return AuthResult.failure("\u7528\u6237\u5220\u9664\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+            return AuthResult.failure("用户删除失败，请稍后重试");
         }
         try {
             this.accountErasure.accept(accountUuid);
         } catch (RuntimeException error) {
             logger.log(Level.WARNING, "Account erasure failed for " + accountUuid, error);
-            return AuthResult.failure("\u7528\u6237\u5220\u9664\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+            return AuthResult.failure("用户删除失败，请稍后重试");
         }
         for (UUID sessionUuid : sessions) {
             this.sessionManager.remove(sessionUuid);
             this.provisionedLogins.remove(sessionUuid);
         }
-        return AuthResult.success("\u7528\u6237\u5df2\u5220\u9664");
+        return AuthResult.success("用户已删除");
     }
 
     private AuthResult authenticate(
