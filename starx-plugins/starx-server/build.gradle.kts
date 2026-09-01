@@ -42,10 +42,10 @@ dependencies {
 
     add(paper261ApiClasspath.name, "io.papermc.paper:paper-api:26.1.2.build.71-stable")
     add(paper261ApiClasspath.name, "me.clip:placeholderapi:2.11.7")
-    add(paper261ApiClasspath.name, "org.jetbrains:annotations:26.0.2")
+    add(paper261ApiClasspath.name, "org.jetbrains:annotations:26.1.0")
     add(paper262ApiClasspath.name, "io.papermc.paper:paper-api:26.2.build.84-stable")
     add(paper262ApiClasspath.name, "me.clip:placeholderapi:2.11.7")
-    add(paper262ApiClasspath.name, "org.jetbrains:annotations:26.0.2")
+    add(paper262ApiClasspath.name, "org.jetbrains:annotations:26.1.0")
 }
 
 tasks.withType<JavaCompile> {
