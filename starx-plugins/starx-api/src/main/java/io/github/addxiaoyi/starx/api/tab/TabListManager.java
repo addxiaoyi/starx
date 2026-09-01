@@ -227,6 +227,15 @@ public interface TabListManager {
     void refreshPlayer(String playerId);
 
     /**
+     * 判断全局或任意玩家专属列表是否需要高频动画刷新。
+     *
+     * @return 存在动画时返回 {@code true}
+     */
+    default boolean hasAnimations() {
+        return getGlobalTabList() != null && getGlobalTabList().hasAnimations();
+    }
+
+    /**
      * 清除所有玩家数据
      */
     void clear();
@@ -469,6 +478,19 @@ public interface TabListManager {
             if (playerTabList != null) {
                 playerTabList.refresh();
             }
+        }
+
+        @Override
+        public boolean hasAnimations() {
+            if (globalTabList != null && globalTabList.hasAnimations()) {
+                return true;
+            }
+            for (TabList tabList : playerTabLists.values()) {
+                if (tabList.hasAnimations()) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         @Override

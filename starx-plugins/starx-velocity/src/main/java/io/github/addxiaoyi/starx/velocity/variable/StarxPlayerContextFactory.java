@@ -91,6 +91,25 @@ public final class StarxPlayerContextFactory {
       int serverOnlinePlayers,
       int serverMaxPlayers,
       PlayerIdentityMetrics metrics) {
+    return this.create(playerId, username, onlineMode, requiresAuth, user, binding, serverName,
+        onlinePlayers, networkMaxPlayers, serverOnlinePlayers, serverMaxPlayers, metrics,
+        "暂无在线子服");
+  }
+
+  public StarxVariableService.PlayerContext create(
+      UUID playerId,
+      String username,
+      boolean onlineMode,
+      boolean requiresAuth,
+      StarxUser user,
+      PlayerBinding binding,
+      String serverName,
+      int onlinePlayers,
+      int networkMaxPlayers,
+      int serverOnlinePlayers,
+      int serverMaxPlayers,
+      PlayerIdentityMetrics metrics,
+      String onlineServers) {
     Objects.requireNonNull(username, "username");
     Objects.requireNonNull(metrics, "metrics");
     StarxVariableService.AuthState authState = requiresAuth
@@ -122,7 +141,8 @@ public final class StarxPlayerContextFactory {
         metrics.reputation(),
         metrics.trustLevel(),
         platform.label(),
-        bedrock);
+        bedrock,
+        onlineServers);
   }
 
   private String loginSource(String username, boolean onlineMode, boolean bedrock) {

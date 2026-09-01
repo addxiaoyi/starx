@@ -1,8 +1,8 @@
 # StarX
 
-StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-0.6.3.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
+StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-0.6.4.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
 
-当前插件版本：**0.6.3**
+当前插件版本：**0.6.4**
 
 公共扩展 API：**1.0.0**
 
@@ -114,7 +114,7 @@ Paper/Folia 后端还提供：
 - Paper 主线程与 Folia global/region/entity 调度隔离；
 - 上报人数、容量、平台、Minecraft 版本、TPS、MSPT、内存、运行时间和能力；
 - 接收维护状态及代理命令，并在正确 scheduler 执行后回传结果；
-- PlaceholderAPI 扩展：`%starx_node%`、`%starx_platform%`、`%starx_execution%`、`%starx_capabilities%`、`%starx_online%`、`%starx_max%`、`%starx_proxy_status%`、`%starx_player%`；
+- PlaceholderAPI 扩展：`%starx_node%`、`%starx_platform%`、`%starx_execution%`、`%starx_capabilities%`、`%starx_online%`、`%starx_max%`、`%starx_memory_used_mb%`、`%starx_memory_max_mb%`、`%starx_memory_percent%`、`%starx_proxy_status%`、`%starx_player%`；其中三个内存变量均表示玩家当前所在子服的 JVM 堆内存。
 - SkinsRestorer 反射软集成和签名 texture 查询。
 
 ### 皮肤与网站同步
@@ -192,6 +192,15 @@ Velocity 内置 SQLite 存储和对应仓库，覆盖：
 | 投票 | `GET /v1/admin/votes`、`GET /v1/admin/votes/active`、`POST /v1/admin/votes/cast` |
 | 皮肤 | `POST /v1/admin/skin-refresh` |
 
+### Mojang 公钥超时排查
+
+如果日志出现 `Failed to request yggdrasil public key`、`api.minecraftservices.com/publickeys` 和 `Connect timed out`，这是 Velocity/Authlib 的官方正版在线认证请求超时，不是 StarX 皮肤桥请求。请按实际运行模式处理：
+
+- 正版在线服：保持 `velocity.toml` 的 `online-mode = true`，确保运行 Velocity 的主机可以访问 `api.minecraftservices.com:443` 和 `sessionserver.mojang.com:443`。若服务器必须经代理联网，在启动 Java 时配置标准 HTTPS 代理，例如 `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890`，并重启 Velocity。
+- 离线/皮肤站服：在 Velocity 的 `velocity.toml` 设置 `online-mode = false`，使用现代转发把身份交给受信任的后端链路；不要只修改 Paper 的 `server.properties`。Paper 后端可保持 `online-mode=false`，并启用 `proxies.velocity.enabled=true`，两端的 forwarding secret 必须一致。
+
+不要通过关闭 TLS、替换官方公钥、或把正版验证失败当作成功来规避此错误。在线正版服无法访问官方服务时，正确结果应是认证失败；离线/皮肤站服则应明确运行在离线模式，并使用 authlib-injector/皮肤站服务商提供的受信任认证链路。修改后必须完整重启 Velocity，`/reload` 不会重建 Authlib 的公钥客户端。
+
 ### 完整模块开关
 
 下表覆盖默认配置中的全部 `modules.*` 项。模块开关控制模块是否注册；第三方服务仍需自己的配置和依赖。
@@ -246,6 +255,8 @@ Velocity 内置 SQLite 存储和对应仓库，覆盖：
 
 内置/TAB 变量包括：`starx_player`、`starx_auth_status`、`starx_registered`、`starx_2fa_enabled`、`starx_last_login`、`starx_login_source`、`starx_client_platform`、`starx_bedrock`、`starx_bind_qq`、`starx_bind_discord`、`starx_playtime`、`starx_first_join`、`starx_server`、`starx_online`、`starx_network_online`、`starx_network_max`、`starx_server_online`、`starx_server_max`、`starx_playtime_total`、`starx_server_footprint`、`starx_reputation` 和 `starx_trust_level`。
 
+玩家列表中的 `{starx_network_online}` / `{starx_network_max}` 在任意子服都表示 Velocity 全网实时人数；`{starx_server_online}` / `{starx_server_max}` 表示当前子服人数；`{starx_servers}` 自动列出当前有玩家的子服及人数，并优先显示别名。可在 `config/modules.yml` 的 `player-list.server-aliases` 映射显示名称，例如 `survival: "生存服"`；映射只影响显示，不影响真实服务器键和转服命令。
+
 Extension API 1.0.0 提供版本协商、平台与能力查询、扩展注册、状态快照、幂等注销、事件订阅、失败回滚和 StarX 停止时逆序关闭。Velocity 通过 `StarxServiceProvider` 暴露服务；Paper/Folia 通过 Bukkit `ServicesManager` 注册 `StarxService`。
 
 各模块都有明确的平台边界和降级行为。架构、安装顺序和线程规则见 [`docs/STARX_PLATFORMS.md`](docs/STARX_PLATFORMS.md)。
@@ -255,7 +266,7 @@ Extension API 1.0.0 提供版本协商、平台与能力查询、扩展注册、
 从 [GitHub Releases](https://github.com/addxiaoyi/starx/releases) 下载：
 
 ```text
-starx-universal-0.6.3.jar
+starx-universal-0.6.4.jar
 ```
 
 下载附件可保留其版本化文件名；生产部署脚本会使用 `starx-universal.jar`。将同一个文件分别放入：
@@ -487,6 +498,6 @@ REAL_CLIENT_UWORLD_ACCEPTANCE_VERIFIED
 ## 许可证
 
 StarX 自有代码采用 GNU Affero General Public License v3。内置或派生的第三方组件保留各自许可证和声明，见 `LICENSE`、`LICENSES/`、`NOTICE` 以及源码文件头。
-# 当前插件版本：**0.6.3**
+# 当前插件版本：**0.6.4**
 
-本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-0.6.3.jar`
+本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-0.6.4.jar`

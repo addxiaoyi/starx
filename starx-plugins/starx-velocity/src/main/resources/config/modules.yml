@@ -15,6 +15,12 @@ player-list:
   footer: |-
       <gray>当前子服 <white>{starx_server}</white> <dark_gray>|</dark_gray> <green>{starx_server_online}</green> 人</gray>
       <gray>全网在线 <aqua>{starx_network_online}</aqua><dark_gray>/</dark_gray><white>{starx_network_max}</white></gray>
+      <gray>在线子服 <white>{starx_servers}</white></gray>
+  # 只改变玩家列表中的显示名称，不改变 velocity.toml 的真实服务器键。
+  server-aliases:
+    lobby: "大厅"
+    survival: "生存服"
+    minigames: "小游戏"
 
 modules:
   # 认证主模块；关闭后玩家不会进入 StarX 认证流程。

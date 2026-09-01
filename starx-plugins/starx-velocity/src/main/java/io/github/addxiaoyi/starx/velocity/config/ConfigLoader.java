@@ -55,6 +55,10 @@ public final class ConfigLoader {
     ConfigLayout.ensure(path);
 
     ConfigLayout.Loaded loaded = ConfigLayout.load(path, ignored -> { });
+    if (loaded.split()) {
+      ConfigLayout.completeMissingDefaults(path, readDefaultRoot(), warningSink);
+      loaded = ConfigLayout.load(path, ignored -> { });
+    }
     Map<String, Object> currentRoot = loaded.root();
     if (!loaded.split()) {
       MiniMotdMigration.Result migration = MiniMotdMigration.migrate(
@@ -614,10 +618,19 @@ public final class ConfigLoader {
   }
 
   private static StarxConfig.PlayerListConfig parsePlayerListConfig(Map<String, Object> node) {
+    Map<String, Object> aliasesNode = child(node, "server-aliases");
+    Map<String, String> serverAliases = new LinkedHashMap<>();
+    aliasesNode.forEach((server, alias) -> {
+      if (alias == null || alias.toString().isBlank()) {
+        throw new IllegalArgumentException("player-list.server-aliases." + server + " must not be blank");
+      }
+      serverAliases.put(server, alias.toString().strip());
+    });
     return new StarxConfig.PlayerListConfig(
         integer(node, "refresh-seconds", 5),
         stringValue(node, "header", null),
-        stringValue(node, "footer", null));
+        stringValue(node, "footer", null),
+        serverAliases);
   }
 
   private static StarxConfig.NapcatConfig parseNapcatConfig(Map<String, Object> node) {

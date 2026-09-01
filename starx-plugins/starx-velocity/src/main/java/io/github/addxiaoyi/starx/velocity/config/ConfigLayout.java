@@ -109,6 +109,53 @@ public final class ConfigLayout {
     return new Loaded(current, true, spec);
   }
 
+  static Completion completeMissingDefaults(
+      Path entrypoint,
+      Map<String, Object> defaults,
+      Consumer<String> warningSink
+  ) throws IOException {
+    Objects.requireNonNull(entrypoint, "entrypoint");
+    Objects.requireNonNull(defaults, "defaults");
+    Objects.requireNonNull(warningSink, "warningSink");
+    Map<String, Object> index = readFile(entrypoint);
+    if (!isSplit(index)) {
+      return Completion.none();
+    }
+
+    Spec spec = parseSpec(index, entrypoint);
+    List<String> addedPaths = new ArrayList<>();
+    List<Path> backups = new ArrayList<>();
+    Object defaultSchema = defaults.get("schema-version");
+    if (defaultSchema != null && !Objects.equals(index.get("schema-version"), defaultSchema)) {
+      Path backup = uniqueSibling(entrypoint, entrypoint.getFileName() + ".pre-migration");
+      Files.copy(entrypoint, backup, StandardCopyOption.COPY_ATTRIBUTES);
+      index.put("schema-version", deepCopy(defaultSchema));
+      writeAtomically(entrypoint, dump(index));
+      backups.add(backup);
+      addedPaths.add("schema-version");
+    }
+    for (String name : spec.files()) {
+      Path fragment = spec.directory().resolve(name).normalize();
+      Map<String, Object> current = readFile(fragment);
+      Map<String, Object> fragmentDefaults = defaultsFor(name, spec, defaults);
+      Map<String, Object> completed = mergeMissing(fragmentDefaults, current, "", addedPaths);
+      if (!completed.equals(current)) {
+        Path backup = uniqueSibling(fragment, fragment.getFileName() + ".pre-migration");
+        Files.copy(fragment, backup, StandardCopyOption.COPY_ATTRIBUTES);
+        writeAtomically(fragment, dump(completed));
+        backups.add(backup);
+      }
+    }
+    if (addedPaths.isEmpty()) {
+      return Completion.none();
+    }
+    warningSink.accept(
+        "StarX split configuration completed missing defaults: " + String.join(", ", addedPaths)
+            + "; backups=" + backups.stream().map(path -> path.getFileName().toString())
+                .collect(java.util.stream.Collectors.joining(",")));
+    return new Completion(List.copyOf(addedPaths), List.copyOf(backups));
+  }
+
   static Map<String, Object> readDefaultRoot() throws IOException {
     Map<String, Object> index = readResource(DEFAULT_INDEX_RESOURCE);
     if (!isSplit(index)) {
@@ -255,6 +302,51 @@ public final class ConfigLayout {
     files.put("files", spec.files());
     index.put(CONFIG_FILES_KEY, files);
     return index;
+  }
+
+  private static Map<String, Object> defaultsFor(
+      String fragmentName,
+      Spec spec,
+      Map<String, Object> defaults
+  ) {
+    LinkedHashMap<String, Object> fragmentDefaults = new LinkedHashMap<>();
+    for (Map.Entry<String, Object> entry : defaults.entrySet()) {
+      if ("schema-version".equals(entry.getKey())) {
+        continue;
+      }
+      String owner = DEFAULT_OWNERS.getOrDefault(entry.getKey(), spec.files().getFirst());
+      if (!spec.files().contains(owner)) {
+        owner = spec.files().getFirst();
+      }
+      if (fragmentName.equals(owner)) {
+        fragmentDefaults.put(entry.getKey(), deepCopy(entry.getValue()));
+      }
+    }
+    return fragmentDefaults;
+  }
+
+  private static Map<String, Object> mergeMissing(
+      Map<String, Object> defaults,
+      Map<String, Object> current,
+      String prefix,
+      List<String> addedPaths
+  ) {
+    LinkedHashMap<String, Object> merged = new LinkedHashMap<>();
+    current.forEach((key, value) -> merged.put(key, deepCopy(value)));
+    for (Map.Entry<String, Object> entry : defaults.entrySet()) {
+      String key = entry.getKey();
+      String path = prefix.isEmpty() ? key : prefix + "." + key;
+      Object currentValue = current.get(key);
+      if (!current.containsKey(key)) {
+        merged.put(key, deepCopy(entry.getValue()));
+        addedPaths.add(path);
+      } else if (entry.getValue() instanceof Map<?, ?> defaultMap
+          && currentValue instanceof Map<?, ?> currentMap) {
+        merged.put(key, mergeMissing(
+            stringMap(defaultMap, path), stringMap(currentMap, path), path, addedPaths));
+      }
+    }
+    return merged;
   }
 
   private static void validateFiles(List<String> files, String label) {
@@ -426,6 +518,12 @@ public final class ConfigLayout {
   }
 
   record Loaded(Map<String, Object> root, boolean split, Spec spec) {
+  }
+
+  record Completion(List<String> addedPaths, List<Path> backups) {
+    private static Completion none() {
+      return new Completion(List.of(), List.of());
+    }
   }
 
   record Spec(Path directory, List<String> files) {

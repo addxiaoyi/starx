@@ -8,6 +8,7 @@ import io.github.addxiaoyi.starx.common.config.DatabaseConfig;
 import io.github.addxiaoyi.starx.website.WebsitePlatform;
 import io.github.addxiaoyi.starx.website.WebsiteSyncConfig;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 
 public final class StarxConfig {
@@ -569,7 +570,11 @@ public static final class HttpConfig {
         }
     }
 
-    public record PlayerListConfig(int refreshSeconds, String header, String footer) {
+    public record PlayerListConfig(
+            int refreshSeconds,
+            String header,
+            String footer,
+            Map<String, String> serverAliases) {
 
         private static final String DEFAULT_HEADER =
                 "<gold><bold>StarMC</bold></gold>\n<gray>欢迎，<white>{starx_player}</white></gray>";
@@ -580,10 +585,40 @@ public static final class HttpConfig {
             refreshSeconds = refreshSeconds < 1 || refreshSeconds > 300 ? 5 : refreshSeconds;
             header = normalized(header, DEFAULT_HEADER);
             footer = normalized(footer, DEFAULT_FOOTER);
+            serverAliases = normalizedAliases(serverAliases);
+        }
+
+        public PlayerListConfig(int refreshSeconds, String header, String footer) {
+            this(refreshSeconds, header, footer, Map.of());
         }
 
         public static PlayerListConfig defaults() {
             return new PlayerListConfig(5, DEFAULT_HEADER, DEFAULT_FOOTER);
+        }
+
+        public String serverAlias(String serverName) {
+            if (serverName == null || serverName.isBlank()) {
+                return "未连接";
+            }
+            String name = serverName.strip();
+            return serverAliases.getOrDefault(name, name);
+        }
+
+        private static Map<String, String> normalizedAliases(Map<String, String> aliases) {
+            if (aliases == null || aliases.isEmpty()) {
+                return Map.of();
+            }
+            Map<String, String> normalized = new LinkedHashMap<>();
+            aliases.forEach((key, value) -> {
+                if (key == null || key.isBlank()) {
+                    throw new IllegalArgumentException("player-list.server-aliases contains a blank server name");
+                }
+                if (value == null || value.isBlank()) {
+                    throw new IllegalArgumentException("player-list.server-aliases contains a blank alias");
+                }
+                normalized.put(key.strip(), value.strip());
+            });
+            return Map.copyOf(normalized);
         }
 
         private static String normalized(String value, String fallback) {

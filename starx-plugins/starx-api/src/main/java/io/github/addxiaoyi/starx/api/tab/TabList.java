@@ -97,6 +97,15 @@ public interface TabList {
     Optional<Component> getFooter();
 
     /**
+     * 当前列表是否包含会随时间变化的内容。
+     *
+     * @return 存在动画时返回 {@code true}
+     */
+    default boolean hasAnimations() {
+        return false;
+    }
+
+    /**
      * 获取玩家条目
      * @param playerId 玩家ID
      * @return 玩家条目

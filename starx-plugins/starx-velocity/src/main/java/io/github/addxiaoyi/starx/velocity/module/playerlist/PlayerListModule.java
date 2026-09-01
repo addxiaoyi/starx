@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.velocity.module.playerlist;
 
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.proxy.Player;
@@ -19,15 +20,33 @@ import io.github.addxiaoyi.starx.velocity.variable.StarxPlayerContextFactory;
 import io.github.addxiaoyi.starx.velocity.variable.StarxVariableService;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.Set;
 import java.util.LinkedHashSet;
+import java.util.Comparator;
 import java.util.function.Function;
 import java.util.logging.Level;
+import java.util.concurrent.ConcurrentHashMap;
 import net.kyori.adventure.text.Component;
 
 public final class PlayerListModule implements VelocityModule {
+
+  private static final Set<String> USER_VARIABLES = Set.of(
+      "starx_registered", "starx_2fa_enabled", "starx_last_login", "starx_playtime",
+      "starx_playtime_total",
+      "starx_first_join", "starx_reputation", "starx_trust_level");
+  private static final Set<String> BINDING_VARIABLES = Set.of(
+      "starx_bind_qq", "starx_bind_discord", "starx_reputation", "starx_trust_level");
+  private static final Set<String> SESSION_VARIABLES = Set.of(
+      "starx_playtime", "starx_playtime_total", "starx_server_footprint", "starx_reputation",
+      "starx_trust_level");
+  private static final PlayerIdentityMetrics EMPTY_METRICS =
+      new PlayerIdentityMetrics(0, 0, 0, "未评级");
 
   private final StarxVelocityPlugin plugin;
   private final JdbcUserRepository users;
@@ -39,9 +58,14 @@ public final class PlayerListModule implements VelocityModule {
   private final StarxPlayerContextFactory contextFactory;
   private final Function<UUID, UUID> canonicalUuidResolver;
   private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
+  private final boolean needsUserData;
+  private final boolean needsBindingData;
+  private final boolean needsSessionData;
 
   private Listener listener;
   private ScheduledTask refreshTask;
+  private final Map<UUID, PlayerListRenderer.Content> lastSentContent = new ConcurrentHashMap<>();
+  private volatile NetworkSnapshot networkSnapshot;
 
   public PlayerListModule(
       StarxVelocityPlugin plugin,
@@ -91,6 +115,11 @@ public final class PlayerListModule implements VelocityModule {
     this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
     this.knownMinecraftUuidsResolver = Objects.requireNonNull(
         knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
+    Set<String> referenced = this.rendererVariables();
+    this.needsBindingData = referencesAny(referenced, BINDING_VARIABLES);
+    this.needsSessionData = referencesAny(referenced, SESSION_VARIABLES);
+    this.needsUserData = referencesAny(referenced, USER_VARIABLES)
+        || this.needsBindingData || this.needsSessionData;
   }
 
   @Override
@@ -125,19 +154,28 @@ public final class PlayerListModule implements VelocityModule {
     if (currentListener != null) {
       this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
     }
+    this.lastSentContent.clear();
     this.plugin.proxy().getAllPlayers().forEach(player ->
         player.sendPlayerListHeaderAndFooter(Component.empty(), Component.empty()));
   }
 
   private void refreshAll() {
-    this.plugin.proxy().getAllPlayers().forEach(this::refreshSafely);
+    NetworkSnapshot snapshot = this.refreshNetworkSnapshot();
+    this.plugin.proxy().getAllPlayers().forEach(player -> this.refreshSafely(player, snapshot));
   }
 
   private void refreshSafely(Player player) {
+    this.refreshSafely(player, this.refreshNetworkSnapshot());
+  }
+
+  private void refreshSafely(Player player, NetworkSnapshot snapshot) {
     try {
-      StarxVariableService.PlayerContext context = this.contextFor(player);
+      StarxVariableService.PlayerContext context = this.contextFor(player, snapshot);
       PlayerListRenderer.Content content = this.renderer.render(this.config, context);
-      player.sendPlayerListHeaderAndFooter(content.header(), content.footer());
+      PlayerListRenderer.Content previous = this.lastSentContent.put(player.getUniqueId(), content);
+      if (!content.equals(previous)) {
+        player.sendPlayerListHeaderAndFooter(content.header(), content.footer());
+      }
     } catch (RuntimeException error) {
       this.plugin.logger().log(
           Level.WARNING,
@@ -147,35 +185,35 @@ public final class PlayerListModule implements VelocityModule {
   }
 
   public StarxVariableService.PlayerContext contextFor(Player player) {
+    return this.contextFor(player, this.currentNetworkSnapshot());
+  }
+
+  private StarxVariableService.PlayerContext contextFor(Player player, NetworkSnapshot snapshot) {
     Objects.requireNonNull(player, "player");
-    StarxUser user = this.authentication.authService()
-        .findConnectedUser(player.getUniqueId())
-        .orElse(null);
+    StarxUser user = this.needsUserData
+        ? this.authentication.authService().findConnectedUser(player.getUniqueId()).orElse(null)
+        : null;
     UUID legacyUuid = user == null ? null : user.uuid();
-    UUID accountUuid = this.canonicalUuidResolver.apply(
-        legacyUuid == null ? player.getUniqueId() : legacyUuid);
-    Set<UUID> knownUuids = new LinkedHashSet<>(
-        this.knownMinecraftUuidsResolver.apply(player.getUniqueId()));
-    if (legacyUuid != null) knownUuids.addAll(this.knownMinecraftUuidsResolver.apply(legacyUuid));
+    Set<UUID> knownUuids = this.needsBindingData || this.needsSessionData
+        ? knownUuids(player.getUniqueId(), legacyUuid)
+        : Set.of();
     PlayerBinding binding = null;
-    for (UUID knownUuid : knownUuids) {
-      binding = this.bindings.findByPlayer(knownUuid).orElse(null);
-      if (binding != null) break;
+    if (this.needsBindingData) {
+      for (UUID knownUuid : knownUuids) {
+        binding = this.bindings.findByPlayer(knownUuid).orElse(null);
+        if (binding != null) break;
+      }
     }
-    var session = this.sessions.summary(knownUuids).orElse(null);
-    var playtime = this.sessions.playtimeByServer(knownUuids);
+    var session = this.needsSessionData ? this.sessions.summary(knownUuids).orElse(null) : null;
+    var playtime = this.needsSessionData ? this.sessions.playtimeByServer(knownUuids) : Map.<String, Long>of();
     String serverName = player.getCurrentServer()
         .map(connection -> connection.getServerInfo().getName())
         .orElse(null);
-    int serverOnlinePlayers = player.getCurrentServer()
-        .map(connection -> connection.getServer().getPlayersConnected().size())
-        .orElse(0);
-    PlayerIdentityMetrics metrics = PlayerIdentityMetrics.from(
-        user,
-        binding,
-        session,
-        playtime,
-        Instant.now());
+    String displayServerName = this.config.serverAlias(serverName);
+    int serverOnlinePlayers = snapshot.onlinePlayers(serverName);
+    PlayerIdentityMetrics metrics = this.needsUserData || this.needsBindingData || this.needsSessionData
+        ? PlayerIdentityMetrics.from(user, binding, session, playtime, Instant.now())
+        : EMPTY_METRICS;
     return this.contextFactory.create(
         player.getUniqueId(),
         player.getUsername(),
@@ -183,12 +221,83 @@ public final class PlayerListModule implements VelocityModule {
         this.authentication.requiresAuth(player),
         user,
         binding,
-        serverName,
-        this.plugin.proxy().getPlayerCount(),
-        this.plugin.proxy().getConfiguration().getShowMaxPlayers(),
+        displayServerName,
+        snapshot.onlinePlayers(),
+        snapshot.maxPlayers(),
         serverOnlinePlayers,
         0,
-        metrics);
+        metrics,
+        snapshot.onlineServers());
+  }
+
+  private NetworkSnapshot currentNetworkSnapshot() {
+    NetworkSnapshot current = this.networkSnapshot;
+    return current == null ? this.refreshNetworkSnapshot() : current;
+  }
+
+  private Set<String> rendererVariables() {
+    return this.renderer.variables().referencedKeys(this.config.header(), this.config.footer());
+  }
+
+  private Set<UUID> knownUuids(UUID playerUuid, UUID legacyUuid) {
+    Set<UUID> known = new LinkedHashSet<>(this.knownMinecraftUuidsResolver.apply(playerUuid));
+    known.add(playerUuid);
+    UUID canonical = this.canonicalUuidResolver.apply(legacyUuid == null ? playerUuid : legacyUuid);
+    known.add(canonical);
+    if (legacyUuid != null && !legacyUuid.equals(playerUuid)) {
+      known.addAll(this.knownMinecraftUuidsResolver.apply(legacyUuid));
+      known.add(legacyUuid);
+    }
+    return Set.copyOf(known);
+  }
+
+  private static boolean referencesAny(Set<String> referenced, Set<String> candidates) {
+    return referenced.stream().anyMatch(candidates::contains);
+  }
+
+  private NetworkSnapshot refreshNetworkSnapshot() {
+    Map<String, Integer> serverCounts = new LinkedHashMap<>();
+    List<OnlineServer> online = new ArrayList<>();
+    this.plugin.proxy().getAllServers().forEach(server -> {
+      String name = server.getServerInfo().getName();
+      int players = server.getPlayersConnected().size();
+      serverCounts.put(name, players);
+      if (players > 0) {
+        online.add(new OnlineServer(this.config.serverAlias(name), players));
+      }
+    });
+    online.sort(Comparator.comparingInt(OnlineServer::players).reversed()
+        .thenComparing(OnlineServer::name));
+    StringBuilder labels = new StringBuilder();
+    for (OnlineServer server : online) {
+      if (!labels.isEmpty()) {
+        labels.append(" <dark_gray>|</dark_gray> ");
+      }
+      labels.append(server.name()).append(' ').append(server.players());
+    }
+    NetworkSnapshot snapshot = new NetworkSnapshot(
+        this.plugin.proxy().getPlayerCount(),
+        this.plugin.proxy().getConfiguration().getShowMaxPlayers(),
+        serverCounts,
+        labels.isEmpty() ? "暂无在线子服" : labels.toString());
+    this.networkSnapshot = snapshot;
+    return snapshot;
+  }
+
+  private record OnlineServer(String name, int players) {}
+
+  private record NetworkSnapshot(
+      int onlinePlayers,
+      int maxPlayers,
+      Map<String, Integer> serverCounts,
+      String onlineServers) {
+    private NetworkSnapshot {
+      serverCounts = Map.copyOf(serverCounts);
+    }
+
+    private int onlinePlayers(String serverName) {
+      return serverName == null ? 0 : serverCounts.getOrDefault(serverName, 0);
+    }
   }
 
   private void scheduleRefresh(Player player) {
@@ -207,6 +316,11 @@ public final class PlayerListModule implements VelocityModule {
     @Subscribe
     public void onServerConnected(ServerConnectedEvent event) {
       scheduleRefresh(event.getPlayer());
+    }
+
+    @Subscribe
+    public void onDisconnect(DisconnectEvent event) {
+      lastSentContent.remove(event.getPlayer().getUniqueId());
     }
   }
 }

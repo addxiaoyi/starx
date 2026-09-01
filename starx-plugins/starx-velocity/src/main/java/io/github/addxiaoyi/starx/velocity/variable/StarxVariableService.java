@@ -23,7 +23,7 @@ public final class StarxVariableService {
       "starx_first_join", "starx_server", "starx_online",
       "starx_network_online", "starx_network_max", "starx_server_online",
       "starx_server_max", "starx_playtime_total", "starx_server_footprint",
-      "starx_reputation", "starx_trust_level");
+      "starx_reputation", "starx_trust_level", "starx_servers");
 
   private final ZoneId zone;
 
@@ -58,6 +58,25 @@ public final class StarxVariableService {
     return KEYS;
   }
 
+  public Set<String> referencedKeys(String... templates) {
+    Objects.requireNonNull(templates, "templates");
+    Set<String> referenced = new java.util.HashSet<>();
+    for (String template : templates) {
+      if (template == null || template.isBlank()) {
+        continue;
+      }
+      Matcher matcher = VARIABLE.matcher(template);
+      while (matcher.find()) {
+        String key = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+        String normalized = normalize(key);
+        if (KEYS.contains(normalized)) {
+          referenced.add(normalized);
+        }
+      }
+    }
+    return Set.copyOf(referenced);
+  }
+
   private String knownValue(String key, PlayerContext player) {
     return switch (normalize(key)) {
       case "starx_player" -> player.playerName();
@@ -78,6 +97,7 @@ public final class StarxVariableService {
       case "starx_network_max" -> Integer.toString(player.networkMaxPlayers());
       case "starx_server_online" -> Integer.toString(player.serverOnlinePlayers());
       case "starx_server_max" -> Integer.toString(player.serverMaxPlayers());
+      case "starx_servers" -> player.onlineServers();
       case "starx_playtime_total" -> playtime(player.playtimeSeconds());
       case "starx_server_footprint" -> Integer.toString(player.serverFootprint());
       case "starx_reputation" -> Integer.toString(player.reputation());
@@ -155,13 +175,15 @@ public final class StarxVariableService {
       int reputation,
       String trustLevel,
       String clientPlatform,
-      boolean bedrock) {
+      boolean bedrock,
+      String onlineServers) {
 
     public PlayerContext {
       playerName = Objects.requireNonNull(playerName, "playerName");
       authState = Objects.requireNonNull(authState, "authState");
       loginSource = blankTo(loginSource, "未知来源");
       clientPlatform = blankTo(clientPlatform, "Java版");
+      onlineServers = blankTo(onlineServers, "暂无在线子服");
       if (onlinePlayers < 0 || networkMaxPlayers < 0
           || serverOnlinePlayers < 0 || serverMaxPlayers < 0 || serverFootprint < 0) {
         throw new IllegalArgumentException("player counts and footprint cannnot be negative");
@@ -194,7 +216,7 @@ public final class StarxVariableService {
       this(playerName, authState, registered, totpEnabled, lastLogin, loginSource,
           qqBound, discordBound, playtimeSeconds, firstJoin, serverName, onlinePlayers,
           networkMaxPlayers, serverOnlinePlayers, serverMaxPlayers, serverFootprint,
-          reputation, trustLevel, "Java版", false);
+          reputation, trustLevel, "Java版", false, "暂无在线子服");
     }
 
     public PlayerContext(
@@ -255,9 +277,7 @@ public final class StarxVariableService {
           0,
           0,
           0,
-          "未评级",
-          "Java版",
-          false);
+          "未评级", "Java版", false, "暂无在线子服");
     }
   }
 }

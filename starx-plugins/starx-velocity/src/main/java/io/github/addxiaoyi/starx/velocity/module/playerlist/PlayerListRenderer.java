@@ -15,6 +15,10 @@ public final class PlayerListRenderer {
     this(variables, MiniMessage.miniMessage());
   }
 
+  StarxVariableService variables() {
+    return this.variables;
+  }
+
   PlayerListRenderer(StarxVariableService variables, MiniMessage miniMessage) {
     this.variables = Objects.requireNonNull(variables, "variables");
     this.miniMessage = Objects.requireNonNull(miniMessage, "miniMessage");

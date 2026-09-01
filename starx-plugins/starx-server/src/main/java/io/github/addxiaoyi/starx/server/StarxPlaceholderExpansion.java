@@ -48,6 +48,9 @@ public final class StarxPlaceholderExpansion extends PlaceholderExpansion {
       case "capabilities" -> status.getOrDefault("capabilities", "");
       case "online" -> status.getOrDefault("online", "0");
       case "max" -> status.getOrDefault("max", "0");
+      case "memory_used_mb" -> status.getOrDefault("memoryUsedMb", "0");
+      case "memory_max_mb" -> status.getOrDefault("memoryMaxMb", "0");
+      case "memory_percent" -> status.getOrDefault("memoryPercent", "0");
       case "proxy_status" -> this.session.lastProxyContact().isPresent() ? "已连接" : "未连接";
       case "player" -> player == null ? "" : Objects.requireNonNullElse(player.getName(), "");
       default -> null;

@@ -132,6 +132,11 @@ public class DefaultTabList implements TabList {
     }
 
     @Override
+    public boolean hasAnimations() {
+        return headerAnimation != null || footerAnimation != null;
+    }
+
+    @Override
     public Optional<TabPlayerEntry> getPlayerEntry(String playerId) {
         Objects.requireNonNull(playerId, "playerId");
         return Optional.ofNullable(entries.get(playerId));

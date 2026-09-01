@@ -65,6 +65,32 @@ final class ConfigLayoutTest {
   }
 
   @Test
+  void splitConfigIsCompletedWithNewDefaultsWithoutChangingExistingValues() throws Exception {
+    Path entrypoint = this.tempDir.resolve("config.yml");
+    Files.writeString(entrypoint, """
+        schema-version: 4
+        config-files:
+          directory: config
+          files: [core.yml, auth.yml, network.yml, modules.yml, uworld.yml, update.yml]
+        """, StandardCharsets.UTF_8);
+    write("config/modules.yml", """
+        player-list:
+          refresh-seconds: 9
+        """);
+
+    ConfigLoader.load(entrypoint);
+
+    String modules = Files.readString(this.tempDir.resolve("config/modules.yml"));
+    assertTrue(modules.contains("refresh-seconds: 9"));
+    assertTrue(modules.contains("server-aliases:"));
+    assertTrue(Files.readString(entrypoint).contains("schema-version: 5"));
+    try (Stream<Path> files = Files.list(this.tempDir)) {
+      assertTrue(files.anyMatch(path -> path.getFileName().toString()
+          .startsWith("config.yml.pre-migration")));
+    }
+  }
+
+  @Test
   void legacyMonolithicConfigIsReadAndMigratedWithAUsableBackup() throws Exception {
     Path entrypoint = this.tempDir.resolve("config.yml");
     Files.writeString(entrypoint, "schema-version: 5\napi-key: legacy\n", StandardCharsets.UTF_8);

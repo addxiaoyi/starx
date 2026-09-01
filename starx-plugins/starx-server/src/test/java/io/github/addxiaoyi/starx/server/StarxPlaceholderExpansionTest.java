@@ -15,7 +15,12 @@ final class StarxPlaceholderExpansionTest {
     BackendBridgeSession session = new BackendBridgeSession(
         "factions",
         ServerPlatform.PAPER,
-        () -> Map.of("online", "7", "max", "100"),
+        () -> Map.of(
+            "online", "7",
+            "max", "100",
+            "memoryUsedMb", "1536",
+            "memoryMaxMb", "4096",
+            "memoryPercent", "37"),
         Clock.systemUTC());
     StarxPlaceholderExpansion expansion = new StarxPlaceholderExpansion(session, "0.1.4");
 
@@ -26,6 +31,9 @@ final class StarxPlaceholderExpansionTest {
     assertEquals("main-thread", expansion.onRequest(null, "execution"));
     assertEquals("7", expansion.onRequest(null, "online"));
     assertEquals("100", expansion.onRequest(null, "max"));
+    assertEquals("1536", expansion.onRequest(null, "memory_used_mb"));
+    assertEquals("4096", expansion.onRequest(null, "memory_max_mb"));
+    assertEquals("37", expansion.onRequest(null, "memory_percent"));
     assertEquals("未连接", expansion.onRequest(null, "proxy_status"));
     assertNull(expansion.onRequest(null, "unknown"));
   }
