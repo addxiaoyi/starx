@@ -13,7 +13,7 @@ final class BackendTabTitleListener implements Listener {
   private static final List<String> PROVIDERS = List.of(
       "PlayerTitle", "zPrefix", "PrefixManager", "KDPrefix", "LuckPerms", "Vault");
   private static final List<String> PLACEHOLDERS = List.of(
-      "%playertitle_title%", "%playertitle_prefix%", "%zprefix_prefix%",
+      "%zprefix_current%", "%zprefix_prefix%", "%playertitle_title%", "%playertitle_prefix%",
       "%prefixmanager_prefix%", "%kdprefix_prefix%", "%luckperms_prefix%", "%vault_prefix%");
 
   @EventHandler
