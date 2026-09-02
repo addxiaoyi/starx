@@ -57,6 +57,7 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
   private String serverType;
   private DefaultStarxService extensionService;
   private CompatibilityReport compatibilityReport;
+  private BackendTabTitleListener tabTitleListener;
 
   @Override
   public void onEnable() {
@@ -124,6 +125,10 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
     this.getServer().getPluginManager().registerEvents(this.accountController, this);
     this.getServer().getPluginManager().registerEvents(new IntegrationListener(), this);
     this.enablePlaceholderApi();
+    this.tabTitleListener = new BackendTabTitleListener();
+    this.getServer().getPluginManager().registerEvents(this.tabTitleListener, this);
+    this.getServer().getGlobalRegionScheduler().runAtFixedRate(
+        this, task -> this.tabTitleListener.applyAll(), 40L, 100L);
     this.installExtensionService(platform);
     this.getLogger().info(
         "StarX backend ready: node=" + nodeId

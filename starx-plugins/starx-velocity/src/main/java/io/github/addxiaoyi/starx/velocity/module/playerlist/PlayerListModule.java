@@ -262,16 +262,14 @@ public final class PlayerListModule implements VelocityModule {
       String name = server.getServerInfo().getName();
       int players = server.getPlayersConnected().size();
       serverCounts.put(name, players);
-      if (players > 0) {
-        online.add(new OnlineServer(this.config.serverAlias(name), players));
-      }
+      online.add(new OnlineServer(this.config.serverAlias(name), players));
     });
-    online.sort(Comparator.comparingInt(OnlineServer::players).reversed()
-        .thenComparing(OnlineServer::name));
+    online.sort(Comparator.comparing(OnlineServer::name));
     StringBuilder labels = new StringBuilder();
-    for (OnlineServer server : online) {
+    for (int index = 0; index < online.size(); index++) {
+      OnlineServer server = online.get(index);
       if (!labels.isEmpty()) {
-        labels.append(" <dark_gray>|</dark_gray> ");
+        labels.append(index % 4 == 0 ? "\\n" : " <dark_gray>|</dark_gray> ");
       }
       labels.append(server.name()).append(' ').append(server.players());
     }
@@ -279,7 +277,7 @@ public final class PlayerListModule implements VelocityModule {
         this.plugin.proxy().getPlayerCount(),
         this.plugin.proxy().getConfiguration().getShowMaxPlayers(),
         serverCounts,
-        labels.isEmpty() ? "暂无在线子服" : labels.toString());
+        labels.isEmpty() ? "暂无已注册子服" : labels.toString());
     this.networkSnapshot = snapshot;
     return snapshot;
   }

@@ -14,6 +14,8 @@
 
 - TAB 可在任意子服显示全网在线人数、当前子服人数及在线子服人数，支持配置子服别名优先显示。
 - PAPI 可读取子服内存占用等节点运行数据，并通过缓存快照避免每次占位符解析触发网络请求。
+- TAB 子服人数列表现在包含所有已注册子服，并按多行展示 0 人服务，避免空服被误认为未配置。
+- 后端自动识别 PlayerTitle、zPrefix、PrefixManager、KDPrefix、LuckPerms 和 Vault 等称号/前缀来源，通过 PlaceholderAPI 将首个有效称号应用到 TAB 玩家名。
 
 ### Upgrade
 
