@@ -1,0 +1,23 @@
+{
+    "id": "starx",
+    "name": "StarX",
+    "version": "${version}",
+    "description": "StarX Velocity proxy plugin with embedded Uworld runtime",
+    "authors": ["addxiaoyi"],
+    "main": "io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin",
+    "api-version": "1.21",
+    "dependencies": [
+        {
+            "id": "luckperms",
+            "optional": true
+        },
+        {
+            "id": "floodgate",
+            "optional": true
+        },
+        {
+            "id": "tab",
+            "optional": true
+        }
+    ]
+}

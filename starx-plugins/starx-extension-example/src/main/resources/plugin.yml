@@ -1,0 +1,8 @@
+name: StarXExtensionExample
+version: '${version}'
+main: io.github.addxiaoyi.starx.example.server.StarxExampleServerPlugin
+api-version: '1.21'
+folia-supported: true
+description: Public StarX Service API example for Paper and Folia
+authors: [addxiaoyi]
+depend: [StarXServer]

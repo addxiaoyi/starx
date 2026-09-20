@@ -1,0 +1,70 @@
+# StarX 基础配置：自动配置、兼容性检查、管理接口、回调和数据库。
+#
+# 新手先只看这份文件：
+# 1. 首次启动通常只需要确认 HTTP 端口、数据库类型和数据库密码。
+# 2. 空的 api-key 会在 auto-config.generate-api-key=true 时自动生成，生成后不要再随意删除。
+# 3. 修改配置后必须完整停止并重新启动 Velocity，插件不支持热重载。
+#
+# 安全提醒：api-key、webhook.secret、database.password 都是敏感信息，不要提交到仓库或发到公共群。
+# HTTP 管理接口默认只监听本机；只有明确需要外部访问时才修改 http.bind，并同时配置防火墙、反向代理和强密钥。
+auto-config:
+  # 自动配置总开关。true 会根据已安装的插件和后端服务器补齐部分配置；false 表示完全手动维护。
+  enabled: true
+  # api-key 为空时自动生成管理接口密钥；已有非空密钥不会被覆盖。
+  generate-api-key: true
+  # 根据已安装的可选插件自动开关 LuckPerms、Floodgate、TAB、Plan、RakNet 等集成。
+  manage-optional-integrations: true
+  # 根据已安装的皮肤插件自动选择 website-sync.textures.source。
+  manage-texture-source: true
+  # 首次启动时自动选择认证完成后要进入的后端服务器。
+  select-auth-target: true
+  # 自动探测结果写入此文件，路径相对于 plugins/starx/。
+  report-file: "auto-detection.json"
+
+# 管理 HTTP API 的访问密钥。留空并保持上面的自动生成开关为 true 即可让插件生成。
+api-key: ""
+
+compatibility:
+  # true：检测到不受支持的平台时阻止启动；生产环境建议保持 true。
+  strict-platform: true
+  # 兼容性报告文件名，路径相对于 plugins/starx/。
+  report-file: "compatibility-report.json"
+
+http:
+  # 管理 HTTP API 监听地址。127.0.0.1 只允许本机访问，0.0.0.0 会暴露到所有网卡。
+  bind: "127.0.0.1"
+  # 管理 HTTP API 端口，不是 Minecraft 游戏端口。
+  port: 8788
+  # 端口被占用时的策略：strict=直接失败，fallback=在备用范围找端口，persist=选择后保留，ephemeral=临时选择。
+  port-conflict-policy: "persist"
+  # fallback 或 persist 需要换端口时搜索的范围；通常保持默认即可。
+  fallback-range-start: 8788
+  fallback-range-end: 8888
+  # 通过 FRP 或反向代理对外提供的 HTTP 根地址；不使用时留空。
+  frp-public-url: ""
+
+webhook:
+  # 可选的事件回调地址；留空表示不发送 webhook。
+  url: ""
+  # webhook 签名密钥。配置 url 后建议填写随机值，并与接收端保持一致。
+  secret: ""
+
+database:
+  # 常用值：sqlite、mysql、postgresql 或 h2。默认 sqlite 最省事，正式多节点部署再考虑外部数据库。
+  type: "sqlite"
+  # 外部数据库主机；sqlite 不使用。
+  host: ""
+  # 外部数据库端口；MySQL 默认 3306。
+  port: 3306
+  # sqlite 为文件路径；外部数据库为库名。默认文件会落在 plugins/starx/data.db。
+  database: "plugins/starx/data.db"
+  # 外部数据库用户名；sqlite 不使用。
+  username: "starx"
+  # 外部数据库密码。不要在日志、仓库或截图中暴露。
+  password: ""
+  # 留空时按 type/host/port/database 生成 JDBC 地址；需要特殊 JDBC 参数时才填写。
+  url: ""
+  # 数据库连接池上限。单个 Velocity 实例一般保持 2-10 即可。
+  pool-max-size: 2
+  # 建立数据库连接的超时时间，单位毫秒。
+  connection-timeout-ms: 30000

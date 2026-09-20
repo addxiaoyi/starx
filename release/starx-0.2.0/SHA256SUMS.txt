@@ -1,0 +1,7 @@
+ad2d990c8a0c2cb4dbf82d5dac8c6a60aacad57af954cc98859058673b483bf8  starx-api-1.0.0-javadoc.jar
+d7e3453dd501655f2e34b272b4473e760210b68be33b4a7adedae3c9d2903f4a  starx-api-1.0.0-sources.jar
+14308d645169e45872f73eea4f37d7f99e78acbb0b89e1c65ce749a4de0eb440  starx-api-1.0.0.jar
+c4beef1650a30e74dfc69edd5f44dd535158d96dd472c2842a34447ab56cac1f  starx-extension-example-0.2.0.jar
+a13a345602cb5f42a74ed1c872dadb7492d788399bccd91a6a97973042b2bda4  starx-server-0.2.0.jar
+586d5cc2b09855e15a7ae3f2ccaeeebc6a53e61a93abad2c93c6911910da7bba  starx-universal-0.2.0.jar
+0f64f4817243a9fad933847d3c9a34f1bcb67efe70c21b2ded94b5b5dce83323  starx-velocity-0.2.0.jar

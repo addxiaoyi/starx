@@ -1,0 +1,24 @@
+CHECK name=velocity_home status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test exists=true
+CHECK name=java_21 status=PASS detail=path=C:\Program Files\Zulu\zulu-21\bin\java.exe java21=true
+CHECK name=velocity_build_606 status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\velocity-3.5.0-SNAPSHOT-606.jar build606=true
+CHECK name=plugin_jar_inspection status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\plugins readable=true
+CHECK name=starx_jar_count status=PASS detail=single=true path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\plugins\starx-velocity.jar
+CHECK name=external_limboapi status=PASS detail=absent=true
+CHECK name=candidate_hash status=PASS detail=candidate_sha256=C5CBFC4887B7B3ED228B9AFEEA2092EE81213EB99E6D201B4DFABEB0E648D695 deployed_sha256=C5CBFC4887B7B3ED228B9AFEEA2092EE81213EB99E6D201B4DFABEB0E648D695 match=true
+CHECK name=starx_config_syntax status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\plugins\starx\config.yml valid=true
+CHECK name=uworld_config status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\plugins\starx\config.yml module_root=true uworld_root=true module_enabled=true uworld_enabled=true legacy=false
+CHECK name=velocity_config_syntax status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\velocity.toml valid=true
+CHECK name=target_registered status=PASS detail=configured=true registered=true port=25565
+CHECK name=backend_reachable status=PASS detail=required=true reachable=true port=25565
+CHECK name=velocity_modern_forwarding status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\forwarding.secret modern=true secret_nonempty=true
+CHECK name=paper_config_syntax status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\.paper-runtime\instances\factions\config\paper-global.yml valid=true
+CHECK name=paper_velocity_forwarding status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\.paper-runtime\instances\factions\config\paper-global.yml enabled=true secret_nonempty=true
+CHECK name=forwarding_secret_match status=PASS detail=velocity_nonempty=true paper_nonempty=true match=true
+CHECK name=forwarding_online_mode_match status=PASS detail=velocity=false paper=false match=true
+CHECK name=paper_server_properties_syntax status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\.paper-runtime\instances\factions\server.properties valid=true duplicate_keys=none
+CHECK name=paper_online_mode status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\.paper-runtime\instances\factions\server.properties online_mode_false=true
+CHECK name=paper_target_port status=PASS detail=registered=true paper_port=25565 target_port=25565 match=true
+CHECK name=paper_target_host status=PASS detail=registered=true binding_specific=true same_address=true
+CHECK name=paper_server_binding status=PASS detail=configured=true private_or_loopback=true
+CHECK name=sqlite_parent_writable status=PASS detail=path=D:\qwq\项目\————————————————————————\starmc-website\velocity-test\plugins\starx sqlite=true service_identity=ADDXIAOYI9000\l method=live-probe writable=true
+UWORLD_ENVIRONMENT=PASS

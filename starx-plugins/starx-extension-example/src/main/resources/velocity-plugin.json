@@ -1,0 +1,14 @@
+{
+  "id": "starx-extension-example",
+  "name": "StarX Extension Example",
+  "version": "${version}",
+  "description": "Public StarX Service API example for Velocity",
+  "authors": ["addxiaoyi"],
+  "main": "io.github.addxiaoyi.starx.example.velocity.StarxExampleVelocityPlugin",
+  "dependencies": [
+    {
+      "id": "starx",
+      "optional": false
+    }
+  ]
+}

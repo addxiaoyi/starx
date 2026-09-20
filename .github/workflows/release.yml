@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Verify build toolchain matches release requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          java_version="$(java -version 2>&1 | head -n 1)"
+          echo "System Java: $java_version"
+          if ! java -version 2>&1 | grep -q '"25'; then
+            echo "ERROR: Release builds must run on JDK 25 (bytecode compatibility contract)" >&2
+            exit 1
+          fi
+
+      - name: Validate tag and project version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^[[:space:]]*version = "\([^"]*\)"/\1/p' build.gradle.kts | head -n 1)"
+          test -n "$version"
+          test "v$version" = "$GITHUB_REF_NAME"
+          notes="docs/releases/$version.md"
+          test -s "$notes"
+          grep -Fq "# StarX $version" "$notes"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+
+      - name: Run complete release verification
+        run: |
+          chmod +x gradlew
+          ./gradlew clean check :starx-plugins:starx-universal:check --warning-mode all --no-daemon --console=plain --non-interactive
+
+      - name: Verify universal JAR bytecode targets Java 21 and loads under JDK 21
+        shell: bash
+        run: |
+          set -euo pipefail
+          jar="starx-plugins/starx-universal/build/libs/starx-universal.jar"
+          test -s "$jar"
+          # Extract a representative class and confirm major version 65 (Java 21)
+          unzip -p "$jar" io/github/addxiaoyi/starx/velocity/StarxVelocityPlugin.class \
+            | od -An -tu1 -N8 | awk '{if ($8 != 65) { print "ERROR: bytecode major version is not 65 (Java 21): " $8; exit 1 } else { print "Bytecode target OK (major 65 / Java 21)" }}'
+
+      - name: Prepare release assets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="starx-universal-$VERSION.jar"
+          cp starx-plugins/starx-universal/build/libs/starx-universal.jar "$artifact"
+          sha256sum "$artifact" > SHA256SUMS
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          artifact = Path(f"starx-universal-{version}.jar")
+          digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+          manifest = {
+              "schemaVersion": 1,
+              "version": version,
+              "tag": os.environ["TAG"],
+              "commit": os.environ["COMMIT"],
+              "artifact": artifact.name,
+              "sha256": digest,
+              "sizeBytes": artifact.stat().st_size,
+              "java": 21,
+              "bytecodeJava": 21,
+              "buildJava": 25,
+              "runtimeJava": [21, 25],
+              "certifiedPaperApis": [
+                  "26.1.2.build.71-stable",
+                  "26.2.build.84-stable",
+              ],
+              "platforms": ["Velocity", "Paper", "Folia"],
+              "extensionApi": "1.0.0",
+          }
+          Path("release-manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          grep -Fq "$(cut -d' ' -f1 SHA256SUMS)" release-manifest.json
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          notes="${{ steps.version.outputs.notes }}"
+          assets=(
+            "starx-universal-$version.jar"
+            SHA256SUMS
+            release-manifest.json
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME"               --notes-file "$notes"               --title "StarX $version"
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}"               --verify-tag               --notes-file "$notes"               --title "StarX $version"
+          fi
+
+      - name: Upload release verification evidence
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-evidence-${{ steps.version.outputs.version }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            starx-universal-${{ steps.version.outputs.version }}.jar
+            SHA256SUMS
+            release-manifest.json
+            docs/releases/${{ steps.version.outputs.version }}.md

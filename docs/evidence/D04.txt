@@ -1,0 +1,15 @@
+status=PASS
+artifact_sha256=6EA06E607B447E336D2E38C198F963458D824A2C56C393920E2E696CF56ABD12
+case_id=D04
+timestamp=2026-07-19T22:50:19.917+08:00
+velocity_build=606
+java_version=21.0.10
+client_version=1.21.11
+account_type=offline
+initial_server=lobby
+expected_target=diagnostics
+observed_outcome=chat callback and movement callback observed; moved 3.542 blocks
+proxy_log=docs/evidence/D04-20260719-proxy.log
+proxy_log_sha256=4EF6E0E0222065ABB1F919F89FD9E8857E07B46E82174ED7C05530111DC029A5
+operator=Codex isolated diagnostics probe
+source_run=tmp/uworld-real-client-probe/runs/20260719-224755-022

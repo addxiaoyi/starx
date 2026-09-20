@@ -1,0 +1,53 @@
+# StarX Uworld 配置：认证世界、诊断世界和投影文件加载。
+#
+# 最常见的投影操作只有三步：
+# 1. 把投影文件放到 plugins/starx/assets/uworld/，例如 auth_world.schem。
+# 2. 在下面填写相对于 plugins/starx/ 的 file-name，例如 assets/uworld/auth_world.schem。
+# 3. loader-type 使用 AUTO，保存后完整重启 Velocity。
+#
+# 没有投影文件时可把 loader-type 改为 VOID，让插件只生成默认平台。
+# Uworld 还需要 modules.yml 中的 starx.uworld.enabled=true；两个开关缺一不可。
+# 不要把生产投影放进 JAR 的 src/main/resources/，那里只是默认模板。
+uworld:
+  # Uworld 总开关；false 时认证世界和诊断世界都不会启动。
+  enabled: true
+  # 玩家切换到认证世界或从认证世界返回后端的等待上限，单位秒。
+  transfer-timeout-seconds: 30
+  auth:
+    # 玩家完成认证的最长时间，单位秒；超时会结束认证会话。
+    timeout-seconds: 300
+    # 认证成功后要进入的 Velocity 后端名称，必须和 velocity.toml 中的服务器名一致。
+    target-server: "lobby"
+    world:
+      # 世界维度：OVERWORLD、NETHER 或 THE_END。
+      dimension: "OVERWORLD"
+      # 认证世界出生点坐标和朝向；投影原点会叠加下面的 offset。
+      spawn-x: 0.5
+      spawn-y: 100.0
+      spawn-z: 0.5
+      spawn-yaw: 0.0
+      spawn-pitch: 0.0
+      # 出生时的游戏模式。
+      game-mode: "ADVENTURE"
+      # AUTO 按扩展名选择 loader；也可以明确写 WORLDEDIT_SCHEM、SCHEMATIC、STRUCTURE 或 LITEMATIC。
+      loader-type: "AUTO"
+      # 相对于 plugins/starx/ 的投影路径，不是相对于 config/uworld.yml。
+      file-name: "assets/uworld/auth_world.schem"
+      # 投影载入后整体平移，单位方块；投影位置不对时优先调整这里。
+      offset-x: 0
+      offset-y: 0
+      offset-z: 0
+      # 认证世界的区块加载和模拟范围；太大可能增加内存和 CPU 消耗。
+      view-distance: 4
+      simulation-distance: 4
+      # VOID 平台或投影保护平台的半径，单位方块。
+      platform-radius: 5
+      # 玩家掉出世界低于此高度时执行救援，单位方块。
+      void-rescue-threshold: 16
+  diagnostics:
+    # 是否启用诊断世界。只在排查 Uworld 环境问题时临时开启。
+    enabled: false
+    # 诊断流程最长等待时间，单位秒。
+    timeout-seconds: 120
+    # 诊断平台半径，单位方块。
+    platform-radius: 5

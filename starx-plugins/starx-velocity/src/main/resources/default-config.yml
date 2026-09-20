@@ -1,0 +1,19 @@
+schema-version: 5
+
+# StarX Velocity 配置入口模板。
+#
+# 运行中的实际文件位于 plugins/starx/：
+# - config.yml 只负责记录分片目录和加载顺序；
+# - 真正的业务配置在 config/core.yml、auth.yml、network.yml、modules.yml、uworld.yml；
+# - 投影等运行时资源放在 assets/uworld/。
+#
+# 不要把业务配置直接写进这个入口文件。首次启动会复制缺失的默认分片，已有分片不会被默认模板覆盖。
+config-files:
+  directory: config
+  files:
+    - core.yml
+    - auth.yml
+    - network.yml
+    - modules.yml
+    - uworld.yml
+    - update.yml

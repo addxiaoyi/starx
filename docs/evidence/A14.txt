@@ -1,0 +1,15 @@
+status=PASS
+artifact_sha256=DCDC97E956100B6DD42C38E50AAEF8A035129113E76219231DFE13AC2A48CF80
+case_id=A14
+timestamp=2026-07-20T15:17:28.6870000+08:00
+velocity_build=606
+java_version=21.0.10
+client_version=1.21.11
+account_type=offline
+initial_server=auth Uworld
+expected_target=lobby
+observed_outcome=graceful shutdown disconnected the pending auth owner; Velocity exited; UUID owner, lease, session, isolated JVMs and ports were cleaned
+proxy_log=docs/evidence/A14-20260720-proxy.log
+proxy_log_sha256=B91E545C20F0C3329879F1A7C8F9962E2AFA0D423704A1A0F424ECDBC93B213D
+operator=Codex isolated minecraft-protocol acceptance probe
+source_run=tmp/uworld-real-client-probe/runs/auth-20260720-151426-670
