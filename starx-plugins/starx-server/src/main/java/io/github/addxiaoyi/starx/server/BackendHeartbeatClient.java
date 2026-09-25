@@ -18,6 +18,9 @@ final class BackendHeartbeatClient {
   static final String SERVER_HEADER = "X-StarX-Server";
   private static final String API_KEY_HEADER = "X-API-Key";
   private static final String SERVER_PATTERN = "[A-Za-z0-9_.-]{1,64}";
+  private static final HttpClient SHARED_HTTP = HttpClient.newBuilder()
+      .version(HttpClient.Version.HTTP_2)
+      .build();
 
   private final HttpClient http;
   private final URI velocityUrl;
@@ -38,7 +41,9 @@ final class BackendHeartbeatClient {
     if (timeout.isNegative() || timeout.isZero() || timeout.compareTo(Duration.ofMinutes(1)) > 0) {
       throw new IllegalArgumentException("heartbeat timeout must be between 1 ms and 60 seconds");
     }
-    this.http = HttpClient.newBuilder().connectTimeout(timeout).build();
+    // Reuse the connection pool across endpoint/key refreshes; request timeout
+    // remains enforced by HttpRequest.timeout(...).
+    this.http = SHARED_HTTP;
   }
 
   CompletableFuture<Optional<BridgeMessage>> send(BridgeMessage status) {
@@ -46,41 +51,6 @@ final class BackendHeartbeatClient {
         this.velocityUrl, this.apiKey, this.serverName, status, this.timeout);
     return this.http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.US_ASCII))
         .thenApply(response -> decodeCommandResponse(response.statusCode(), response.body()));
-  }
-
-  /**
-   * 发送心跳并返回命令及 Velocity 端 mailbox 剩余积压数量。
-   * queued 为 -1 表示响应未携带积压信息（旧版 Velocity）。
-   */
-  CompletableFuture<HeartbeatReply> sendWithBacklog(BridgeMessage status) {
-    HttpRequest request = buildRequest(
-        this.velocityUrl, this.apiKey, this.serverName, status, this.timeout);
-    return this.http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.US_ASCII))
-        .thenApply(response -> decodeCommandResponseWithBacklog(
-            response.statusCode(), response.body()));
-  }
-
-  record HeartbeatReply(Optional<BridgeMessage> command, int queuedRemaining) {
-    static final HeartbeatReply EMPTY = new HeartbeatReply(Optional.empty(), 0);
-    boolean hasCommand() {
-      return this.command.isPresent();
-    }
-  }
-
-  static HeartbeatReply decodeCommandResponseWithBacklog(int statusCode, String body) {
-    Optional<BridgeMessage> command = decodeCommandResponse(statusCode, body);
-    if (command.isEmpty()) {
-      return HeartbeatReply.EMPTY;
-    }
-    BridgeMessage cmd = command.get();
-    String queued = cmd.attributes().getOrDefault("httpCommandsQueued", "0");
-    int remaining;
-    try {
-      remaining = Math.max(0, Integer.parseInt(queued.trim()));
-    } catch (NumberFormatException error) {
-      remaining = 0;
-    }
-    return new HeartbeatReply(command, remaining);
   }
 
   static HttpRequest buildRequest(

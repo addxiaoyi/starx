@@ -18,6 +18,7 @@ public final class HubCommandModule implements VelocityModule {
 
   private final StarxVelocityPlugin plugin;
   private final Config config;
+  private final TransferCoordinator transfers = new TransferCoordinator(java.time.Duration.ofSeconds(10));
 
   public HubCommandModule(StarxVelocityPlugin plugin, Config config) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -36,9 +37,7 @@ public final class HubCommandModule implements VelocityModule {
     }
     ProxyServer proxy = this.plugin.proxy();
     try {
-      proxy.getCommandManager().register(
-          proxy.getCommandManager().metaBuilder("sxhub").build(),
-          (Command) new HubCommand());
+      proxy.getCommandManager().register("sxhub", (Command) new HubCommand(), "hub", "lobby");
     } catch (RuntimeException error) {
       proxy.getCommandManager().unregister("sxhub");
       throw error;
@@ -59,6 +58,7 @@ public final class HubCommandModule implements VelocityModule {
     if (failure != null) {
       throw new IllegalStateException("Unable to unregister hub commands", failure);
     }
+    this.transfers.clear();
   }
 
   public void sendToHub(Player player) {
@@ -67,7 +67,38 @@ public final class HubCommandModule implements VelocityModule {
       player.sendMessage(Component.text("大厅服务器暂不可用。", NamedTextColor.RED));
       return;
     }
-    player.createConnectionRequest(hub).connect();
+    if (player.getCurrentServer().map(connection ->
+        connection.getServer().getServerInfo().getName().equals(this.config.hubServerName())).orElse(false)) {
+      player.sendMessage(Component.text("你已经在大厅，无需重复转服。", NamedTextColor.GRAY));
+      return;
+    }
+    if (this.transfers.isActive(player.getUniqueId())) {
+      player.sendMessage(Component.text("正在前往大厅，请等待当前请求完成。", NamedTextColor.YELLOW));
+      return;
+    }
+    player.sendMessage(Component.text("正在前往大厅…", NamedTextColor.YELLOW));
+    try {
+      this.transfers.transfer(player, hub, "hub")
+          .whenComplete((result, error) -> {
+            if (error == null && result != null
+                && result.status() == TransferCoordinator.Status.DUPLICATE) {
+              player.sendMessage(Component.text("正在前往大厅，请等待当前请求完成。", NamedTextColor.YELLOW));
+              return;
+            }
+            if (error == null && result != null
+                && result.status() == TransferCoordinator.Status.CANCELLED) {
+              player.sendMessage(Component.text("大厅转服请求已取消，当前连接保持不变。", NamedTextColor.GRAY));
+              return;
+            }
+            if (error != null || result == null || !result.successful()) {
+              player.sendMessage(Component.text(
+                  "前往大厅失败，当前连接保持不变，请稍后重试。", NamedTextColor.RED));
+            }
+          });
+    } catch (RuntimeException error) {
+      player.sendMessage(Component.text("前往大厅失败，当前连接保持不变。", NamedTextColor.RED));
+      this.plugin.logger().fine("Unable to start hub transfer for " + player.getUniqueId());
+    }
   }
 
   public interface Config {
@@ -103,8 +134,42 @@ public final class HubCommandModule implements VelocityModule {
     public void execute(Invocation invocation) {
       CommandSource source = invocation.source();
       if (source instanceof Player player) {
+        String[] args = invocation.arguments();
+        if (args.length == 1 && "status".equalsIgnoreCase(args[0])) {
+          boolean inHub = player.getCurrentServer().map(connection ->
+              connection.getServer().getServerInfo().getName().equals(config.hubServerName())).orElse(false);
+          player.sendMessage(Component.text(
+              inHub
+                  ? "大厅转服状态：已在大厅。"
+                  : transfers.isActive(player.getUniqueId())
+                  ? "大厅转服状态：正在连接（目标：" + config.hubServerName() + "）。"
+                  : "大厅转服状态：当前没有进行中的请求。",
+              NamedTextColor.GRAY));
+          return;
+        }
+        if (args.length == 1 && "cancel".equalsIgnoreCase(args[0])) {
+          boolean cancelled = transfers.cancel(player.getUniqueId());
+          player.sendMessage(Component.text(
+              cancelled ? "正在取消大厅转服请求…" : "当前没有可取消的大厅转服请求。",
+              NamedTextColor.GRAY));
+          return;
+        }
+        if (args.length > 0) {
+          player.sendMessage(Component.text("用法：/sxhub、/sxhub status 或 /sxhub cancel。", NamedTextColor.YELLOW));
+          return;
+        }
         HubCommandModule.this.sendToHub(player);
       }
+    }
+
+    @Override
+    public java.util.List<String> suggest(Invocation invocation) {
+      String[] args = invocation.arguments();
+      if (args.length > 1) return java.util.List.of();
+      String prefix = args.length == 0 ? "" : args[0].toLowerCase(java.util.Locale.ROOT);
+      return java.util.List.of("status", "cancel").stream()
+          .filter(option -> option.startsWith(prefix))
+          .toList();
     }
   }
 }

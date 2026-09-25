@@ -4,6 +4,7 @@ import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
 import io.github.addxiaoyi.starx.api.bridge.BridgeProtocol;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -163,6 +164,15 @@ public final class BackendBridgeSession {
 
   public Optional<Instant> lastProxyContact() {
     return Optional.ofNullable(this.lastProxyContact);
+  }
+
+  public boolean hasRecentProxyContact(Duration maximumAge) {
+    Duration age = Objects.requireNonNull(maximumAge, "maximumAge");
+    if (age.isNegative() || age.isZero()) {
+      throw new IllegalArgumentException("maximumAge must be positive");
+    }
+    Instant contact = this.lastProxyContact;
+    return contact != null && contact.plus(age).isAfter(this.clock.instant());
   }
 
   public String nodeId() {

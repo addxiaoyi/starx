@@ -42,6 +42,7 @@ public final class VelocityBackendBridge implements VelocityModule {
 
   private static final String COMMAND = "sxnodes";
   private static final Duration STALE_AFTER = Duration.ofMinutes(5);
+  private static final Duration STATUS_REFRESH_INTERVAL = Duration.ofMinutes(2);
 
   private final StarxVelocityPlugin plugin;
   private final BackendNodeRegistry registry;
@@ -102,7 +103,7 @@ public final class VelocityBackendBridge implements VelocityModule {
         (Command) new BackendCommand());
     this.refreshTask = this.plugin.proxy().getScheduler()
         .buildTask(this.plugin, this::refreshAllStatuses)
-        .repeat(Duration.ofMinutes(1))
+        .repeat(STATUS_REFRESH_INTERVAL)
         .schedule();
   }
 
@@ -411,7 +412,28 @@ public final class VelocityBackendBridge implements VelocityModule {
     });
     this.registry.pruneExpired();
     this.commandMailbox.pruneIdle();
-    refreshStatuses(servers, this.channel, () -> UUID.randomUUID().toString());
+    queueStatusRequests(servers);
+  }
+
+  /**
+   * Periodic telemetry must not use a player as a plugin-message carrier.
+   * Heartbeat HTTP polling delivers these requests directly to the backend.
+   */
+  private void queueStatusRequests(Collection<RegisteredServer> servers) {
+    for (RegisteredServer server : servers) {
+      String name = server.getServerInfo().getName();
+      // Do not accumulate stale status requests while a backend heartbeat is down.
+      if (this.commandMailbox.containsType(name, BridgeProtocol.STATUS_REQUEST)) {
+        continue;
+      }
+      BridgeMessage request = BridgeMessage.statusRequest("proxy", UUID.randomUUID().toString());
+      if (!this.commandMailbox.offer(name, request)) {
+        this.plugin.logger().log(
+            Level.FINE,
+            "Backend status mailbox is full for {0}",
+            name);
+      }
+    }
   }
 
   static boolean isTrustedSource(ChannelMessageSource source) {
@@ -451,9 +473,7 @@ public final class VelocityBackendBridge implements VelocityModule {
     RegisteredServer server = event.getServer();
     this.registry.observeServer(server.getServerInfo().getName());
     BridgeMessage hello = BridgeMessage.hello("proxy", PlatformKind.VELOCITY);
-    BridgeMessage status = BridgeMessage.statusRequest(
-        "proxy",
-        UUID.randomUUID().toString());
+    BridgeMessage status = BridgeMessage.statusRequest("proxy", UUID.randomUUID().toString());
     boolean helloSent = server.sendPluginMessage(this.channel, BridgeProtocol.encode(hello));
     boolean statusSent = server.sendPluginMessage(this.channel, BridgeProtocol.encode(status));
     if (!helloSent || !statusSent) {

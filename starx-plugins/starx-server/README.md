@@ -61,6 +61,18 @@ bridge:
 
 若管理员安装 SkinsRestorer，StarX 会通过反射软集成读取玩家绑定的签名 texture；未安装、API 无数据或玩家没有皮肤时明确返回 `found=false`。StarX 不打包、不下载 SkinsRestorer API。
 
+## PlaceholderAPI 正版身份
+
+安装 PlaceholderAPI 后，StarX 注册以下玩家身份变量：
+
+| 变量 | 返回值 |
+|---|---|
+| `%starx_premium%` | `正版`、`离线账户` 或 `未知` |
+| `%starx_premium_verified%` | `true` 或 `false` |
+| `%starx_premium_status%` | `verified`、`offline` 或 `unknown` |
+
+这些变量不会查询数据库历史标记，也不会在 PAPI 渲染时请求 Mojang。只有玩家当前在线、UUID 符合 Velocity modern forwarding 的在线身份约束、且后端在最近五分钟内收到 StarX 代理桥接消息时，才显示 `正版`。未配置 modern forwarding、代理桥接失效或查询离线玩家时返回 `未知`，防止展示伪造身份。
+
 ## 命令
 
 - `/starxserver status`：显示节点、平台、执行模型、人数与最后代理联系时间。

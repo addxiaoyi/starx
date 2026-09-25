@@ -27,7 +27,11 @@ import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.util.Collection;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -36,8 +40,11 @@ import net.kyori.adventure.text.format.TextDecoration;
 public final class ProxyInfoModule
 implements VelocityModule {
     private static final long STARTUP_TIME = System.currentTimeMillis();
+    private static final long SERVER_PROBE_TTL_MILLIS = 5000L;
     private final StarxVelocityPlugin plugin;
     private final Config config;
+    private final Map<String, ProbeResult> serverProbeCache = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<Boolean>> serverProbes = new ConcurrentHashMap<>();
     private CommandMeta commandMeta;
 
     public ProxyInfoModule(StarxVelocityPlugin plugin, Config config) {
@@ -171,16 +178,41 @@ implements VelocityModule {
             };
         }
 
-        private void sendServers(SimpleCommand.Invocation invocation) {
+    private void sendServers(SimpleCommand.Invocation invocation) {
             ProxyServer proxy = ProxyInfoModule.this.plugin.proxy();
             Collection<RegisteredServer> servers = proxy.getAllServers();
             invocation.source().sendMessage(Component.text((String)("==== Servers (" + servers.size() + ") ===="), (TextColor)NamedTextColor.GOLD).decoration(TextDecoration.BOLD, true));
             for (RegisteredServer server : servers) {
                 int playerCount = server.getPlayersConnected().size();
-                String status = server.ping() != null ? "Online" : "Offline";
-                NamedTextColor color = "Online".equals(status) ? NamedTextColor.GREEN : NamedTextColor.RED;
-                invocation.source().sendMessage(Component.text((String)("  " + server.getServerInfo().getName() + ": "), (TextColor)NamedTextColor.WHITE).append((Component)Component.text((String)(status + " (" + playerCount + " players)"), (TextColor)color)));
+                String serverName = server.getServerInfo().getName();
+                this.probe(server).thenAccept(online -> {
+                    NamedTextColor color = online ? NamedTextColor.GREEN : NamedTextColor.RED;
+                    String status = online ? "Online" : "Offline";
+                    invocation.source().sendMessage(Component.text(
+                        "  " + serverName + ": ", NamedTextColor.WHITE)
+                        .append(Component.text(status + " (" + playerCount + " players)", color)));
+                });
             }
         }
+
+        private CompletableFuture<Boolean> probe(RegisteredServer server) {
+            String name = server.getServerInfo().getName();
+            long now = System.currentTimeMillis();
+            ProbeResult cached = ProxyInfoModule.this.serverProbeCache.get(name);
+            if (cached != null && now - cached.checkedAt() < SERVER_PROBE_TTL_MILLIS) {
+                return CompletableFuture.completedFuture(cached.online());
+            }
+            return ProxyInfoModule.this.serverProbes.computeIfAbsent(name, ignored ->
+                server.ping().orTimeout(1, TimeUnit.SECONDS)
+                    .handle((ping, error) -> error == null && ping != null)
+                    .whenComplete((online, error) -> {
+                        boolean reachable = error == null && Boolean.TRUE.equals(online);
+                        ProxyInfoModule.this.serverProbeCache.put(
+                            name, new ProbeResult(reachable, System.currentTimeMillis()));
+                        ProxyInfoModule.this.serverProbes.remove(name);
+                    }));
+        }
     }
+
+    private record ProbeResult(boolean online, long checkedAt) {}
 }

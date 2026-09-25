@@ -51,6 +51,7 @@ implements VelocityModule {
     private final SmartQueueService queueService;
     private final BackendRoutingService routingService;
     private final QueueTargetPolicy targetPolicy;
+    private final TransferCoordinator transfers = new TransferCoordinator(Duration.ofSeconds(10));
     private final AdaptiveRateLimiter rateLimiter;
     private ScheduledTask processingTask;
     private SmartQueueListener listener;
@@ -103,6 +104,7 @@ implements VelocityModule {
         this.listener = null;
         if (currentListener != null) this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
         this.queueService.clear();
+        this.transfers.clear();
     }
 
     public Map<String, Object> runtimeSnapshot() {
@@ -119,6 +121,7 @@ implements VelocityModule {
             "mode", "priority",
             "load", load.name(),
             "releasePerCycle", release,
+            "transfers", this.transfers.snapshot(),
             "servers", Map.copyOf(servers));
     }
 
@@ -128,11 +131,15 @@ implements VelocityModule {
 
     void onDisconnect(DisconnectEvent event) {
         Player player = event.getPlayer();
+        this.transfers.cancel(player.getUniqueId());
         this.queueService.recordQuit(player);
         player.getCurrentServer().ifPresent(connection -> this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> this.processQueues()).schedule());
     }
 
     void onKicked(KickedFromServerEvent event) {
+        if (event.getResult() instanceof KickedFromServerEvent.Notify) {
+            return;
+        }
         Optional reason = event.getServerKickReason();
         if (reason.isEmpty() || !this.isFullReason((Component)reason.get())) {
             return;
@@ -184,16 +191,15 @@ implements VelocityModule {
         if (server == null) return CompletableFuture.completedFuture(false);
 
         try {
-            return player.createConnectionRequest(server).connect()
-                .thenApply(result -> result.isSuccessful())
-                .orTimeout(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            return this.transfers.transfer(player, server, "smart-queue")
+                .thenApply(result -> result.successful())
                 .exceptionally(error -> {
                     this.plugin.logger().log(Level.FINE,
                         "Smart queue connection failed for player " + player.getUniqueId()
                             + " via " + selectedName,
                         error);
                     return false;
-                });
+                }).toCompletableFuture();
         } catch (RuntimeException error) {
             this.plugin.logger().log(Level.FINE,
                 "Smart queue connection could not start for player " + player.getUniqueId()
@@ -262,7 +268,7 @@ implements VelocityModule {
 
                 @Override
                 public String queueMessage() {
-                    return "Server is full, you are queued. VIP players get priority.";
+                    return "服务器已满，已进入智能排队；VIP 玩家享有优先级";
                 }
 
                 @Override

@@ -31,7 +31,9 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
 /**
  * 标签页列表模块
@@ -40,11 +42,13 @@ import net.kyori.adventure.text.Component;
 public class TabListModule implements VelocityModule {
 
     private static final long STATIC_REFRESH_INTERVAL_NANOS = Duration.ofSeconds(1).toNanos();
+    private static final Duration ANIMATION_REFRESH_INTERVAL = Duration.ofMillis(200);
 
     private final StarxVelocityPlugin plugin;
     private final TabListManager tabListManager;
     private final ConcurrentMap<UUID, ScheduledTask> playerTasks = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, TabContent> lastSentContent = new ConcurrentHashMap<>();
+    private final AtomicBoolean refreshInProgress = new AtomicBoolean();
     private ScheduledTask globalRefreshTask;
     private volatile long nextStaticRefreshAt;
 
@@ -63,7 +67,7 @@ public class TabListModule implements VelocityModule {
         // 启动全局刷新任务
         this.globalRefreshTask = this.plugin.proxy().getScheduler()
             .buildTask(this.plugin, this::refreshAll)
-            .repeat(Duration.ofMillis(50))
+            .repeat(ANIMATION_REFRESH_INTERVAL)
             .schedule();
 
         // 监听玩家事件
@@ -100,6 +104,9 @@ public class TabListModule implements VelocityModule {
      * 刷新所有玩家
      */
     public void refreshAll() {
+        if (!this.refreshInProgress.compareAndSet(false, true)) {
+            return;
+        }
         try {
             if (!this.tabListManager.hasAnimations() && !shouldRefreshStaticContent()) {
                 return;
@@ -112,6 +119,8 @@ public class TabListModule implements VelocityModule {
             }
         } catch (Exception e) {
             this.plugin.logger().log(java.util.logging.Level.WARNING, "刷新标签列表时出错", e);
+        } finally {
+            this.refreshInProgress.set(false);
         }
     }
 
@@ -173,15 +182,28 @@ public class TabListModule implements VelocityModule {
     }
 
     private void sendIfChanged(Player player, TabContent content) {
-        TabContent previous = this.lastSentContent.put(player.getUniqueId(), content);
-        if (content.equals(previous)) {
+        TabContent effectiveContent = accessibleContent(player, content);
+        TabContent previous = this.lastSentContent.put(player.getUniqueId(), effectiveContent);
+        if (effectiveContent.equals(previous)) {
             return;
         }
-        content.header().ifPresentOrElse(
-            header -> content.footer().ifPresentOrElse(
+        effectiveContent.header().ifPresentOrElse(
+            header -> effectiveContent.footer().ifPresentOrElse(
                 footer -> player.sendPlayerListHeaderAndFooter(header, footer),
                 () -> player.sendPlayerListHeader(header)),
-            () -> content.footer().ifPresent(player::sendPlayerListFooter));
+            () -> effectiveContent.footer().ifPresent(player::sendPlayerListFooter));
+    }
+
+    private static TabContent accessibleContent(Player player, TabContent content) {
+        boolean lowVersion = player.getProtocolVersion().getProtocol()
+            < com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_16.getProtocol();
+        if (!lowVersion) {
+            return content;
+        }
+        PlainTextComponentSerializer plain = PlainTextComponentSerializer.plainText();
+        return new TabContent(
+            content.header().map(value -> Component.text(plain.serialize(value))),
+            content.footer().map(value -> Component.text(plain.serialize(value))));
     }
 
     private record TabContent(Optional<Component> header, Optional<Component> footer) {

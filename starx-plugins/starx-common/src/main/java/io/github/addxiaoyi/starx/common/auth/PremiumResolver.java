@@ -18,8 +18,11 @@ public final class PremiumResolver {
     }
 
     public boolean isPremium(UUID uuid, boolean onlineMode) {
-        if (uuid == null) {
-            return onlineMode;
+        if (uuid == null) return false;
+        if (!onlineMode) {
+            // A client-controlled offline UUID must never retain online-mode state.
+            premiumCache.remove(uuid);
+            return false;
         }
         
         Boolean cached = premiumCache.getIfPresent(uuid);
@@ -27,9 +30,8 @@ public final class PremiumResolver {
             return cached;
         }
         
-        boolean result = onlineMode;
-        premiumCache.put(uuid, result);
-        return result;
+        premiumCache.put(uuid, true);
+        return true;
     }
     
     public void invalidate(UUID uuid) {

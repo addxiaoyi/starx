@@ -23,7 +23,9 @@ public final class StarxVariableService {
       "starx_first_join", "starx_server", "starx_online",
       "starx_network_online", "starx_network_max", "starx_server_online",
       "starx_server_max", "starx_playtime_total", "starx_server_footprint",
-      "starx_reputation", "starx_trust_level", "starx_servers");
+      "starx_reputation", "starx_trust_level", "starx_servers", "starx_ping",
+      "starx_ping_raw", "starx_premium_status", "starx_premium_verified",
+      "starx_premium_display");
 
   private final ZoneId zone;
 
@@ -85,6 +87,10 @@ public final class StarxVariableService {
       case "starx_2fa_enabled" -> player.totpEnabled() ? "已开启" : "未开启";
       case "starx_last_login" -> dateTime(player.lastLogin());
       case "starx_login_source" -> player.loginSource();
+      case "starx_premium_status" -> premiumStatus(player.loginSource());
+      case "starx_premium_verified" -> Boolean.toString(
+          "Java 正版账号".equals(player.loginSource()));
+      case "starx_premium_display" -> premiumDisplay(player);
       case "starx_client_platform" -> player.clientPlatform();
       case "starx_bedrock" -> yesNo(player.bedrock());
       case "starx_bind_qq" -> binding(player.qqBound());
@@ -102,6 +108,8 @@ public final class StarxVariableService {
       case "starx_server_footprint" -> Integer.toString(player.serverFootprint());
       case "starx_reputation" -> Integer.toString(player.reputation());
       case "starx_trust_level" -> player.trustLevel();
+      case "starx_ping" -> ping(player.smoothedPing());
+      case "starx_ping_raw" -> ping(player.rawPing());
       default -> null;
     };
   }
@@ -135,8 +143,27 @@ public final class StarxVariableService {
     return bound ? "已绑定" : "未绑定";
   }
 
+  private static String ping(int value) {
+    return value < 0 ? "未知" : value + "ms";
+  }
+
   private static String blankTo(String value, String fallback) {
     return value == null || value.isBlank() ? fallback : value;
+  }
+
+  private static String premiumStatus(String loginSource) {
+    if ("Java 正版账号".equals(loginSource)) return "verified";
+    if ("Java 离线账号".equals(loginSource)) return "offline";
+    return "unknown";
+  }
+
+  private static String premiumDisplay(PlayerContext player) {
+    if (player.authState() != AuthState.AUTHENTICATED) return "验证中";
+    return switch (premiumStatus(player.loginSource())) {
+      case "verified" -> "正版";
+      case "offline" -> "离线账户";
+      default -> "未知";
+    };
   }
 
   public enum AuthState {
@@ -176,7 +203,9 @@ public final class StarxVariableService {
       String trustLevel,
       String clientPlatform,
       boolean bedrock,
-      String onlineServers) {
+      String onlineServers,
+      int rawPing,
+      int smoothedPing) {
 
     public PlayerContext {
       playerName = Objects.requireNonNull(playerName, "playerName");
@@ -191,7 +220,38 @@ public final class StarxVariableService {
       if (reputation < 0 || reputation > 100) {
         throw new IllegalArgumentException("reputation must be between 0 and 100");
       }
+      if (rawPing < -1 || smoothedPing < -1) {
+        throw new IllegalArgumentException("ping cannot be less than -1");
+      }
       trustLevel = blankTo(trustLevel, "未评级");
+    }
+
+    public PlayerContext(
+        String playerName,
+        AuthState authState,
+        boolean registered,
+        boolean totpEnabled,
+        Instant lastLogin,
+        String loginSource,
+        boolean qqBound,
+        boolean discordBound,
+        long playtimeSeconds,
+        Instant firstJoin,
+        String serverName,
+        int onlinePlayers,
+        int networkMaxPlayers,
+        int serverOnlinePlayers,
+        int serverMaxPlayers,
+        int serverFootprint,
+        int reputation,
+        String trustLevel,
+        String clientPlatform,
+        boolean bedrock,
+        String onlineServers) {
+      this(playerName, authState, registered, totpEnabled, lastLogin, loginSource,
+          qqBound, discordBound, playtimeSeconds, firstJoin, serverName, onlinePlayers,
+          networkMaxPlayers, serverOnlinePlayers, serverMaxPlayers, serverFootprint,
+          reputation, trustLevel, clientPlatform, bedrock, onlineServers, -1, -1);
     }
 
     public PlayerContext(
@@ -277,7 +337,7 @@ public final class StarxVariableService {
           0,
           0,
           0,
-          "未评级", "Java版", false, "暂无在线子服");
+          "未评级", "Java版", false, "暂无在线子服", -1, -1);
     }
   }
 }

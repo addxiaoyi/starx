@@ -37,6 +37,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -48,8 +50,10 @@ implements VelocityModule {
     private final Config config;
     private final QueueService queueService;
     private final QueueTargetPolicy targetPolicy;
+    private final TransferCoordinator transfers = new TransferCoordinator(Duration.ofSeconds(10));
     private ScheduledTask processingTask;
     private QueueListener listener;
+    private final Map<UUID, Long> failureNoticeAt = new ConcurrentHashMap<>();
 
     public QueueModule(
         StarxVelocityPlugin plugin,
@@ -93,6 +97,8 @@ implements VelocityModule {
         this.listener = null;
         if (currentListener != null) this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
         this.queueService.clear();
+        this.failureNoticeAt.clear();
+        this.transfers.clear();
     }
 
     public Map<String, Object> runtimeSnapshot() {
@@ -100,10 +106,16 @@ implements VelocityModule {
         this.queueService.snapshot().forEach((server, size) -> servers.put(server, Map.of(
             "queued", size,
             "tailEtaSeconds", (size * this.config.checkIntervalMillis() + 999L) / 1000L)));
-        return Map.of("mode", "fifo", "servers", Map.copyOf(servers));
+        return Map.of(
+            "mode", "fifo",
+            "transfers", this.transfers.snapshot(),
+            "servers", Map.copyOf(servers));
     }
 
     void onKicked(KickedFromServerEvent event) {
+        if (event.getResult() instanceof KickedFromServerEvent.Notify) {
+            return;
+        }
         Optional reason = event.getServerKickReason();
         if (reason.isEmpty() || !this.isFullReason((Component)reason.get())) {
             return;
@@ -122,6 +134,7 @@ implements VelocityModule {
 
     void onDisconnect(DisconnectEvent event) {
         Player player = event.getPlayer();
+        this.transfers.cancel(player.getUniqueId());
         this.queueService.removeFromAllQueues(player);
         player.getCurrentServer().ifPresent(connection -> this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> this.processQueueFor(connection.getServer())).schedule());
     }
@@ -145,22 +158,41 @@ implements VelocityModule {
         if (server == null) return CompletableFuture.completedFuture(false);
 
         try {
-            return player.createConnectionRequest(server).connect()
-                .thenApply(result -> result.isSuccessful())
-                .orTimeout(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            return this.transfers.transfer(player, server, "queue")
+                .thenApply(result -> {
+                    boolean success = result.successful();
+                    if (!success) notifyRetry(player, server);
+                    return success;
+                })
                 .exceptionally(error -> {
+                    notifyRetry(player, server);
                     this.plugin.logger().log(Level.FINE,
                         "Queue connection failed for player " + player.getUniqueId()
                             + " via " + selectedName,
                         error);
                     return false;
-                });
+                }).toCompletableFuture();
         } catch (RuntimeException error) {
             this.plugin.logger().log(Level.FINE,
                 "Queue connection could not start for player " + player.getUniqueId()
                     + " via " + selectedName,
                 error);
             return CompletableFuture.completedFuture(false);
+        }
+    }
+
+    private void notifyRetry(Player player, RegisteredServer server) {
+        long now = System.nanoTime();
+        Long previous = this.failureNoticeAt.put(player.getUniqueId(), now);
+        if (previous == null || now - previous >= Duration.ofSeconds(15).toNanos()) {
+            int position = this.queueService.position(server, player);
+            long eta = this.queueService.estimateWaitSeconds(
+                server, player, 1, this.config.checkIntervalMillis());
+            String detail = position > 0
+                ? "当前位置 #" + position + "，预计 " + eta + " 秒"
+                : "队列位置更新中";
+            player.sendActionBar(Component.text(
+                "当前子服暂不可用，仍在排队，系统将自动重试（" + detail + "）。"));
         }
     }
 
@@ -186,7 +218,7 @@ implements VelocityModule {
 
                 @Override
                 public String queueMessage() {
-                    return "Server is full, you are queued.";
+                    return "服务器已满，已进入排队";
                 }
 
                 @Override

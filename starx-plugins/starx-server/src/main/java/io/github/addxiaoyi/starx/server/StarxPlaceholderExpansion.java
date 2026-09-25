@@ -3,12 +3,15 @@ package io.github.addxiaoyi.starx.server;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.time.Duration;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public final class StarxPlaceholderExpansion extends PlaceholderExpansion {
+  private static final Duration TRUSTED_PROXY_CONTACT_MAX_AGE = Duration.ofMinutes(5);
 
   private final BackendBridgeSession session;
   private final String version;
@@ -53,7 +56,45 @@ public final class StarxPlaceholderExpansion extends PlaceholderExpansion {
       case "memory_percent" -> status.getOrDefault("memoryPercent", "0");
       case "proxy_status" -> this.session.lastProxyContact().isPresent() ? "已连接" : "未连接";
       case "player" -> player == null ? "" : Objects.requireNonNullElse(player.getName(), "");
+      case "premium" -> this.premiumStatus(player).label();
+      case "premium_verified" -> this.premiumStatus(player).verified() ? "true" : "false";
+      case "premium_status" -> this.premiumStatus(player).key();
       default -> null;
     };
+  }
+
+  private PremiumStatus premiumStatus(OfflinePlayer player) {
+    if (player == null) return PremiumStatus.UNKNOWN;
+    Player online = player.getPlayer();
+    if (online == null || !online.isOnline()) return PremiumStatus.UNKNOWN;
+    if (!this.session.hasRecentProxyContact(TRUSTED_PROXY_CONTACT_MAX_AGE)) {
+      return PremiumStatus.UNKNOWN;
+    }
+    // Velocity modern forwarding transports the authenticated online-mode UUID.
+    // Paper does not expose online-mode per player, so do not consult persisted
+    // account flags or perform a separate profile lookup from a PAPI render.
+    return online.getUniqueId().version() == 4
+        ? PremiumStatus.VERIFIED
+        : PremiumStatus.OFFLINE;
+  }
+
+  private enum PremiumStatus {
+    VERIFIED("verified", "正版", true),
+    OFFLINE("offline", "离线账户", false),
+    UNKNOWN("unknown", "未知", false);
+
+    private final String key;
+    private final String label;
+    private final boolean verified;
+
+    PremiumStatus(String key, String label, boolean verified) {
+      this.key = key;
+      this.label = label;
+      this.verified = verified;
+    }
+
+    String key() { return this.key; }
+    String label() { return this.label; }
+    boolean verified() { return this.verified; }
   }
 }

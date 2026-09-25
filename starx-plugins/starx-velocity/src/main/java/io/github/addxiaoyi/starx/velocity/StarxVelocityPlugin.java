@@ -99,6 +99,7 @@ import io.github.addxiaoyi.starx.velocity.module.proxytools.MaintenanceModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.MotdModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.OnlineSyncModule;
 import io.github.addxiaoyi.starx.velocity.module.tab.TabListModule;
+import io.github.addxiaoyi.starx.velocity.module.tab.CrossServerTabModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.ProxyInfoModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.QueueModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.TutorialModule;
@@ -463,6 +464,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager.register(playerList);
         this.moduleManager.register(new TabIntegrationModule(this, playerList, variables));
         this.moduleManager.register(new TabListModule(this));
+        this.moduleManager.register(new CrossServerTabModule(this));
         MigrationModule migrationModule = new MigrationModule(this, this.eventBus, MigrationModule.Config.defaultConfig(), userRepository, uniAuthClient);
         this.moduleManager.register(migrationModule);
         this.moduleManager.register(new MigrationCommands(this, userRepository, migrationModule, uniAuthClient));
@@ -481,7 +483,9 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             this, backendBridge, maintenanceModule, userRepository, accountIdentities);
         this.lifecycle.own("website synchronization", websiteSync::close);
         this.moduleManager.register(new ChatModule(this, messageBridge, ChatModule.Config.defaultConfig()));
-        this.moduleManager.register(new RedirectModule(this, RedirectModule.Config.defaultConfig()));
+        this.moduleManager.register(new RedirectModule(
+            this, RedirectModule.Config.defaultConfig(), new BackendRoutingService(backendBridge.registry()),
+            authModule::requiresAuth));
         QueueModule queueModule = new QueueModule(
             this,
             QueueModule.Config.defaultConfig(),
@@ -548,6 +552,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             metrics.put("maintenance", maintenanceModule.isEnabled());
             metrics.put("queue", queueModule.runtimeSnapshot());
             metrics.put("smartQueue", smartQueueModule.runtimeSnapshot());
+            metrics.put("playerNetwork", playerList.networkMetrics());
             metrics.put("networkAutomation", this.networkAutomationService == null
                 ? Map.of("status", "not_started")
                 : this.networkAutomationService.snapshot());

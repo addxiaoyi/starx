@@ -47,6 +47,10 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
     @Override
     public CompletableFuture<String> authenticate(String username, String serverId, String ip, String serverName) {
+        if (username == null || !username.matches("[A-Za-z0-9_]{3,16}")
+            || serverId == null || serverId.isBlank()) {
+            return CompletableFuture.completedFuture(null);
+        }
         CompletableFuture<String> future = new CompletableFuture<>();
         String baseUrl = this.authServers.getOrDefault(serverName, MOJANG_SESSION_URL);
         String url = baseUrl + "session/minecraft/hasJoined"
@@ -59,6 +63,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
         this.httpClient.sendAsync(HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
                 .header("User-Agent", USER_AGENT)
                 .build(), HttpResponse.BodyHandlers.ofString())

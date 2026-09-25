@@ -42,6 +42,9 @@ final class StarxVariableServiceTest {
         () -> assertEquals("已开启", variables.resolve("starx_2fa_enabled", player)),
         () -> assertEquals("2026-07-17 12:34", variables.resolve("starx_last_login", player)),
         () -> assertEquals("离线账号", variables.resolve("starx_login_source", player)),
+        () -> assertEquals("unknown", variables.resolve("starx_premium_status", player)),
+        () -> assertEquals("false", variables.resolve("starx_premium_verified", player)),
+        () -> assertEquals("未知", variables.resolve("starx_premium_display", player)),
         () -> assertEquals("已绑定", variables.resolve("starx_bind_qq", player)),
         () -> assertEquals("未绑定", variables.resolve("starx_bind_discord", player)),
         () -> assertEquals("1 小时 1 分钟", variables.resolve("starx_playtime", player)),
@@ -92,7 +95,18 @@ final class StarxVariableServiceTest {
             "starx_first_join", "starx_server", "starx_online",
             "starx_network_online", "starx_network_max", "starx_server_online",
             "starx_server_max", "starx_playtime_total", "starx_server_footprint",
-            "starx_reputation", "starx_trust_level"),
+            "starx_reputation", "starx_trust_level", "starx_servers", "starx_ping",
+            "starx_ping_raw", "starx_premium_status", "starx_premium_verified",
+            "starx_premium_display"),
         this.variables.keys());
+  }
+
+  @Test
+  void rendersUnknownPingWithoutInventingZero() {
+    StarxVariableService.PlayerContext player = StarxVariableService.PlayerContext.guest("Alex", 1);
+
+    assertEquals("未知", variables.resolve("starx_ping", player));
+    assertEquals("未知", variables.resolve("starx_ping_raw", player));
+    assertEquals("验证中", variables.resolve("starx_premium_display", player));
   }
 }

@@ -32,6 +32,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
+import com.velocitypowered.api.proxy.server.ServerPing;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -47,7 +49,9 @@ implements VelocityModule {
     private final SendCommand sendCommand;
     private final AlertCommand alertCommand;
     private final PingCommand pingCommand;
+    private final DiagnoseCommand diagnoseCommand;
     private final KickAllCommand kickAllCommand;
+    private final TransferCoordinator transfers = new TransferCoordinator(java.time.Duration.ofSeconds(10));
     private CommandMeta commandMeta;
 
     public EnhancedProxyModule(StarxVelocityPlugin plugin, Config config) {
@@ -58,6 +62,7 @@ implements VelocityModule {
         this.sendCommand = new SendCommand();
         this.alertCommand = new AlertCommand();
         this.pingCommand = new PingCommand();
+        this.diagnoseCommand = new DiagnoseCommand();
         this.kickAllCommand = new KickAllCommand();
     }
 
@@ -81,12 +86,13 @@ implements VelocityModule {
         CommandMeta current = this.commandMeta;
         this.commandMeta = null;
         if (current != null) this.plugin.proxy().getCommandManager().unregister(current);
+        this.transfers.clear();
     }
 
     private final class NetworkCommand implements SimpleCommand {
         @Override public void execute(SimpleCommand.Invocation invocation) {
             String[] args = invocation.arguments();
-            if (args.length == 0) { invocation.source().sendMessage(Component.text("用法：/sxnet <list|find|send|alert|ping|drain> ...", NamedTextColor.YELLOW)); return; }
+            if (args.length == 0) { invocation.source().sendMessage(Component.text("用法：/sxnet <list|find|send|alert|ping|diagnose|drain> ...", NamedTextColor.YELLOW)); return; }
             String action = args[0].toLowerCase();
             SimpleCommand delegate = switch (action) {
                 case "list" -> glistCommand;
@@ -94,22 +100,24 @@ implements VelocityModule {
                 case "send" -> sendCommand;
                 case "alert" -> alertCommand;
                 case "ping" -> pingCommand;
+                case "diagnose" -> diagnoseCommand;
                 case "drain" -> kickAllCommand;
                 default -> null;
             };
-            if (delegate == null) { invocation.source().sendMessage(Component.text("未知网络操作。可用：list/find/send/alert/ping/drain", NamedTextColor.RED)); return; }
+            if (delegate == null) { invocation.source().sendMessage(Component.text("未知网络操作。可用：list/find/send/alert/ping/diagnose/drain", NamedTextColor.RED)); return; }
             delegate.execute(new RoutedInvocation(invocation, java.util.Arrays.copyOfRange(args, 1, args.length), "sxnet"));
         }
         @Override public List<String> suggest(SimpleCommand.Invocation invocation) {
             String[] args = invocation.arguments();
-            List<String> actions = List.of("list", "find", "send", "alert", "ping", "drain");
+            List<String> actions = List.of("list", "find", "send", "alert", "ping", "diagnose", "drain");
             if (args.length <= 1) {
                 String prefix = args.length == 0 ? "" : args[0].toLowerCase();
                 return actions.stream().filter(action -> action.startsWith(prefix)).toList();
             }
             SimpleCommand delegate = switch (args[0].toLowerCase()) {
                 case "list" -> glistCommand; case "find" -> findCommand; case "send" -> sendCommand;
-                case "alert" -> alertCommand; case "ping" -> pingCommand; case "drain" -> kickAllCommand; default -> null;
+                case "alert" -> alertCommand; case "ping" -> pingCommand; case "diagnose" -> diagnoseCommand;
+                case "drain" -> kickAllCommand; default -> null;
             };
             return delegate == null ? List.of() : delegate.suggest(
                 new RoutedInvocation(invocation, java.util.Arrays.copyOfRange(args, 1, args.length), "sxnet"));
@@ -296,8 +304,44 @@ implements VelocityModule {
             }
             Player target = (Player)targetOpt.get();
             RegisteredServer server = (RegisteredServer)serverOpt.get();
-            target.createConnectionRequest(server).fireAndForget();
-            invocation.source().sendMessage(((TextComponent)((TextComponent)Component.text((String)"已将 ", (TextColor)NamedTextColor.GREEN).append((Component)Component.text((String)target.getUsername(), (TextColor)NamedTextColor.AQUA))).append((Component)Component.text((String)" 发送至 ", (TextColor)NamedTextColor.GREEN))).append((Component)Component.text((String)server.getServerInfo().getName(), (TextColor)NamedTextColor.AQUA)));
+            if (EnhancedProxyModule.this.transfers.isActive(target.getUniqueId())) {
+                invocation.source().sendMessage(Component.text(
+                    "该玩家已有转服请求正在处理，请等待结果。", NamedTextColor.YELLOW));
+                return;
+            }
+            invocation.source().sendMessage(Component.text(
+                "正在将 " + target.getUsername() + " 发送至 "
+                    + server.getServerInfo().getName() + "...", NamedTextColor.YELLOW));
+            try {
+            EnhancedProxyModule.this.transfers.transfer(target, server, "admin-send")
+                .whenComplete((result, error) -> {
+                boolean connected = error == null && result != null && result.successful();
+                if (error == null && result != null
+                    && result.status() == TransferCoordinator.Status.DUPLICATE) {
+                    invocation.source().sendMessage(Component.text(
+                        "该玩家已有转服请求正在处理。", NamedTextColor.YELLOW));
+                    return;
+                }
+                if (connected) {
+                    invocation.source().sendMessage(Component.text(
+                        "已将 " + target.getUsername() + " 发送至 "
+                            + server.getServerInfo().getName(), NamedTextColor.GREEN));
+                    return;
+                }
+                String reason = error == null ? "目标服务器不可用或被拒绝" : "连接失败";
+                invocation.source().sendMessage(Component.text(
+                    "转服失败: " + target.getUsername() + " -> "
+                        + server.getServerInfo().getName() + " (" + reason + ")",
+                    NamedTextColor.RED));
+                target.sendMessage(Component.text(
+                    "转服失败，当前连接保持不变。请稍后重试。", NamedTextColor.RED));
+            });
+            } catch (RuntimeException error) {
+                invocation.source().sendMessage(Component.text(
+                    "转服请求无法启动，当前连接保持不变。", NamedTextColor.RED));
+                target.sendMessage(Component.text(
+                    "转服失败，当前连接保持不变。请稍后重试。", NamedTextColor.RED));
+            }
         }
 
         public List<String> suggest(SimpleCommand.Invocation invocation) {
@@ -355,7 +399,7 @@ implements VelocityModule {
                     return;
                 }
                 Player target = (Player)targetOpt.get();
-                invocation.source().sendMessage(((TextComponent)Component.text((String)target.getUsername(), (TextColor)NamedTextColor.AQUA).append((Component)Component.text((String)" 的延迟：", (TextColor)NamedTextColor.GOLD))).append((Component)Component.text((String)(target.getPing() + "ms"), (TextColor)NamedTextColor.GREEN)));
+                invocation.source().sendMessage(((TextComponent)Component.text((String)target.getUsername(), (TextColor)NamedTextColor.AQUA).append((Component)Component.text((String)" 的延迟：", (TextColor)NamedTextColor.GOLD))).append((Component)Component.text((String)formatPing(target), (TextColor)NamedTextColor.GREEN)));
                 return;
             }
             if (!(invocation.source() instanceof Player)) {
@@ -363,12 +407,63 @@ implements VelocityModule {
                 return;
             }
             Player self = (Player)invocation.source();
-            invocation.source().sendMessage(Component.text((String)"你的延迟：", (TextColor)NamedTextColor.GOLD).append((Component)Component.text((String)(self.getPing() + "ms"), (TextColor)NamedTextColor.GREEN)));
+            invocation.source().sendMessage(Component.text((String)"你的延迟：", (TextColor)NamedTextColor.GOLD).append((Component)Component.text((String)formatPing(self), (TextColor)NamedTextColor.GREEN)));
+        }
+
+        private String formatPing(Player player) {
+            long ping = player.getPing();
+            return ping < 0 ? "未知" : ping + "ms";
         }
 
         public List<String> suggest(SimpleCommand.Invocation invocation) {
             String lastArg = ((String[])invocation.arguments()).length > 0 ? ((String[])invocation.arguments())[((String[])invocation.arguments()).length - 1] : "";
             return EnhancedProxyModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(name -> name.toLowerCase().startsWith(lastArg.toLowerCase())).sorted().collect(Collectors.toList());
+        }
+    }
+
+    private final class DiagnoseCommand implements SimpleCommand {
+        @Override
+        public void execute(SimpleCommand.Invocation invocation) {
+            if (!(invocation.source() instanceof Player player)) {
+                invocation.source().sendMessage(Component.text("diagnose 只能由玩家执行。", NamedTextColor.RED));
+                return;
+            }
+            long playerPing = player.getPing();
+            String playerValue = playerPing < 0 ? "未知" : playerPing + "ms";
+            Optional<ServerConnection> connection = player.getCurrentServer();
+            if (connection.isEmpty()) {
+                invocation.source().sendMessage(Component.text("网络诊断", NamedTextColor.GOLD));
+                invocation.source().sendMessage(Component.text("玩家到代理：" + playerValue, NamedTextColor.YELLOW));
+                invocation.source().sendMessage(Component.text("当前后端：未连接", NamedTextColor.GRAY));
+                invocation.source().sendMessage(Component.text("建议：等待连接完成后再次执行 /sxnet diagnose。", NamedTextColor.GRAY));
+                return;
+            }
+            RegisteredServer server = connection.get().getServer();
+            String name = server.getServerInfo().getName();
+            invocation.source().sendMessage(Component.text("网络诊断", NamedTextColor.GOLD));
+            invocation.source().sendMessage(Component.text("玩家到代理：" + playerValue, NamedTextColor.YELLOW));
+            invocation.source().sendMessage(Component.text("当前节点：" + name, NamedTextColor.YELLOW));
+            invocation.source().sendMessage(Component.text("后端状态：查询中…", NamedTextColor.GRAY));
+            server.ping().orTimeout(1, TimeUnit.SECONDS).handle((ping, error) -> {
+                Optional<ServerConnection> current = player.getCurrentServer();
+                if (current.isEmpty()
+                    || !current.get().getServer().getServerInfo().getName().equals(name)) {
+                    return null;
+                }
+                boolean online = error == null && ping != null;
+                String backend = online ? "在线" : "不可达";
+                player.sendMessage(Component.text("后端状态：" + backend,
+                    online ? NamedTextColor.GREEN : NamedTextColor.RED));
+                player.sendMessage(Component.text(
+                    online ? "建议：当前节点可用。" : "建议：稍后重试或使用 /sxhub 返回大厅。",
+                    online ? NamedTextColor.GRAY : NamedTextColor.YELLOW));
+                return (ServerPing) ping;
+            });
+        }
+
+        @Override
+        public List<String> suggest(SimpleCommand.Invocation invocation) {
+            return List.of();
         }
     }
 

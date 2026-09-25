@@ -24,7 +24,6 @@ import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.api.event.EventBus;
-import io.github.addxiaoyi.starx.api.messaging.PluginMessage;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.messaging.VelocityMessageBridge;
 import io.github.addxiaoyi.starx.velocity.bridge.VelocityBackendBridge;
@@ -32,6 +31,7 @@ import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.List;
 import java.time.Duration;
 import io.github.addxiaoyi.starx.common.platform.MaintenanceStateService;
 import net.kyori.adventure.text.Component;
@@ -109,14 +109,20 @@ implements VelocityModule {
                 return;
             }
             this.eventBus.publish(MAINTENANCE_CHANGED, Map.of("enabled", enabled));
+            this.notifyOnlinePlayers(enabled);
         }
     }
 
+    private void notifyOnlinePlayers(boolean enabled) {
+        Component message = enabled
+            ? Component.text("服务器维护已开始：当前在线不受影响，请避免前往可能重启的子服。")
+            : Component.text("服务器维护已结束：服务已恢复，可以正常进入。 ");
+        this.plugin.proxy().getAllPlayers().forEach(player -> player.sendMessage(message));
+    }
+
     private void syncToBackends(boolean enabled) {
-        PluginMessage message = new PluginMessage("config_sync", Map.of("maintenance", enabled));
-        for (Player player : this.plugin.proxy().getAllPlayers()) {
-            this.bridge.sendMessage(player, message);
-        }
+        // BackendBridge sends directly to each backend; routing this through every
+        // player's connection duplicates traffic and fails when no player is online.
         this.backendBridge.broadcastMaintenance(enabled);
     }
 
@@ -181,7 +187,7 @@ implements VelocityModule {
         public void execute(SimpleCommand.Invocation invocation) {
             String[] args = (String[])invocation.arguments();
             if (args.length != 1) {
-                invocation.source().sendMessage((Component)Component.text((String)"用法：/sxmaintain <on|off>"));
+                invocation.source().sendMessage((Component)Component.text((String)"用法：/sxmaintain <on|off|status>"));
                 return;
             }
             switch (args[0].toLowerCase()) {
@@ -193,14 +199,29 @@ implements VelocityModule {
                     MaintenanceModule.this.setEnabled(false);
                     break;
                 }
+                case "status": {
+                    invocation.source().sendMessage(Component.text(
+                        MaintenanceModule.this.isEnabled() ? "维护状态：已开启" : "维护状态：未开启"));
+                    break;
+                }
                 default: {
-                    invocation.source().sendMessage((Component)Component.text((String)"用法：/sxmaintain <on|off>"));
+                    invocation.source().sendMessage((Component)Component.text((String)"用法：/sxmaintain <on|off|status>"));
                 }
             }
         }
 
         public boolean hasPermission(SimpleCommand.Invocation invocation) {
             return invocation.source().hasPermission(MaintenanceModule.this.config.bypassPermission());
+        }
+
+        @Override
+        public List<String> suggest(SimpleCommand.Invocation invocation) {
+            String[] args = invocation.arguments();
+            if (args.length > 1) return List.of();
+            String prefix = args.length == 0 ? "" : args[0].toLowerCase();
+            return List.of("on", "off", "status").stream()
+                .filter(option -> option.startsWith(prefix))
+                .toList();
         }
     }
 }

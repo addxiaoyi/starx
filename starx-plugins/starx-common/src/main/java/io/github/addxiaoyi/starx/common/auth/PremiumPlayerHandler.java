@@ -49,15 +49,19 @@ public final class PremiumPlayerHandler {
      * 检查玩家是否为正版玩家（带缓存）
      */
     public boolean isPremium(UUID uuid, boolean onlineMode) {
-        // 首先检查缓存
+        if (uuid == null || !onlineMode) {
+            // Offline-mode identities are client-controlled and must never reuse
+            // a prior online-mode verification for the same UUID.
+            if (uuid != null) {
+                this.invalidate(uuid);
+            }
+            return false;
+        }
+
+        // Only online-mode identities may read a premium verification cache.
         PremiumVerification cached = verificationCache.get(uuid);
         if (cached != null && !cached.isExpired(VERIFICATION_TTL_MS)) {
             return cached.isPremium();
-        }
-
-        // 直接检查在线模式
-        if (!onlineMode) {
-            return false;
         }
 
         // 通过 PremiumResolver 检查
@@ -81,11 +85,13 @@ public final class PremiumPlayerHandler {
 
         yggdrasilAuth.authenticate(username, serverId, ip, serverName)
             .thenAccept(result -> {
-                if (result != null) {
+                if (PremiumProfileVerifier.matches(result, uuid, username)) {
                     verificationCache.put(uuid, new PremiumVerification(true));
-                    markRecentAuth(uuid.toString() + ":" + result);
+                    markRecentAuth(uuid.toString());
+                    callback.accept(true);
+                    return;
                 }
-                callback.accept(result != null);
+                callback.accept(false);
             })
             .exceptionally(ex -> {
                 LOGGER.log(Level.FINE, "Premium verification failed for " + uuid + ": " + ex.getMessage());

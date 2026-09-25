@@ -17,6 +17,8 @@ import java.util.Set;
 
 public final class BackendRoutingService {
   private static final int DEFAULT_ADMISSIONS_PER_MINUTE = 20;
+  private static final int UNKNOWN_LATENCY_MS = 1_000;
+  private static final int MAX_LATENCY_MS = 60_000;
 
   private final BackendNodeRegistry registry;
   private final ServerRoutingEngine engine;
@@ -44,6 +46,24 @@ public final class BackendRoutingService {
   public Optional<ServerRoutingEngine.Decision> select(
       String preferredNode,
       Map<String, Integer> queueSizes) {
+    return selectExcluding(preferredNode, Set.of(), queueSizes);
+  }
+
+  /** Selects a healthy sibling while excluding a node known to have just failed. */
+  public Optional<ServerRoutingEngine.Decision> selectAlternative(
+      String preferredNode,
+      String excludedNode,
+      Map<String, Integer> queueSizes) {
+    Set<String> excluded = excludedNode == null || excludedNode.isBlank()
+        ? Set.of()
+        : Set.of(excludedNode);
+    return selectExcluding(preferredNode, excluded, queueSizes);
+  }
+
+  private Optional<ServerRoutingEngine.Decision> selectExcluding(
+      String preferredNode,
+      Set<String> excludedNodes,
+      Map<String, Integer> queueSizes) {
     if (preferredNode == null || preferredNode.isBlank()) return Optional.empty();
     Map<String, Integer> queues = queueSizes == null ? Map.of() : Map.copyOf(queueSizes);
     String requestedType = this.registry.find(preferredNode)
@@ -52,6 +72,7 @@ public final class BackendRoutingService {
     Instant now = this.clock.instant();
     List<ServerRoutingEngine.Node> candidates = new ArrayList<>();
     for (BackendNode node : this.registry.all()) {
+      if (excludedNodes.contains(node.registeredServer())) continue;
       candidates.add(toRoutingNode(node, queues.getOrDefault(node.registeredServer(), 0), now));
     }
     if (candidates.isEmpty()) return Optional.empty();
@@ -81,7 +102,7 @@ public final class BackendRoutingService {
         capacity,
         players,
         parseDouble(node.status().get("mspt"), 0.0),
-        parseInt(node.status().get("latencyMs"), 0),
+        latencyMs(node.status().get("latencyMs")),
         Math.max(0, queued),
         positiveInt(node.status().get("admissionsPerMinute"), DEFAULT_ADMISSIONS_PER_MINUTE),
         health.admissionWeight());
@@ -103,6 +124,11 @@ public final class BackendRoutingService {
   private static int positiveInt(String value, int fallback) {
     int parsed = parseInt(value, fallback);
     return parsed > 0 ? parsed : fallback;
+  }
+
+  private static int latencyMs(String value) {
+    int parsed = parseInt(value, UNKNOWN_LATENCY_MS);
+    return parsed < 0 || parsed > MAX_LATENCY_MS ? UNKNOWN_LATENCY_MS : parsed;
   }
 
   private static int parseInt(String value, int fallback) {

@@ -49,6 +49,7 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
   private volatile Duration heartbeatTimeout;
   private ScheduledTask heartbeatTask;
   private final AtomicBoolean heartbeatDegraded = new AtomicBoolean();
+  private final AtomicBoolean heartbeatInFlight = new AtomicBoolean();
   private volatile long lastPullbackMillis = 0;
   private static final long MIN_PULLBACK_INTERVAL_MS = 500;
   private final AtomicBoolean heartbeatEndpointRefreshScheduled = new AtomicBoolean();
@@ -250,6 +251,9 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
     if (client == null || currentSession == null) {
       return;
     }
+    if (!this.heartbeatInFlight.compareAndSet(false, true)) {
+      return;
+    }
     this.publishHeartbeatInternal(client, currentSession);
   }
 
@@ -275,49 +279,42 @@ public final class StarxServerPlugin extends JavaPlugin implements StarxServiceP
   ) {
     // 单次触发最多连续拉取 8 轮；超过后放弃，等待下一个正常心跳周期。
     if (pullbackRound >= 8) {
+      if (pullbackRound == 0) this.heartbeatInFlight.set(false);
       return;
     }
     long now = System.currentTimeMillis();
     long sinceLast = now - this.lastPullbackMillis;
     if (sinceLast < MIN_PULLBACK_INTERVAL_MS) {
+      if (pullbackRound == 0) this.heartbeatInFlight.set(false);
       return;
     }
     this.lastPullbackMillis = now;
-    client.sendWithBacklog(session.statusReport(UUID.randomUUID().toString()))
-        .whenComplete((reply, error) -> {
+    BackendHeartbeatExchange.run(
+        client,
+        session,
+        session.statusReport(UUID.randomUUID().toString()),
+        8,
+        command -> {
+          CompletableFuture<Optional<BridgeMessage>> scheduled = new CompletableFuture<>();
+          this.getServer().getGlobalRegionScheduler().run(this, ignored -> {
+            try {
+              scheduled.complete(command.get());
+            } catch (RuntimeException e) {
+              scheduled.completeExceptionally(e);
+            }
+          });
+          return scheduled;
+        })
+        .whenComplete((ignored, error) -> {
           if (error != null) {
             this.handleHeartbeatError(error);
+            if (pullbackRound == 0) this.heartbeatInFlight.set(false);
             return;
           }
-          BackendHeartbeatExchange.run(
-              client,
-              session,
-              session.statusReport(UUID.randomUUID().toString()),
-              8,
-              command -> {
-                CompletableFuture<Optional<BridgeMessage>> scheduled = new CompletableFuture<>();
-                this.getServer().getGlobalRegionScheduler().run(this, ignored -> {
-                  try {
-                    scheduled.complete(command.get());
-                  } catch (RuntimeException e) {
-                    scheduled.completeExceptionally(e);
-                  }
-                });
-                return scheduled;
-              })
-              .whenComplete((ignored, exchangeError) -> {
-                if (exchangeError == null) {
-                  if (this.heartbeatDegraded.getAndSet(false)) {
-                    this.getLogger().info("StarX empty-server heartbeat recovered");
-                  }
-                  // 仍有积压（至少 1 条）时，立即触发下轮心跳，实现实时推送
-                  if (reply.hasCommand() && reply.queuedRemaining() > 0) {
-                    this.publishHeartbeatInternal(client, session, pullbackRound + 1);
-                  }
-                  return;
-                }
-                this.handleHeartbeatError(exchangeError);
-              });
+          if (this.heartbeatDegraded.getAndSet(false)) {
+            this.getLogger().info("StarX empty-server heartbeat recovered");
+          }
+          if (pullbackRound == 0) this.heartbeatInFlight.set(false);
         });
   }
 

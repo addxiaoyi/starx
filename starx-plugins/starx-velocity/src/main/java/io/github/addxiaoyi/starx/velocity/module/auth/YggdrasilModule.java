@@ -150,9 +150,11 @@ implements VelocityModule {
             future.complete(null);
             return future;
         }
-        StringBuilder urlBuilder = new StringBuilder(baseUrl).append("session/minecraft/hasJoined").append("?username=").append(username).append("&serverId=").append(serverId);
+        StringBuilder urlBuilder = new StringBuilder(baseUrl).append("session/minecraft/hasJoined")
+            .append("?username=").append(encodeQuery(username))
+            .append("&serverId=").append(encodeQuery(serverId));
         if (this.config.verifyIp() && ip != null) {
-            urlBuilder.append("&ip=").append(ip);
+            urlBuilder.append("&ip=").append(encodeQuery(ip));
         }
         ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(urlBuilder.toString())).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
             if (response.statusCode() == 200) {
@@ -166,6 +168,10 @@ implements VelocityModule {
             return null;
         });
         return future;
+    }
+
+    private static String encodeQuery(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     public static interface Config {

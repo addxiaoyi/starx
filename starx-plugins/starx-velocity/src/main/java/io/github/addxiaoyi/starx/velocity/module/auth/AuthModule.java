@@ -65,6 +65,7 @@ import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.title.Title;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public final class AuthModule implements VelocityModule {
@@ -100,6 +101,7 @@ public final class AuthModule implements VelocityModule {
       new AuthFlowIndex<>();
   private final LoginAttemptLimiter loginAttempts = new LoginAttemptLimiter(
       MAX_TRACKED_LOGIN_IDENTITIES, MAX_LOGIN_ATTEMPTS, ATTEMPT_RESET);
+  private final Map<UUID, Long> inputBusyNoticeAt = new ConcurrentHashMap<>();
 
   private JdbcUserRepository userRepository;
   private SessionManager sessionManager;
@@ -363,6 +365,7 @@ public final class AuthModule implements VelocityModule {
     this.targetServer = null;
     this.flows.clear();
     this.loginAttempts.clear();
+    this.inputBusyNoticeAt.clear();
     if (currentSessions != null) {
       failure = stopAuthenticationSessions(failure, currentSessions::shutdown);
     }
@@ -454,6 +457,7 @@ public final class AuthModule implements VelocityModule {
   private Optional<Component> beginLogin(Player player, AuthLease lease) {
     UUID playerId = player.getUniqueId();
     String username = player.getUsername();
+    player.sendActionBar(Component.text("正在验证，请稍候…", NamedTextColor.GRAY));
     InetAddress address = this.playerAddress(player);
     if (this.externalHandshake.matches(player.getRawVirtualHost().orElse(null))) {
       this.logger.fine("Validated external-handshake for " + username
@@ -557,6 +561,11 @@ public final class AuthModule implements VelocityModule {
     }
     AuthFlowIndex.InputType input = this.flows.claimInput(player).orElse(null);
     if (input == null) {
+      long now = System.nanoTime();
+      Long previous = this.inputBusyNoticeAt.put(player.getUniqueId(), now);
+      if (previous == null || now - previous >= Duration.ofSeconds(5).toNanos()) {
+        player.sendActionBar(Component.text("上一条验证仍在处理中，请稍候…", NamedTextColor.GRAY));
+      }
       return;
     }
 
@@ -825,6 +834,9 @@ public final class AuthModule implements VelocityModule {
           bindingUrl,
           card));
       player.sendMessage(Component.text(messages.loginPrompt(), NamedTextColor.YELLOW));
+      player.sendMessage(Component.text(
+          "登录指引：直接在聊天框输入密码；需要二步验证时继续输入验证码。完成后可使用 /sxhub 返回大厅。",
+          NamedTextColor.GRAY));
       if (this.authUx.actionBarEnabled()) {
         player.sendActionBar(Component.text(messages.loginActionBar(), NamedTextColor.GRAY));
       }
@@ -850,6 +862,9 @@ public final class AuthModule implements VelocityModule {
         accountCenterUrl,
         card));
     player.sendMessage(Component.text(messages.registerPrompt(), NamedTextColor.YELLOW));
+    player.sendMessage(Component.text(
+        "注册指引：按提示直接在聊天框输入密码；登录完成后可使用 /2fa 开启二步验证。",
+        NamedTextColor.GRAY));
     if (this.authUx.actionBarEnabled()) {
       player.sendActionBar(Component.text(messages.registerActionBar(), NamedTextColor.GRAY));
     }
@@ -1044,6 +1059,7 @@ public final class AuthModule implements VelocityModule {
       UUID playerId = player.getUniqueId();
       AuthLease lease = AuthModule.this.flows.lease(player).orElse(null);
       if (AuthModule.this.flows.close(playerId, player) && lease != null) {
+        AuthModule.this.inputBusyNoticeAt.remove(playerId);
         AuthModule.this.authService.closeConnection(playerId, lease);
       }
     }

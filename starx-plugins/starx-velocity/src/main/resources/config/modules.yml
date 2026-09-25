@@ -123,6 +123,9 @@ modules:
     enabled: true
   starx.tab-list:
     enabled: true
+  # 在任意子服 TAB 中显示全网玩家，并在名称前标注映射后的子服名称。
+  starx.cross-server-tab:
+    enabled: true
   starx.uworld.diagnostics:
     enabled: true
   starx.integrations.qq:

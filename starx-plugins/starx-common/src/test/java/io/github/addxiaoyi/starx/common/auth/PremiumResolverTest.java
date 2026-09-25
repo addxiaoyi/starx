@@ -29,4 +29,12 @@ class PremiumResolverTest {
     assertFalse(resolver.isPremium(ONLINE_UUID, false));
     assertFalse(resolver.isPremium(OFFLINE_UUID, false));
   }
+
+  @Test
+  void offlineConnectionCannotReuseOnlineModeCache() {
+    PremiumResolver resolver = new PremiumResolver();
+    assertTrue(resolver.isPremium(ONLINE_UUID, true));
+    assertFalse(resolver.isPremium(ONLINE_UUID, false));
+    assertFalse(resolver.getCacheSize() > 0);
+  }
 }

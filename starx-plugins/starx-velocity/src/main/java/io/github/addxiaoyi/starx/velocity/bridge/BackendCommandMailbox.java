@@ -135,6 +135,17 @@ public final class BackendCommandMailbox {
     }
   }
 
+  /** Returns whether a not-yet-delivered command of the requested type exists. */
+  public boolean containsType(String serverName, String type) {
+    String server = requireServerName(serverName);
+    String commandType = Objects.requireNonNull(type, "type");
+    Mailbox mailbox = this.queues.get(server);
+    if (mailbox == null) return false;
+    Instant now = this.clock.instant();
+    pruneExpired(mailbox, now);
+    return mailbox.commands.stream().anyMatch(item -> commandType.equals(item.command().type()));
+  }
+
   public int pruneIdle() {
     Instant now = this.clock.instant();
     AtomicInteger removed = new AtomicInteger();

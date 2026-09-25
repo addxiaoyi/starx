@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.server;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
@@ -30,6 +31,24 @@ final class BackendBridgeSessionTest {
     assertEquals("lobby", response.nodeId());
     assertEquals(PlatformKind.PAPER, response.platform());
     assertEquals(NOW, session.lastProxyContact().orElseThrow());
+    assertTrue(session.hasRecentProxyContact(java.time.Duration.ofMinutes(5)));
+  }
+
+  @Test
+  void proxyContactExpiresAtTheRequestedBoundary() {
+    AtomicReference<Instant> clockValue = new AtomicReference<>(NOW);
+    BackendBridgeSession session = new BackendBridgeSession(
+        "lobby",
+        ServerPlatform.PAPER,
+        () -> Map.of(),
+        new Clock() {
+          @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
+          @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+          @Override public Instant instant() { return clockValue.get(); }
+        });
+    session.receive(BridgeMessage.hello("proxy", PlatformKind.VELOCITY));
+    clockValue.set(NOW.plus(java.time.Duration.ofMinutes(6)));
+    assertFalse(session.hasRecentProxyContact(java.time.Duration.ofMinutes(5)));
   }
 
   @Test

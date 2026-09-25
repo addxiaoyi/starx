@@ -12,8 +12,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.proxy.server.ServerPing;
@@ -21,10 +21,15 @@ import com.velocitypowered.api.proxy.server.ServerPing;
 final class NetworkStatusHandler {
 
   private static final Duration BRIDGE_MAX_AGE = Duration.ofMinutes(5);
+  // Status is operational telemetry, not a per-tick feed. Keep probes sparse.
+  private static final Duration PING_CACHE_TTL = Duration.ofSeconds(10);
+  private static final Duration SNAPSHOT_CACHE_TTL = Duration.ofSeconds(1);
 
   private final ProxyServer proxy;
   private final BackendNodeRegistry backendNodes;
   private final Supplier<Map<String, Object>> metricsSupplier;
+  private final Map<String, CachedPing> pingCache = new ConcurrentHashMap<>();
+  private volatile SnapshotCache snapshotCache;
 
   NetworkStatusHandler(ProxyServer proxy, BackendNodeRegistry backendNodes) {
     this(proxy, backendNodes, Map::of);
@@ -61,11 +66,27 @@ final class NetworkStatusHandler {
   private NetworkStatusSnapshot snapshot() {
     Instant now = Instant.now();
     List<RegisteredServer> registeredServers = List.copyOf(this.proxy.getAllServers());
-    Map<String, CompletableFuture<ServerPing>> pings = new LinkedHashMap<>();
+    SnapshotCache cachedSnapshot = this.snapshotCache;
+    if (cachedSnapshot != null && now.isBefore(cachedSnapshot.expiresAt())) {
+      return cachedSnapshot.snapshot();
+    }
+
+    // Remove deleted servers so a long-lived proxy does not retain old names forever.
+    java.util.Set<String> activeNames = registeredServers.stream()
+        .map(server -> server.getServerInfo().getName())
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    this.pingCache.keySet().removeIf(name -> !activeNames.contains(name));
+
+    Map<String, Integer> capacities = new LinkedHashMap<>();
     for (RegisteredServer server : registeredServers) {
-      pings.put(
-          server.getServerInfo().getName(),
-          server.ping().completeOnTimeout(null, 1, TimeUnit.SECONDS));
+      String name = server.getServerInfo().getName();
+      CachedPing cached = this.pingCache.get(name);
+      if (cached == null || now.isAfter(cached.expiresAt())) {
+        if (cached != null) this.pingCache.remove(name, cached);
+        this.refreshPing(name, server);
+        cached = new CachedPing(-1, now.plus(PING_CACHE_TTL));
+      }
+      capacities.put(name, cached.capacity());
     }
     List<NetworkStatusSnapshot.ServerStatus> servers = registeredServers.stream()
         .map(server -> new NetworkStatusSnapshot.ServerStatus(
@@ -75,15 +96,34 @@ final class NetworkStatusHandler {
                 this.backendNodes,
                 server.getServerInfo().getName(),
                 now,
-                BackendPingCapacity.read(pings.get(server.getServerInfo().getName()))),
+                capacities.getOrDefault(server.getServerInfo().getName(), -1)),
             this.features(server.getServerInfo().getName(), now)))
         .toList();
-    return NetworkStatusSnapshot.of(
+    NetworkStatusSnapshot snapshot = NetworkStatusSnapshot.of(
         now,
         this.proxy.getPlayerCount(),
         this.proxy.getConfiguration().getShowMaxPlayers(),
         servers);
+    this.snapshotCache = new SnapshotCache(snapshot, now.plus(SNAPSHOT_CACHE_TTL));
+    return snapshot;
   }
+
+  private void refreshPing(String name, RegisteredServer server) {
+    if (this.pingCache.putIfAbsent(
+        name, new CachedPing(-1, Instant.now().plus(PING_CACHE_TTL))) != null) {
+      return;
+    }
+    server.ping().orTimeout(1, TimeUnit.SECONDS).whenComplete((ping, error) -> {
+      int capacity = error == null && ping != null
+          ? ping.getPlayers().map(ServerPing.Players::getMax).orElse(-1)
+          : -1;
+      this.pingCache.put(name, new CachedPing(capacity, Instant.now().plus(PING_CACHE_TTL)));
+    });
+  }
+
+  private record CachedPing(int capacity, Instant expiresAt) {}
+
+  private record SnapshotCache(NetworkStatusSnapshot snapshot, Instant expiresAt) {}
 
   private Map<String, String> features(String serverName, Instant now) {
     BackendNode node = this.backendNodes.find(serverName).orElse(null);
@@ -130,6 +170,10 @@ final class NetworkStatusHandler {
     features.put("bridgeState", stale ? "stale" : "linked");
     features.put("healthState", health.state().name());
     features.put("admissionWeight", Integer.toString(health.admissionWeight()));
+    features.put("latencyMs", node.status().getOrDefault("latencyMs", "unknown"));
+    features.put("mspt", node.status().getOrDefault("mspt", "unknown"));
+    features.put("heartbeatRttMs", node.status().getOrDefault("heartbeatRttMs", "unknown"));
+    features.put("packetLoss", node.status().getOrDefault("packetLoss", "unknown"));
     features.put("transport", node.status().getOrDefault("transport", "player-carrier"));
     features.put(
         "httpCommandsAccepted",
