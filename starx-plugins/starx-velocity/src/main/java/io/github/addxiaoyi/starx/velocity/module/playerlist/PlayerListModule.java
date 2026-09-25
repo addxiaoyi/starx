@@ -61,7 +61,7 @@ public final class PlayerListModule implements VelocityModule {
   private final StarxPlayerContextFactory contextFactory;
   private final Function<UUID, UUID> canonicalUuidResolver;
   private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
-  private final PlayerLatencyTracker latencyTracker = new PlayerLatencyTracker();
+  private final PlayerLatencyTracker latencyTracker;
   private final boolean needsUserData;
   private final boolean needsBindingData;
   private final boolean needsSessionData;
@@ -85,7 +85,8 @@ public final class PlayerListModule implements VelocityModule {
       StarxConfig.PlayerListConfig config,
       PlayerListRenderer renderer,
       StarxPlayerContextFactory contextFactory) {
-    this(plugin, users, bindings, sessions, authentication, config, renderer, contextFactory, uuid -> uuid);
+    this(plugin, users, bindings, sessions, authentication, config, renderer, contextFactory,
+        uuid -> uuid, uuid -> Set.of(uuid), new PlayerLatencyTracker());
   }
 
   public PlayerListModule(
@@ -99,7 +100,7 @@ public final class PlayerListModule implements VelocityModule {
       StarxPlayerContextFactory contextFactory,
       Function<UUID, UUID> canonicalUuidResolver) {
     this(plugin, users, bindings, sessions, authentication, config, renderer, contextFactory,
-        canonicalUuidResolver, uuid -> Set.of(uuid));
+        canonicalUuidResolver, uuid -> Set.of(uuid), new PlayerLatencyTracker());
   }
 
   public PlayerListModule(
@@ -113,6 +114,22 @@ public final class PlayerListModule implements VelocityModule {
       StarxPlayerContextFactory contextFactory,
       Function<UUID, UUID> canonicalUuidResolver,
       Function<UUID, Set<UUID>> knownMinecraftUuidsResolver) {
+    this(plugin, users, bindings, sessions, authentication, config, renderer, contextFactory,
+        canonicalUuidResolver, knownMinecraftUuidsResolver, new PlayerLatencyTracker());
+  }
+
+  public PlayerListModule(
+      StarxVelocityPlugin plugin,
+      JdbcUserRepository users,
+      JdbcBindingRepository bindings,
+      JdbcPlayerSessionRepository sessions,
+      AuthModule authentication,
+      StarxConfig.PlayerListConfig config,
+      PlayerListRenderer renderer,
+      StarxPlayerContextFactory contextFactory,
+      Function<UUID, UUID> canonicalUuidResolver,
+      Function<UUID, Set<UUID>> knownMinecraftUuidsResolver,
+      PlayerLatencyTracker latencyTracker) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.users = Objects.requireNonNull(users, "users");
     this.bindings = Objects.requireNonNull(bindings, "bindings");
@@ -124,6 +141,7 @@ public final class PlayerListModule implements VelocityModule {
     this.canonicalUuidResolver = Objects.requireNonNull(canonicalUuidResolver, "canonicalUuidResolver");
     this.knownMinecraftUuidsResolver = Objects.requireNonNull(
         knownMinecraftUuidsResolver, "knownMinecraftUuidsResolver");
+    this.latencyTracker = Objects.requireNonNull(latencyTracker, "latencyTracker");
     Set<String> referenced = this.rendererVariables();
     this.needsBindingData = referencesAny(referenced, BINDING_VARIABLES);
     this.needsSessionData = referencesAny(referenced, SESSION_VARIABLES);
@@ -357,7 +375,7 @@ public final class PlayerListModule implements VelocityModule {
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
     this.latencyTracker.retain(onlinePlayers);
     this.plugin.proxy().getAllPlayers().forEach(player ->
-        this.latencyTracker.observe(player.getUniqueId(), player.getPing()));
+        this.latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing));
   }
 
   private void samplePlayerLatencyAndRefresh() {
@@ -371,7 +389,7 @@ public final class PlayerListModule implements VelocityModule {
     NetworkSnapshot snapshot = this.currentNetworkSnapshot();
     this.plugin.proxy().getAllPlayers().forEach(player -> {
       UUID playerId = player.getUniqueId();
-      PlayerLatencyTracker.Snapshot latency = this.latencyTracker.observe(playerId, player.getPing());
+      PlayerLatencyTracker.Snapshot latency = this.latencyTracker.sampleIfDue(playerId, player::getPing);
       DisplayedLatency previous = this.displayedLatency.get(playerId);
       boolean changedEnough = previous == null
           || previous.smoothedPing() < 0 != latency.smoothedPing() < 0

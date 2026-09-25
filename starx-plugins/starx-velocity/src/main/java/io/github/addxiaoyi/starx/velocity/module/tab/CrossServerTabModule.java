@@ -9,6 +9,7 @@ import com.velocitypowered.api.proxy.player.TabList;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
+import io.github.addxiaoyi.starx.velocity.module.playerlist.PlayerLatencyTracker;
 import java.time.Duration;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -32,6 +33,7 @@ public final class CrossServerTabModule implements VelocityModule {
   private static final int LATENCY_CHANGE_THRESHOLD_MS = 5;
 
   private final StarxVelocityPlugin plugin;
+  private final PlayerLatencyTracker latencyTracker;
   private final Path serverNamesPath;
   private volatile Map<String, String> serverNames;
   private volatile long serverNamesModifiedAt = Long.MIN_VALUE;
@@ -44,7 +46,14 @@ public final class CrossServerTabModule implements VelocityModule {
   private ScheduledTask reconcileTask;
 
   public CrossServerTabModule(StarxVelocityPlugin plugin) {
+    this(plugin, new PlayerLatencyTracker());
+  }
+
+  public CrossServerTabModule(
+      StarxVelocityPlugin plugin,
+      PlayerLatencyTracker latencyTracker) {
     this.plugin = plugin;
+    this.latencyTracker = latencyTracker;
     this.serverNamesPath = plugin.dataDirectory().resolve("cross-server-tab.yml");
     this.serverNames = loadServerNames();
   }
@@ -91,7 +100,7 @@ public final class CrossServerTabModule implements VelocityModule {
           .forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
               player.getUniqueId(),
               new EntryState(displayServerName(connection.getServer().getServerInfo().getName()),
-                  player.getUsername(), tabLatency(player)))));
+                  player.getUsername(), tabLatency(player), player.getGameProfile()))));
       this.plugin.proxy().getAllPlayers().forEach(viewer -> reconcileViewer(viewer, roster));
     } finally {
       this.reconciling.set(false);
@@ -140,10 +149,6 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private boolean addEntry(TabList tabList, UUID targetId, EntryState state) {
-    Player target = this.plugin.proxy().getPlayer(targetId).orElse(null);
-    if (target == null) {
-      return false;
-    }
     var existing = tabList.getEntry(targetId);
     if (existing.isPresent()) {
       existing.get().setDisplayName(displayName(state));
@@ -151,7 +156,7 @@ public final class CrossServerTabModule implements VelocityModule {
       return true;
     }
     tabList.addEntry(tabList.buildEntry(
-        target.getGameProfile(), displayName(state), state.latency(), 0));
+        state.gameProfile(), displayName(state), state.latency(), 0));
     return true;
   }
 
@@ -258,9 +263,8 @@ public final class CrossServerTabModule implements VelocityModule {
     }
   }
 
-  private static int tabLatency(Player player) {
-    long ping = player.getPing();
-    return ping < 0 || ping > Integer.MAX_VALUE ? -1 : (int) ping;
+  private int tabLatency(Player player) {
+    return this.latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing).smoothedPing();
   }
 
   private final class Listener {
@@ -276,12 +280,18 @@ public final class CrossServerTabModule implements VelocityModule {
 
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
-      sentEntries.remove(event.getPlayer().getUniqueId());
+      UUID playerId = event.getPlayer().getUniqueId();
+      sentEntries.remove(playerId);
+      latencyTracker.remove(playerId);
       scheduleReconcile(Duration.ZERO);
     }
   }
 
-  private record EntryState(String serverName, String username, int latency) {
+  private record EntryState(
+      String serverName,
+      String username,
+      int latency,
+      com.velocitypowered.api.util.GameProfile gameProfile) {
     private boolean sameDisplay(EntryState other) {
       return this.serverName.equals(other.serverName) && this.username.equals(other.username);
     }

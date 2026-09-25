@@ -1,8 +1,8 @@
 # StarX
 
-StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-0.8.1.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
+StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-1.0.18.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
 
-当前插件版本：**1.0.16**
+当前插件版本：**1.0.18**
 
 公共扩展 API：**1.0.0**
 
@@ -76,7 +76,7 @@ Uworld 不是多世界插件、后端服务器或通用 fallback，也不支持�
 | 维护模式 | 状态持久化，登录拦截、权限/白名单绕过，并通过桥接同步到全部后端；每分钟重广播校准 | 开启，初始为关闭状态 |
 | 新手引导 | 首次进入后显示可恢复步骤，支持查看、开始、下一步、重置和跳过，进度持久化 | 开启 |
 | MOTD | 根据代理状态生成服务器列表响应 | 开启 |
-| 内置玩家列表 | MiniMessage 页眉/页脚、每服与全网人数、身份和登录变量；不要求 TAB | 开启 |
+| 内置玩家列表 | MiniMessage 页眉/页脚、每服与全网人数、身份和登录变量；与跨服 TAB 共用真实 Ping 平滑快照，不要求 TAB | 开启 |
 | TAB 变量 | 将 StarX 变量注册给 TAB | 软依赖增强 |
 | 全局在线列表 | 汇总网络玩家和服务器分布 | 开启 |
 | 全局聊天与消息桥 | 代理聊天、跨服插件消息和事件转发 | 开启 |
@@ -266,7 +266,7 @@ Extension API 1.0.0 提供版本协商、平台与能力查询、扩展注册、
 从 [GitHub Releases](https://github.com/addxiaoyi/starx/releases) 下载：
 
 ```text
-starx-universal-1.0.16.jar
+starx-universal-1.0.18.jar
 ```
 
 下载附件可保留其版本化文件名；生产部署脚本会使用 `starx-universal.jar`。将同一个文件分别放入：
@@ -498,6 +498,6 @@ REAL_CLIENT_UWORLD_ACCEPTANCE_VERIFIED
 ## 许可证
 
 StarX 自有代码采用 GNU Affero General Public License v3。内置或派生的第三方组件保留各自许可证和声明，见 `LICENSE`、`LICENSES/`、`NOTICE` 以及源码文件头。
-# 当前插件版本：**1.0.16**
+# 当前插件版本：**1.0.18**
 
-本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-1.0.16.jar`
+本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-1.0.18.jar`
