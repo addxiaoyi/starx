@@ -56,6 +56,13 @@ class CrossServerTabLifecycleTest {
       var refresh = workers.submit(runtime.tasks.getFirst().action);
       try {
         assertTrue(runtime.readStarted.await(5, TimeUnit.SECONDS));
+        var schedule = CrossServerTabModule.class.getDeclaredMethod("scheduleReconcile", java.time.Duration.class);
+        schedule.setAccessible(true);
+        var playerEvent = workers.submit(() -> {
+          schedule.invoke(module, java.time.Duration.ZERO);
+          return null;
+        });
+        playerEvent.get(2, TimeUnit.SECONDS);
         var disable = workers.submit(module::onDisable);
         runtime.resumeRead.countDown();
         refresh.get(5, TimeUnit.SECONDS);

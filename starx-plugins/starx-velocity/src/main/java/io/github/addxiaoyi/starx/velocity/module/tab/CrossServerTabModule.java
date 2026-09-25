@@ -194,7 +194,8 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private void scheduleReconcile(Duration delay) {
-    this.lifecycleLock.lock();
+    // The periodic task covers skipped events; never stall a player event behind a refresh.
+    if (!this.lifecycleLock.tryLock()) return;
     try {
       if (!this.enabled || this.reconcileQueued) return;
       this.reconcileQueued = true;
