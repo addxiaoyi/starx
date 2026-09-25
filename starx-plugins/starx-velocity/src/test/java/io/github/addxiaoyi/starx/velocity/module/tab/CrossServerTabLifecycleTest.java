@@ -25,6 +25,21 @@ class CrossServerTabLifecycleTest {
   @TempDir Path directory;
 
   @Test
+  void periodicRefreshPrunesSnapshotsLeftByADisconnectRace() throws Exception {
+    var runtime = new RuntimeStub();
+    var module = module(runtime);
+    module.onEnable();
+    var entries = CrossServerTabModule.class.getDeclaredField("sentEntries");
+    entries.setAccessible(true);
+    @SuppressWarnings("unchecked")
+    var snapshots = (java.util.Map<java.util.UUID, java.util.Map<?, ?>>) entries.get(module);
+    snapshots.put(java.util.UUID.randomUUID(), java.util.Map.of());
+    runtime.tasks.getFirst().action.run();
+    assertTrue(snapshots.isEmpty());
+    module.onDisable();
+  }
+
+  @Test
   void cancelsBothTasksAndRejectsCallbacksFromEarlierEnableCycle() {
     var runtime = new RuntimeStub();
     var module = module(runtime);

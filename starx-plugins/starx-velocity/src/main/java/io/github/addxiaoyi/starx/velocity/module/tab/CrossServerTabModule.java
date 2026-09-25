@@ -13,7 +13,9 @@ import io.github.addxiaoyi.starx.velocity.module.playerlist.PlayerLatencyTracker
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
@@ -101,15 +103,18 @@ public final class CrossServerTabModule implements VelocityModule {
       if (this.serverNames.reloadIfChanged()) {
         this.plugin.logger().info("已热加载 cross-server-tab.yml（" + this.serverNames.size() + " 个映射）");
       }
-      Map<UUID, EntryState> roster = new LinkedHashMap<>();
-      this.plugin.proxy().getAllPlayers().stream()
+      List<Player> players = this.plugin.proxy().getAllPlayers().stream()
+          .filter(Player::isActive)
           .sorted(Comparator.comparing(Player::getUsername, String.CASE_INSENSITIVE_ORDER)
               .thenComparing(Player::getUniqueId))
-          .forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
+          .toList();
+      this.sentEntries.keySet().retainAll(players.stream().map(Player::getUniqueId).collect(Collectors.toSet()));
+      Map<UUID, EntryState> roster = new LinkedHashMap<>();
+      players.forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
               player.getUniqueId(),
               new EntryState(displayServerName(connection.getServer().getServerInfo().getName()),
                   player.getUsername(), tabLatency(player), player.getGameProfile()))));
-      this.plugin.proxy().getAllPlayers().forEach(viewer -> reconcileViewer(viewer, roster));
+      players.stream().filter(Player::isActive).forEach(viewer -> reconcileViewer(viewer, roster));
     } finally {
       this.lifecycleLock.unlock();
     }
