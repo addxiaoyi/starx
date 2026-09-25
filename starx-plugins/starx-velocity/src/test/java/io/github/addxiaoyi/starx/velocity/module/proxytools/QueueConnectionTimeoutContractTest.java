@@ -16,6 +16,7 @@ final class QueueConnectionTimeoutContractTest {
         "src/main/java/io/github/addxiaoyi/starx/velocity/module/proxytools");
     assertAsyncModule(proxytools.resolve("QueueModule.java"));
     assertAsyncModule(proxytools.resolve("SmartQueueModule.java"));
+    assertBoundedCoordinator(proxytools.resolve("TransferCoordinator.java"));
 
     String fifo = Files.readString(proxytools.resolve("queue/QueueService.java"));
     assertTrue(fifo.contains("CompletionStage<Boolean> connect"));
@@ -33,10 +34,18 @@ final class QueueConnectionTimeoutContractTest {
   private static void assertAsyncModule(Path file) throws Exception {
     String source = Files.readString(file);
     assertTrue(source.contains(".processQueues(this::connect"), file.toString());
-    assertTrue(source.contains(
-        ".orTimeout(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)"), file.toString());
+    assertTrue(source.contains("this.transfers.transfer(player, server"), file.toString());
     assertTrue(source.contains("catch (RuntimeException error)"), file.toString());
     assertTrue(source.contains("CompletableFuture.completedFuture(false)"), file.toString());
+    assertFalse(source.contains(".join()"), file.toString());
+  }
+
+  private static void assertBoundedCoordinator(Path file) throws Exception {
+    String source = Files.readString(file);
+    assertTrue(source.contains("createConnectionRequest(target).connect()"), file.toString());
+    assertTrue(source.contains(".orTimeout(this.timeout.toMillis(), TimeUnit.MILLISECONDS)"),
+        file.toString());
+    assertTrue(source.contains("MAX_ACTIVE_PER_TARGET"), file.toString());
     assertFalse(source.contains(".join()"), file.toString());
   }
 }

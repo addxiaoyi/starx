@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.yaml.snakeyaml.Yaml;
@@ -28,6 +29,7 @@ public final class CrossServerTabModule implements VelocityModule {
 
   private static final Duration RECONCILE_INTERVAL = Duration.ofSeconds(1);
   private static final Duration EVENT_DELAY = Duration.ofMillis(250);
+  private static final int LATENCY_CHANGE_THRESHOLD_MS = 5;
 
   private final StarxVelocityPlugin plugin;
   private final Path serverNamesPath;
@@ -35,7 +37,10 @@ public final class CrossServerTabModule implements VelocityModule {
   private volatile long serverNamesModifiedAt = Long.MIN_VALUE;
   private volatile boolean serverNamesLoadValid;
   private final Map<UUID, Map<UUID, EntryState>> sentEntries = new ConcurrentHashMap<>();
+  private final AtomicBoolean reconcileQueued = new AtomicBoolean();
+  private final AtomicBoolean reconciling = new AtomicBoolean();
   private final Listener listener = new Listener();
+  private volatile boolean enabled;
   private ScheduledTask reconcileTask;
 
   public CrossServerTabModule(StarxVelocityPlugin plugin) {
@@ -51,6 +56,7 @@ public final class CrossServerTabModule implements VelocityModule {
 
   @Override
   public void onEnable() {
+    this.enabled = true;
     this.plugin.proxy().getEventManager().register(this.plugin, this.listener);
     this.reconcileTask = this.plugin.proxy().getScheduler()
         .buildTask(this.plugin, this::reconcile)
@@ -61,6 +67,7 @@ public final class CrossServerTabModule implements VelocityModule {
 
   @Override
   public void onDisable() {
+    this.enabled = false;
     ScheduledTask task = this.reconcileTask;
     this.reconcileTask = null;
     if (task != null) {
@@ -72,16 +79,23 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private void reconcile() {
-    reloadServerNamesIfChanged();
-    Map<UUID, EntryState> roster = new LinkedHashMap<>();
-    this.plugin.proxy().getAllPlayers().stream()
-        .sorted(Comparator.comparing(Player::getUsername, String.CASE_INSENSITIVE_ORDER)
-            .thenComparing(Player::getUniqueId))
-        .forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
-            player.getUniqueId(),
-            new EntryState(displayServerName(connection.getServer().getServerInfo().getName()), player.getUsername(),
-                tabLatency(player)))));
-    this.plugin.proxy().getAllPlayers().forEach(viewer -> reconcileViewer(viewer, roster));
+    if (!this.reconciling.compareAndSet(false, true)) {
+      return;
+    }
+    try {
+      reloadServerNamesIfChanged();
+      Map<UUID, EntryState> roster = new LinkedHashMap<>();
+      this.plugin.proxy().getAllPlayers().stream()
+          .sorted(Comparator.comparing(Player::getUsername, String.CASE_INSENSITIVE_ORDER)
+              .thenComparing(Player::getUniqueId))
+          .forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
+              player.getUniqueId(),
+              new EntryState(displayServerName(connection.getServer().getServerInfo().getName()),
+                  player.getUsername(), tabLatency(player)))));
+      this.plugin.proxy().getAllPlayers().forEach(viewer -> reconcileViewer(viewer, roster));
+    } finally {
+      this.reconciling.set(false);
+    }
   }
 
   private void reconcileViewer(Player viewer, Map<UUID, EntryState> roster) {
@@ -99,18 +113,46 @@ public final class CrossServerTabModule implements VelocityModule {
     });
 
     roster.forEach((targetId, state) -> {
-      if (targetId.equals(viewerId) || state.equals(previous.get(targetId))) {
+      if (targetId.equals(viewerId)) {
         return;
       }
-      tabList.removeEntry(targetId);
-      Player target = this.plugin.proxy().getPlayer(targetId).orElse(null);
-      if (target == null) {
+      EntryState old = previous.get(targetId);
+      if (old != null && old.sameDisplay(state)) {
+        if (tabList.getEntry(targetId).isEmpty()) {
+          if (addEntry(tabList, targetId, state)) {
+            previous.put(targetId, state);
+          }
+          return;
+        }
+        if (old.shouldUpdateLatency(state)) {
+          tabList.getEntry(targetId).ifPresent(entry -> entry.setLatency(state.latency()));
+          previous.put(targetId, state);
+        }
         return;
       }
-      tabList.addEntry(tabList.buildEntry(
-          target.getGameProfile(), displayName(state), state.latency(), 0));
-      previous.put(targetId, state);
+      if (old != null) {
+        tabList.removeEntry(targetId);
+      }
+      if (addEntry(tabList, targetId, state)) {
+        previous.put(targetId, state);
+      }
     });
+  }
+
+  private boolean addEntry(TabList tabList, UUID targetId, EntryState state) {
+    Player target = this.plugin.proxy().getPlayer(targetId).orElse(null);
+    if (target == null) {
+      return false;
+    }
+    var existing = tabList.getEntry(targetId);
+    if (existing.isPresent()) {
+      existing.get().setDisplayName(displayName(state));
+      existing.get().setLatency(state.latency());
+      return true;
+    }
+    tabList.addEntry(tabList.buildEntry(
+        target.getGameProfile(), displayName(state), state.latency(), 0));
+    return true;
   }
 
   private void removeManagedEntries(Player viewer) {
@@ -119,11 +161,35 @@ public final class CrossServerTabModule implements VelocityModule {
       return;
     }
     TabList tabList = viewer.getTabList();
-    entries.keySet().forEach(tabList::removeEntry);
+    entries.forEach((targetId, state) -> {
+      Player target = this.plugin.proxy().getPlayer(targetId).orElse(null);
+      if (target != null && sameBackend(viewer, target)) {
+        tabList.getEntry(targetId).ifPresent(entry ->
+            entry.setDisplayName(Component.text(state.username(), NamedTextColor.WHITE)));
+        return;
+      }
+      tabList.removeEntry(targetId);
+    });
+  }
+
+  private static boolean sameBackend(Player viewer, Player target) {
+    return viewer.getCurrentServer().flatMap(viewerConnection ->
+        target.getCurrentServer().map(targetConnection ->
+            viewerConnection.getServer().getServerInfo().getName().equals(
+                targetConnection.getServer().getServerInfo().getName())))
+        .orElse(false);
   }
 
   private void scheduleReconcile(Duration delay) {
-    this.plugin.proxy().getScheduler().buildTask(this.plugin, this::reconcile)
+    if (!this.reconcileQueued.compareAndSet(false, true)) {
+      return;
+    }
+    this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
+          this.reconcileQueued.set(false);
+          if (this.enabled) {
+            reconcile();
+          }
+        })
         .delay(delay)
         .schedule();
   }
@@ -161,8 +227,17 @@ public final class CrossServerTabModule implements VelocityModule {
       return Map.copyOf(aliases);
     } catch (IOException | RuntimeException error) {
       this.serverNamesLoadValid = false;
+      rememberCurrentModificationTime();
       this.plugin.logger().warning("无法读取 cross-server-tab.yml，将使用真实子服名：" + error.getMessage());
       return Map.of();
+    }
+  }
+
+  private void rememberCurrentModificationTime() {
+    try {
+      this.serverNamesModifiedAt = Files.getLastModifiedTime(this.serverNamesPath).toMillis();
+    } catch (IOException ignored) {
+      this.serverNamesModifiedAt = Long.MIN_VALUE;
     }
   }
 
@@ -207,5 +282,15 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private record EntryState(String serverName, String username, int latency) {
+    private boolean sameDisplay(EntryState other) {
+      return this.serverName.equals(other.serverName) && this.username.equals(other.username);
+    }
+
+    private boolean shouldUpdateLatency(EntryState other) {
+      if (this.latency < 0 || other.latency < 0) {
+        return this.latency != other.latency;
+      }
+      return Math.abs(this.latency - other.latency) >= LATENCY_CHANGE_THRESHOLD_MS;
+    }
   }
 }

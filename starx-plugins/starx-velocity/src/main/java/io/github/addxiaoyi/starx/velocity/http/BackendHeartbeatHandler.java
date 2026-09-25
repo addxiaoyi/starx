@@ -157,18 +157,10 @@ final class BackendHeartbeatHandler {
     Map<String, String> attributes = new LinkedHashMap<>(message.attributes());
     attributes.put("transport", "heartbeat-http");
     if (snapshot != null) {
-      if (snapshot.accepted() > 0) {
-        attributes.put("httpCommandsAccepted", Long.toString(snapshot.accepted()));
-      }
-      if (snapshot.delivered() > 0) {
-        attributes.put("httpCommandsDelivered", Long.toString(snapshot.delivered()));
-      }
-      if (snapshot.rejected() > 0) {
-        attributes.put("httpCommandsRejected", Long.toString(snapshot.rejected()));
-      }
-      if (snapshot.queued() > 0) {
-        attributes.put("httpCommandsQueued", Integer.toString(snapshot.queued()));
-      }
+      attributes.put("httpCommandsAccepted", Long.toString(snapshot.accepted()));
+      attributes.put("httpCommandsDelivered", Long.toString(snapshot.delivered()));
+      attributes.put("httpCommandsRejected", Long.toString(snapshot.rejected()));
+      attributes.put("httpCommandsQueued", Integer.toString(snapshot.queued()));
     }
     return new BridgeMessage(
         message.type(),
