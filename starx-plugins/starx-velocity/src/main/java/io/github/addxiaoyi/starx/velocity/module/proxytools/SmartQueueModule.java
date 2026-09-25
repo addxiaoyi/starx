@@ -45,13 +45,12 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
 public final class SmartQueueModule
 implements VelocityModule {
-    private static final long CONNECTION_TIMEOUT_SECONDS = 10L;
     private final StarxVelocityPlugin plugin;
     private final Config config;
     private final SmartQueueService queueService;
     private final BackendRoutingService routingService;
     private final QueueTargetPolicy targetPolicy;
-    private final TransferCoordinator transfers = new TransferCoordinator(Duration.ofSeconds(10));
+    private final TransferCoordinator transfers;
     private final AdaptiveRateLimiter rateLimiter;
     private ScheduledTask processingTask;
     private SmartQueueListener listener;
@@ -65,6 +64,7 @@ implements VelocityModule {
         SmartQueueService queueService,
         BackendRoutingService routingService) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.transfers = this.plugin.transferCoordinator();
         this.config = Objects.requireNonNull(config, "config");
         this.queueService = Objects.requireNonNull(queueService, "queueService");
         this.routingService = Objects.requireNonNull(routingService, "routingService");
@@ -104,7 +104,7 @@ implements VelocityModule {
         this.listener = null;
         if (currentListener != null) this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
         this.queueService.clear();
-        this.transfers.clear();
+        this.transfers.cancelReason("smart-queue");
     }
 
     public Map<String, Object> runtimeSnapshot() {
@@ -131,7 +131,6 @@ implements VelocityModule {
 
     void onDisconnect(DisconnectEvent event) {
         Player player = event.getPlayer();
-        this.transfers.cancel(player.getUniqueId());
         this.queueService.recordQuit(player);
         player.getCurrentServer().ifPresent(connection -> this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> this.processQueues()).schedule());
     }

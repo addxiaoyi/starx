@@ -18,10 +18,11 @@ public final class HubCommandModule implements VelocityModule {
 
   private final StarxVelocityPlugin plugin;
   private final Config config;
-  private final TransferCoordinator transfers = new TransferCoordinator(java.time.Duration.ofSeconds(10));
+  private final TransferCoordinator transfers;
 
   public HubCommandModule(StarxVelocityPlugin plugin, Config config) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
+    this.transfers = this.plugin.transferCoordinator();
     this.config = Objects.requireNonNull(config, "config");
   }
 
@@ -58,7 +59,7 @@ public final class HubCommandModule implements VelocityModule {
     if (failure != null) {
       throw new IllegalStateException("Unable to unregister hub commands", failure);
     }
-    this.transfers.clear();
+    this.transfers.cancelReason("hub");
   }
 
   public void sendToHub(Player player) {
@@ -73,26 +74,28 @@ public final class HubCommandModule implements VelocityModule {
       return;
     }
     if (this.transfers.isActive(player.getUniqueId())) {
-      player.sendMessage(Component.text("正在前往大厅，请等待当前请求完成。", NamedTextColor.YELLOW));
+      player.sendMessage(Component.text("你有一个转服请求正在处理中，请等待完成。", NamedTextColor.YELLOW));
       return;
     }
     player.sendMessage(Component.text("正在前往大厅…", NamedTextColor.YELLOW));
     try {
       this.transfers.transfer(player, hub, "hub")
           .whenComplete((result, error) -> {
+            if (!player.isActive()) return;
             if (error == null && result != null
                 && result.status() == TransferCoordinator.Status.DUPLICATE) {
-              player.sendMessage(Component.text("正在前往大厅，请等待当前请求完成。", NamedTextColor.YELLOW));
+              player.sendMessage(Component.text("你有一个转服请求正在处理中，请等待完成。", NamedTextColor.YELLOW));
               return;
             }
             if (error == null && result != null
                 && result.status() == TransferCoordinator.Status.CANCELLED) {
-              player.sendMessage(Component.text("大厅转服请求已取消，当前连接保持不变。", NamedTextColor.GRAY));
+              if (!"cancelled".equals(result.reason())) return;
+              player.sendMessage(Component.text("已取消等待大厅转服结果；已完成的连接不会撤销。", NamedTextColor.GRAY));
               return;
             }
             if (error != null || result == null || !result.successful()) {
               player.sendMessage(Component.text(
-                  "前往大厅失败，当前连接保持不变，请稍后重试。", NamedTextColor.RED));
+                  "未能确认已连接大厅，请检查当前所在子服后重试。", NamedTextColor.RED));
             }
           });
     } catch (RuntimeException error) {
@@ -138,20 +141,16 @@ public final class HubCommandModule implements VelocityModule {
         if (args.length == 1 && "status".equalsIgnoreCase(args[0])) {
           boolean inHub = player.getCurrentServer().map(connection ->
               connection.getServer().getServerInfo().getName().equals(config.hubServerName())).orElse(false);
-          player.sendMessage(Component.text(
-              inHub
-                  ? "大厅转服状态：已在大厅。"
-                  : transfers.isActive(player.getUniqueId())
-                  ? "大厅转服状态：正在连接（目标：" + config.hubServerName() + "）。"
-                  : "大厅转服状态：当前没有进行中的请求。",
-              NamedTextColor.GRAY));
+          String status = transfers.activeTarget(player.getUniqueId())
+              .map(target -> "转服状态：正在连接（目标：" + target + "）。")
+              .orElse(inHub ? "大厅转服状态：已在大厅。" : "大厅转服状态：当前没有进行中的请求。");
+          player.sendMessage(Component.text(status, NamedTextColor.GRAY));
           return;
         }
         if (args.length == 1 && "cancel".equalsIgnoreCase(args[0])) {
-          boolean cancelled = transfers.cancel(player.getUniqueId());
-          player.sendMessage(Component.text(
-              cancelled ? "正在取消大厅转服请求…" : "当前没有可取消的大厅转服请求。",
-              NamedTextColor.GRAY));
+          boolean cancelled = transfers.cancel(player.getUniqueId(), "hub");
+          if (!cancelled) player.sendMessage(Component.text(
+              "当前没有可取消的大厅转服请求。", NamedTextColor.GRAY));
           return;
         }
         if (args.length > 0) {
