@@ -2,6 +2,16 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.0.16] - 2026-09-25
+
+### Fixed
+
+- 将 `starx.cross-server-tab` 纳入完整默认配置快照门禁，确保新安装、配置生成和 CI 对模块集合的认知一致。
+
+### Verification
+
+- 重新执行 Linux/Windows 全量 CI、Universal JAR 和发布元数据校验。
+
 ## [1.0.15] - 2026-09-25
 
 ### Fixed
