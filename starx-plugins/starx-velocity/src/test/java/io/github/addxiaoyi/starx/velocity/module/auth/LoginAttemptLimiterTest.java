@@ -13,6 +13,37 @@ class LoginAttemptLimiterTest {
   private static final Instant NOW = Instant.parse("2026-07-23T12:00:00Z");
 
   @Test
+  void concurrentAttemptsCannotExceedThePerIdentityLimit() throws Exception {
+    LoginAttemptLimiter limiter = new LoginAttemptLimiter(10, 5, Duration.ofMinutes(1));
+    UUID id = UUID.randomUUID();
+    java.util.concurrent.atomic.AtomicInteger accepted = new java.util.concurrent.atomic.AtomicInteger();
+    try (var workers = java.util.concurrent.Executors.newFixedThreadPool(16)) {
+      for (int i = 0; i < 2000; i++) workers.submit(() -> {
+        if (limiter.allow(id, NOW)) accepted.incrementAndGet();
+      });
+      workers.shutdown();
+      assertTrue(workers.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS));
+    }
+    assertEquals(5, accepted.get());
+    assertTrue(limiter.allow(id, NOW.plusSeconds(60)));
+  }
+
+  @Test
+  void concurrentNewIdentitiesCannotOverflowCapacity() throws Exception {
+    LoginAttemptLimiter limiter = new LoginAttemptLimiter(32, 5, Duration.ofMinutes(1));
+    java.util.concurrent.atomic.AtomicInteger accepted = new java.util.concurrent.atomic.AtomicInteger();
+    try (var workers = java.util.concurrent.Executors.newFixedThreadPool(16)) {
+      for (int i = 0; i < 1000; i++) workers.submit(() -> {
+        if (limiter.allow(UUID.randomUUID(), NOW)) accepted.incrementAndGet();
+      });
+      workers.shutdown();
+      assertTrue(workers.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS));
+    }
+    assertEquals(32, accepted.get());
+    assertEquals(32, limiter.size());
+  }
+
+  @Test
   void rejectsNewIdentityWhenCapacityIsFull() {
     LoginAttemptLimiter limiter = new LoginAttemptLimiter(2, 2, Duration.ofMinutes(1));
 

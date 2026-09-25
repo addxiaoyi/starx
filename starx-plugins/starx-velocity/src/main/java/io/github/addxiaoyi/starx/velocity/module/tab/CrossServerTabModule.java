@@ -11,19 +11,16 @@ import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import io.github.addxiaoyi.starx.velocity.module.playerlist.PlayerLatencyTracker;
 import java.time.Duration;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.yaml.snakeyaml.Yaml;
 
 /** Keeps the proxy-wide player roster visible in every backend TAB list. */
 public final class CrossServerTabModule implements VelocityModule {
@@ -34,13 +31,12 @@ public final class CrossServerTabModule implements VelocityModule {
 
   private final StarxVelocityPlugin plugin;
   private final PlayerLatencyTracker latencyTracker;
-  private final Path serverNamesPath;
-  private volatile Map<String, String> serverNames;
-  private volatile long serverNamesModifiedAt = Long.MIN_VALUE;
-  private volatile boolean serverNamesLoadValid;
+  private final ServerNameMappings serverNames;
   private final Map<UUID, Map<UUID, EntryState>> sentEntries = new ConcurrentHashMap<>();
-  private final AtomicBoolean reconcileQueued = new AtomicBoolean();
-  private final AtomicBoolean reconciling = new AtomicBoolean();
+  private final ReentrantLock lifecycleLock = new ReentrantLock();
+  private boolean reconcileQueued;
+  private long generation;
+  private ScheduledTask eventTask;
   private final Listener listener = new Listener();
   private volatile boolean enabled;
   private ScheduledTask reconcileTask;
@@ -54,8 +50,8 @@ public final class CrossServerTabModule implements VelocityModule {
       PlayerLatencyTracker latencyTracker) {
     this.plugin = plugin;
     this.latencyTracker = latencyTracker;
-    this.serverNamesPath = plugin.dataDirectory().resolve("cross-server-tab.yml");
-    this.serverNames = loadServerNames();
+    this.serverNames = new ServerNameMappings(
+        plugin.dataDirectory().resolve("cross-server-tab.yml"), plugin.logger()::warning);
   }
 
   @Override
@@ -65,45 +61,62 @@ public final class CrossServerTabModule implements VelocityModule {
 
   @Override
   public void onEnable() {
-    this.enabled = true;
-    this.plugin.proxy().getEventManager().register(this.plugin, this.listener);
-    this.reconcileTask = this.plugin.proxy().getScheduler()
-        .buildTask(this.plugin, this::reconcile)
-        .repeat(RECONCILE_INTERVAL)
-        .schedule();
-    scheduleReconcile(Duration.ZERO);
+    this.lifecycleLock.lock();
+    try {
+      if (this.enabled) return;
+      this.enabled = true;
+      long epoch = ++this.generation;
+      this.plugin.proxy().getEventManager().register(this.plugin, this.listener);
+      this.reconcileTask = this.plugin.proxy().getScheduler()
+          .buildTask(this.plugin, () -> reconcile(epoch))
+          .repeat(RECONCILE_INTERVAL)
+          .schedule();
+      scheduleReconcile(Duration.ZERO);
+    } finally {
+      this.lifecycleLock.unlock();
+    }
   }
 
   @Override
   public void onDisable() {
-    this.enabled = false;
-    ScheduledTask task = this.reconcileTask;
-    this.reconcileTask = null;
-    if (task != null) {
-      task.cancel();
+    this.lifecycleLock.lock();
+    try {
+      this.enabled = false;
+      this.generation++;
+      if (this.reconcileTask != null) this.reconcileTask.cancel();
+      if (this.eventTask != null) this.eventTask.cancel();
+      this.reconcileTask = null;
+      this.eventTask = null;
+      this.reconcileQueued = false;
+      this.plugin.proxy().getEventManager().unregisterListener(this.plugin, this.listener);
+      this.plugin.proxy().getAllPlayers().forEach(this::removeManagedEntries);
+      this.sentEntries.clear();
+    } finally {
+      this.lifecycleLock.unlock();
     }
-    this.plugin.proxy().getEventManager().unregisterListener(this.plugin, this.listener);
-    this.plugin.proxy().getAllPlayers().forEach(this::removeManagedEntries);
-    this.sentEntries.clear();
   }
 
-  private void reconcile() {
-    if (!this.reconciling.compareAndSet(false, true)) {
-      return;
-    }
+  private void reconcile(long epoch) {
+    if (!this.lifecycleLock.tryLock()) return;
     try {
-      reloadServerNamesIfChanged();
-      Map<UUID, EntryState> roster = new LinkedHashMap<>();
-      this.plugin.proxy().getAllPlayers().stream()
+      if (!this.enabled || epoch != this.generation) return;
+      if (this.serverNames.reloadIfChanged()) {
+        this.plugin.logger().info("已热加载 cross-server-tab.yml（" + this.serverNames.size() + " 个映射）");
+      }
+      List<Player> players = this.plugin.proxy().getAllPlayers().stream()
+          .filter(Player::isActive)
           .sorted(Comparator.comparing(Player::getUsername, String.CASE_INSENSITIVE_ORDER)
               .thenComparing(Player::getUniqueId))
-          .forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
+          .toList();
+      this.sentEntries.keySet().retainAll(players.stream().map(Player::getUniqueId).collect(Collectors.toSet()));
+      Map<UUID, EntryState> roster = new LinkedHashMap<>();
+      players.forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
               player.getUniqueId(),
               new EntryState(displayServerName(connection.getServer().getServerInfo().getName()),
                   player.getUsername(), tabLatency(player), player.getGameProfile()))));
-      this.plugin.proxy().getAllPlayers().forEach(viewer -> reconcileViewer(viewer, roster));
+      players.stream().filter(Player::isActive).forEach(viewer -> reconcileViewer(viewer, roster));
     } finally {
-      this.reconciling.set(false);
+      this.lifecycleLock.unlock();
     }
   }
 
@@ -186,17 +199,26 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private void scheduleReconcile(Duration delay) {
-    if (!this.reconcileQueued.compareAndSet(false, true)) {
-      return;
+    // The periodic task covers skipped events; never stall a player event behind a refresh.
+    if (!this.lifecycleLock.tryLock()) return;
+    try {
+      if (!this.enabled || this.reconcileQueued) return;
+      this.reconcileQueued = true;
+      long epoch = this.generation;
+      this.eventTask = this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
+        this.lifecycleLock.lock();
+        try {
+          if (!this.enabled || epoch != this.generation) return;
+          this.reconcileQueued = false;
+          this.eventTask = null;
+          reconcile(epoch);
+        } finally {
+          this.lifecycleLock.unlock();
+        }
+      }).delay(delay).schedule();
+    } finally {
+      this.lifecycleLock.unlock();
     }
-    this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
-          this.reconcileQueued.set(false);
-          if (this.enabled) {
-            reconcile();
-          }
-        })
-        .delay(delay)
-        .schedule();
   }
 
   private static Component displayName(EntryState state) {
@@ -205,62 +227,7 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private String displayServerName(String serverName) {
-    return this.serverNames.getOrDefault(serverName, serverName);
-  }
-
-  private Map<String, String> loadServerNames() {
-    Path path = this.serverNamesPath;
-    try {
-      if (Files.notExists(path)) {
-        Files.createDirectories(path.getParent());
-        Files.writeString(path, "# 跨服 TAB 子服名称映射；键为 velocity.toml 中的真实服务器名。\n"
-            + "servers:\n  lobby: \"大厅\"\n  survival: \"生存服\"\n  minigames: \"小游戏\"\n",
-            StandardCharsets.UTF_8);
-      }
-      Object parsed = new Yaml().load(Files.readString(path, StandardCharsets.UTF_8));
-      if (!(parsed instanceof Map<?, ?> root) || !(root.get("servers") instanceof Map<?, ?> values)) {
-        return Map.of();
-      }
-      Map<String, String> aliases = new LinkedHashMap<>();
-      values.forEach((key, value) -> {
-        if (key != null && value != null && !key.toString().isBlank() && !value.toString().isBlank()) {
-          aliases.put(key.toString().trim(), value.toString().trim());
-        }
-      });
-      this.serverNamesModifiedAt = Files.getLastModifiedTime(path).toMillis();
-      this.serverNamesLoadValid = true;
-      return Map.copyOf(aliases);
-    } catch (IOException | RuntimeException error) {
-      this.serverNamesLoadValid = false;
-      rememberCurrentModificationTime();
-      this.plugin.logger().warning("无法读取 cross-server-tab.yml，将使用真实子服名：" + error.getMessage());
-      return Map.of();
-    }
-  }
-
-  private void rememberCurrentModificationTime() {
-    try {
-      this.serverNamesModifiedAt = Files.getLastModifiedTime(this.serverNamesPath).toMillis();
-    } catch (IOException ignored) {
-      this.serverNamesModifiedAt = Long.MIN_VALUE;
-    }
-  }
-
-  private void reloadServerNamesIfChanged() {
-    try {
-      long modifiedAt = Files.getLastModifiedTime(this.serverNamesPath).toMillis();
-      if (modifiedAt == this.serverNamesModifiedAt) {
-        return;
-      }
-      Map<String, String> loaded = loadServerNames();
-      if (!this.serverNamesLoadValid) {
-        return;
-      }
-      this.serverNames = loaded;
-      this.plugin.logger().info("已热加载 cross-server-tab.yml（" + loaded.size() + " 个映射）");
-    } catch (IOException error) {
-      this.plugin.logger().warning("无法检查 cross-server-tab.yml，保留上一份有效配置：" + error.getMessage());
-    }
+    return this.serverNames.resolve(serverName);
   }
 
   private int tabLatency(Player player) {

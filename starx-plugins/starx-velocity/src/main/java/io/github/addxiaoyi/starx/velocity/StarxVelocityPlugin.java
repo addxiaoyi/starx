@@ -90,6 +90,7 @@ import io.github.addxiaoyi.starx.velocity.module.integrations.napcat.NapCatModul
 import io.github.addxiaoyi.starx.velocity.module.playerlist.PlayerListModule;
 import io.github.addxiaoyi.starx.velocity.module.playerlist.PlayerListRenderer;
 import io.github.addxiaoyi.starx.velocity.module.session.PlayerSessionModule;
+import io.github.addxiaoyi.starx.velocity.module.proxytools.TransferCoordinator;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.ChatModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.EnhancedProxyModule;
 import io.github.addxiaoyi.starx.velocity.module.proxytools.FileCleanerModule;
@@ -148,6 +149,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
     private final Logger logger;
     private final Path dataDirectory;
     private final PluginLifecycle lifecycle = new PluginLifecycle();
+    private final TransferCoordinator transfers = new TransferCoordinator(java.time.Duration.ofSeconds(10));
     private StarxConfig config;
     private DatabaseManager databaseManager;
     private VelocityEventBus eventBus;
@@ -171,6 +173,10 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
 
     public ProxyServer proxy() {
         return this.proxy;
+    }
+
+    public TransferCoordinator transferCoordinator() {
+        return this.transfers;
     }
 
     public Logger logger() {
@@ -233,6 +239,10 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
 
     private void initialize() throws Exception {
         this.logger.info("StarX Velocity \u521d\u59cb\u5316\u4e2d...");
+        this.lifecycle.own("transfer coordinator", this.transfers::close);
+        this.lifecycle.own("transfer listener", () ->
+            this.proxy.getEventManager().unregisterListener(this, this.transfers));
+        this.proxy.getEventManager().register(this, this.transfers);
         Path configFile = this.dataDirectory.resolve("config.yml");
         boolean firstBoot = Files.notExists(configFile);
         this.config = ConfigLoader.load(configFile, this.logger::warning);
@@ -693,6 +703,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
     public void onProxyShutdown(ProxyShutdownEvent event) {
         this.logger.info("StarX Velocity \u6b63\u5728\u5173\u95ed...");
         try {
+            this.transfers.close();
             this.lifecycle.close();
         } catch (RuntimeException error) {
             this.logger.log(Level.SEVERE, "One or more StarX resources failed to stop", error);

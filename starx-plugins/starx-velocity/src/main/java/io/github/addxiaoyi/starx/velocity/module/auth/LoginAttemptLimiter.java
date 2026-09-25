@@ -26,7 +26,7 @@ final class LoginAttemptLimiter {
     }
   }
 
-  boolean allow(UUID playerId, Instant now) {
+  synchronized boolean allow(UUID playerId, Instant now) {
     Objects.requireNonNull(playerId, "playerId");
     Objects.requireNonNull(now, "now");
     
@@ -51,21 +51,22 @@ final class LoginAttemptLimiter {
     }
     
     // 更新尝试次数
+    if (current.count() >= this.maxAttempts) return false;
     int newCount = current.count() + 1;
     Attempt next = new Attempt(newCount, current.resetAt());
     attempts.put(playerId, next);
     return newCount <= maxAttempts;
   }
 
-  void remove(UUID playerId) {
+  synchronized void remove(UUID playerId) {
     attempts.remove(playerId);
   }
 
-  void clear() {
+  synchronized void clear() {
     attempts.clear();
   }
 
-  int size() {
+  synchronized int size() {
     return attempts.size();
   }
 

@@ -36,24 +36,20 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
 public final class QueueModule
 implements VelocityModule {
-    private static final long CONNECTION_TIMEOUT_SECONDS = 10L;
     private final StarxVelocityPlugin plugin;
     private final Config config;
     private final QueueService queueService;
     private final QueueTargetPolicy targetPolicy;
-    private final TransferCoordinator transfers = new TransferCoordinator(Duration.ofSeconds(10));
+    private final TransferCoordinator transfers;
     private ScheduledTask processingTask;
     private QueueListener listener;
-    private final Map<UUID, Long> failureNoticeAt = new ConcurrentHashMap<>();
+    private final RetryNoticeLimiter retryNotices = new RetryNoticeLimiter();
 
     public QueueModule(
         StarxVelocityPlugin plugin,
@@ -61,6 +57,7 @@ implements VelocityModule {
         QueueService queueService,
         BackendRoutingService routingService) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.transfers = this.plugin.transferCoordinator();
         this.config = Objects.requireNonNull(config, "config");
         this.queueService = Objects.requireNonNull(queueService, "queueService");
         BackendRoutingService routing = Objects.requireNonNull(routingService, "routingService");
@@ -97,8 +94,8 @@ implements VelocityModule {
         this.listener = null;
         if (currentListener != null) this.plugin.proxy().getEventManager().unregisterListener(this.plugin, currentListener);
         this.queueService.clear();
-        this.failureNoticeAt.clear();
-        this.transfers.clear();
+        this.retryNotices.clear();
+        this.transfers.cancelReason("queue");
     }
 
     public Map<String, Object> runtimeSnapshot() {
@@ -129,12 +126,13 @@ implements VelocityModule {
     }
 
     void onServerConnected(ServerConnectedEvent event) {
+        this.retryNotices.remove(event.getPlayer().getUniqueId());
         this.queueService.removeFromQueue(event.getServer(), event.getPlayer());
     }
 
     void onDisconnect(DisconnectEvent event) {
         Player player = event.getPlayer();
-        this.transfers.cancel(player.getUniqueId());
+        this.retryNotices.remove(player.getUniqueId());
         this.queueService.removeFromAllQueues(player);
         player.getCurrentServer().ifPresent(connection -> this.plugin.proxy().getScheduler().buildTask((Object)this.plugin, () -> this.processQueueFor(connection.getServer())).schedule());
     }
@@ -161,7 +159,8 @@ implements VelocityModule {
             return this.transfers.transfer(player, server, "queue")
                 .thenApply(result -> {
                     boolean success = result.successful();
-                    if (!success) notifyRetry(player, server);
+                    if (!success && result.status() != TransferCoordinator.Status.CANCELLED
+                        && result.status() != TransferCoordinator.Status.DUPLICATE) notifyRetry(player, server);
                     return success;
                 })
                 .exceptionally(error -> {
@@ -182,9 +181,9 @@ implements VelocityModule {
     }
 
     private void notifyRetry(Player player, RegisteredServer server) {
+        if (!player.isActive()) return;
         long now = System.nanoTime();
-        Long previous = this.failureNoticeAt.put(player.getUniqueId(), now);
-        if (previous == null || now - previous >= Duration.ofSeconds(15).toNanos()) {
+        if (this.retryNotices.allow(player.getUniqueId(), now)) {
             int position = this.queueService.position(server, player);
             long eta = this.queueService.estimateWaitSeconds(
                 server, player, 1, this.config.checkIntervalMillis());

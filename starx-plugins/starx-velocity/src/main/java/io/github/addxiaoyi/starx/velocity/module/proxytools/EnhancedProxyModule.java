@@ -51,11 +51,12 @@ implements VelocityModule {
     private final PingCommand pingCommand;
     private final DiagnoseCommand diagnoseCommand;
     private final KickAllCommand kickAllCommand;
-    private final TransferCoordinator transfers = new TransferCoordinator(java.time.Duration.ofSeconds(10));
+    private final TransferCoordinator transfers;
     private CommandMeta commandMeta;
 
     public EnhancedProxyModule(StarxVelocityPlugin plugin, Config config) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.transfers = this.plugin.transferCoordinator();
         this.config = Objects.requireNonNull(config, "config");
         this.glistCommand = new GListCommand();
         this.findCommand = new FindCommand();
@@ -86,7 +87,7 @@ implements VelocityModule {
         CommandMeta current = this.commandMeta;
         this.commandMeta = null;
         if (current != null) this.plugin.proxy().getCommandManager().unregister(current);
-        this.transfers.clear();
+        this.transfers.cancelReason("admin-send");
     }
 
     private final class NetworkCommand implements SimpleCommand {
@@ -322,19 +323,26 @@ implements VelocityModule {
                         "该玩家已有转服请求正在处理。", NamedTextColor.YELLOW));
                     return;
                 }
+                if (error == null && result != null
+                    && result.status() == TransferCoordinator.Status.CANCELLED) {
+                    invocation.source().sendMessage(Component.text(
+                        "转服请求已取消：" + target.getUsername(), NamedTextColor.GRAY));
+                    return;
+                }
                 if (connected) {
                     invocation.source().sendMessage(Component.text(
                         "已将 " + target.getUsername() + " 发送至 "
                             + server.getServerInfo().getName(), NamedTextColor.GREEN));
                     return;
                 }
-                String reason = error == null ? "目标服务器不可用或被拒绝" : "连接失败";
+                String reason = error != null || result != null && result.error() != null
+                    ? "连接超时或异常" : "目标服务器繁忙、不可用或被拒绝";
                 invocation.source().sendMessage(Component.text(
                     "转服失败: " + target.getUsername() + " -> "
                         + server.getServerInfo().getName() + " (" + reason + ")",
                     NamedTextColor.RED));
-                target.sendMessage(Component.text(
-                    "转服失败，当前连接保持不变。请稍后重试。", NamedTextColor.RED));
+                if (target.isActive()) target.sendMessage(Component.text(
+                    "转服未能确认完成，请检查当前所在子服后重试。", NamedTextColor.RED));
             });
             } catch (RuntimeException error) {
                 invocation.source().sendMessage(Component.text(
