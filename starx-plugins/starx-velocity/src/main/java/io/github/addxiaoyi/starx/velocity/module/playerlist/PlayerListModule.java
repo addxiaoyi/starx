@@ -375,7 +375,7 @@ public final class PlayerListModule implements VelocityModule {
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
     this.latencyTracker.retain(onlinePlayers);
     this.plugin.proxy().getAllPlayers().forEach(player ->
-        this.latencyTracker.observe(player.getUniqueId(), player.getPing()));
+        this.latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing));
   }
 
   private void samplePlayerLatencyAndRefresh() {
@@ -389,7 +389,7 @@ public final class PlayerListModule implements VelocityModule {
     NetworkSnapshot snapshot = this.currentNetworkSnapshot();
     this.plugin.proxy().getAllPlayers().forEach(player -> {
       UUID playerId = player.getUniqueId();
-      PlayerLatencyTracker.Snapshot latency = this.latencyTracker.observe(playerId, player.getPing());
+      PlayerLatencyTracker.Snapshot latency = this.latencyTracker.sampleIfDue(playerId, player::getPing);
       DisplayedLatency previous = this.displayedLatency.get(playerId);
       boolean changedEnough = previous == null
           || previous.smoothedPing() < 0 != latency.smoothedPing() < 0

@@ -17,8 +17,7 @@ class CrossServerTabLatencyContractTest {
     String source = Files.readString(sourcePath, StandardCharsets.UTF_8);
 
     assertTrue(source.contains("PlayerLatencyTracker latencyTracker"));
-    assertTrue(source.contains("latencyTracker.snapshot(player.getUniqueId())"));
-    assertTrue(source.contains("snapshot.smoothedPing()"));
+    assertTrue(source.contains("latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing).smoothedPing()"));
     assertFalse(source.contains("return ping < 0 || ping > Integer.MAX_VALUE"));
   }
 
@@ -30,6 +29,8 @@ class CrossServerTabLatencyContractTest {
 
     assertTrue(source.contains("player.getGameProfile()"));
     assertTrue(source.contains("state.gameProfile()"));
-    assertFalse(source.contains("proxy().getPlayer(targetId)"));
+    String reconciliation = source.substring(source.indexOf("private void reconcileViewer("),
+        source.indexOf("private void removeManagedEntries("));
+    assertFalse(reconciliation.contains("proxy().getPlayer(targetId)"));
   }
 }

@@ -264,11 +264,7 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private int tabLatency(Player player) {
-    PlayerLatencyTracker.Snapshot snapshot = this.latencyTracker.snapshot(player.getUniqueId());
-    if (snapshot.smoothedPing() >= 0) {
-      return snapshot.smoothedPing();
-    }
-    return this.latencyTracker.observe(player.getUniqueId(), player.getPing()).smoothedPing();
+    return this.latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing).smoothedPing();
   }
 
   private final class Listener {

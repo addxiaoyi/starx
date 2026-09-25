@@ -16,6 +16,7 @@ public final class PlayerLatencyTracker {
   private static final int WINDOW_SIZE = 5;
   private static final double EMA_ALPHA = 0.5d;
   private static final long STALE_AFTER_NANOS = 2_000_000_000L;
+  private static final long SAMPLE_INTERVAL_NANOS = 250_000_000L;
 
   private final Map<UUID, Sample> samples = new ConcurrentHashMap<>();
   private final LongSupplier clock;
@@ -34,27 +35,53 @@ public final class PlayerLatencyTracker {
     }
     Sample sample = this.samples.computeIfAbsent(playerId, ignored -> new Sample());
     synchronized (sample) {
-      sample.values.addLast((int) rawPing);
-      while (sample.values.size() > WINDOW_SIZE) sample.values.removeFirst();
-      int median = median(sample.values);
-      sample.smoothed = sample.smoothed < 0
-          ? median
-          : (int) Math.round(sample.smoothed + EMA_ALPHA * (median - sample.smoothed));
-      sample.raw = (int) rawPing;
-      sample.updatedAt = this.clock.getAsLong();
-      return sample.snapshot();
+      return record(sample, rawPing, this.clock.getAsLong());
     }
+  }
+
+  /** Coalesces consumers before reading the local Velocity ping, including invalid attempts. */
+  public Snapshot sampleIfDue(UUID playerId, LongSupplier ping) {
+    if (playerId == null) return Snapshot.unknown();
+    Sample sample = this.samples.computeIfAbsent(playerId, ignored -> new Sample());
+    synchronized (sample) {
+      long now = this.clock.getAsLong();
+      if (sample.attempted && now - sample.attemptedAt < SAMPLE_INTERVAL_NANOS) {
+        return current(sample, now);
+      }
+      long rawPing = ping.getAsLong();
+      sample.attempted = true;
+      sample.attemptedAt = now;
+      if (rawPing < 0 || rawPing > MAX_VALID_PING) return current(sample, now);
+      return record(sample, rawPing, now);
+    }
+  }
+
+  private static Snapshot record(Sample sample, long rawPing, long now) {
+    if (sample.raw >= 0 && now - sample.updatedAt > STALE_AFTER_NANOS) {
+      sample.values.clear();
+      sample.smoothed = UNKNOWN_PING;
+    }
+    sample.values.addLast((int) rawPing);
+    while (sample.values.size() > WINDOW_SIZE) sample.values.removeFirst();
+    int median = median(sample.values);
+    sample.smoothed = sample.smoothed < 0
+        ? median
+        : (int) Math.round(sample.smoothed + EMA_ALPHA * (median - sample.smoothed));
+    sample.raw = (int) rawPing;
+    sample.updatedAt = now;
+    return sample.snapshot();
+  }
+
+  private static Snapshot current(Sample sample, long now) {
+    return sample.raw < 0 || now - sample.updatedAt > STALE_AFTER_NANOS
+        ? Snapshot.unknown() : sample.snapshot();
   }
 
   public Snapshot snapshot(UUID playerId) {
     Sample sample = playerId == null ? null : this.samples.get(playerId);
     if (sample == null) return Snapshot.unknown();
     synchronized (sample) {
-      if (sample.updatedAt == 0L
-          || this.clock.getAsLong() - sample.updatedAt > STALE_AFTER_NANOS) {
-        return Snapshot.unknown();
-      }
-      return sample.snapshot();
+      return current(sample, this.clock.getAsLong());
     }
   }
 
@@ -63,7 +90,12 @@ public final class PlayerLatencyTracker {
   }
 
   public int size() {
-    return this.samples.size();
+    long now = this.clock.getAsLong();
+    return (int) this.samples.values().stream().filter(sample -> {
+      synchronized (sample) {
+        return current(sample, now).smoothedPing() >= 0;
+      }
+    }).count();
   }
 
   /** Returns the percentile across current smoothed player samples, or unknown when empty. */
@@ -74,8 +106,7 @@ public final class PlayerLatencyTracker {
     long now = this.clock.getAsLong();
     int[] values = this.samples.values().stream().mapToInt(sample -> {
       synchronized (sample) {
-        return sample.updatedAt != 0L && now - sample.updatedAt <= STALE_AFTER_NANOS
-            ? sample.smoothed : UNKNOWN_PING;
+        return current(sample, now).smoothedPing();
       }
     }).filter(value -> value >= 0).sorted().toArray();
     if (values.length == 0) return UNKNOWN_PING;
@@ -108,6 +139,8 @@ public final class PlayerLatencyTracker {
     private int raw = UNKNOWN_PING;
     private int smoothed = UNKNOWN_PING;
     private long updatedAt;
+    private boolean attempted;
+    private long attemptedAt;
 
     private Snapshot snapshot() {
       return new Snapshot(this.raw, this.smoothed, this.updatedAt);
