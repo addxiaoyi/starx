@@ -589,12 +589,6 @@ implements UserRepository {
             stmt -> { stmt.setString(1, uuid.toString()); stmt.setString(2, username); }, rs -> 1).isPresent();
     }
 
-    public boolean hasTrustedWebsiteBindingByUsername(String username) {
-        if (username == null || username.isBlank()) return false;
-        return this.queryOne(
-            "SELECT 1 FROM starx_website_bindings WHERE LOWER(username) = LOWER(?) AND verified = TRUE",
-            stmt -> stmt.setString(1, username.trim()), rs -> 1).isPresent();
-    }
 
     public void markPasswordMigrated(UUID uuid, String passwordHash, Instant migratedAt) {
         int updated = this.executeUpdate("UPDATE starx_users SET password_hash = ?, password_migrated_at = ?, migration_state = ? WHERE uuid = ?", stmt -> {
