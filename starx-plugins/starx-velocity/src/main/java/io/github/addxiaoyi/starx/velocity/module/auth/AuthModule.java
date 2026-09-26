@@ -44,6 +44,7 @@ import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import io.github.addxiaoyi.starx.velocity.config.UworldConfig;
 import io.github.addxiaoyi.starx.velocity.integration.TrustedIdentityProvider;
+import io.github.addxiaoyi.starx.velocity.integration.FastLoginPremiumBridge;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -107,6 +108,7 @@ public final class AuthModule implements VelocityModule {
   private SessionManager sessionManager;
   private PremiumResolver premiumResolver;
   private TrustedIdentityProvider trustedIdentity = TrustedIdentityProvider.none();
+  private FastLoginPremiumBridge fastLoginPremium;
   private boolean trustedIdentityBound;
   private AuthService authService;
   private AuthCommandHandler commandHandler;
@@ -436,6 +438,7 @@ public final class AuthModule implements VelocityModule {
   private void initAuthService(StarxConfig.AuthConfig authConfig) {
     this.sessionManager = new SessionManager(Duration.ofMinutes(10), Instant::now);
     this.premiumResolver = new PremiumResolver();
+    this.fastLoginPremium = new FastLoginPremiumBridge(this.plugin.proxy(), this.logger);
 
     UniAuthBridge uniAuthBridge = null;
     if (this.uniauthConfig.enabled() && this.uniauthConfig.bridgeMode()) {
@@ -463,7 +466,8 @@ public final class AuthModule implements VelocityModule {
       this.logger.fine("Validated external-handshake for " + username
           + "; continuing with normal identity authentication");
     }
-    boolean premium = this.premiumResolver.isPremium(playerId, player.isOnlineMode());
+    boolean premium = player.isOnlineMode()
+        || this.fastLoginPremium.isVerified(player);
     boolean trustedExternalIdentity = this.trustedIdentity.isTrusted(playerId);
     IdentitySource trustedSource = premium
         ? IdentitySource.MOJANG

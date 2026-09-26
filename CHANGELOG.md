@@ -2,6 +2,12 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.0.23] - 2026-09-26
+
+### Security
+
+- StarX 认证模块接入 FastLogin Velocity 的已验证会话，仅在 Premium、正版 UUID 和用户名同时匹配时免密；FastLogin 缺失、状态未知或反射 API 不兼容时保持密码认证。
+
 ## [1.0.22] - 2026-09-26
 
 ### Security
