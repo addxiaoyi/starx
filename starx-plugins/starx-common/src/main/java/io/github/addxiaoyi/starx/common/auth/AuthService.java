@@ -993,9 +993,10 @@ public final class AuthService {
 
     public boolean hasTrustedWebsiteBinding(UUID connectionUuid, String username) {
         if (username == null || username.isBlank()) return false;
-        return this.resolveConnectedUser(connectionUuid)
+        boolean uuidBinding = this.resolveConnectedUser(connectionUuid)
             .map(user -> this.userRepository.hasTrustedWebsiteBinding(user.uuid(), username.trim()))
             .orElse(false);
+        return uuidBinding || this.userRepository.hasTrustedWebsiteBindingByUsername(username);
     }
 
     public boolean isUserRegistered(UUID uuid, String username) {
