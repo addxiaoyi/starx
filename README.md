@@ -1,12 +1,12 @@
 # StarX
 
-StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-1.0.19.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
+StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-1.0.20.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
 
-当前插件版本：**1.0.19**
+当前插件版本：**1.0.20**
 
 公共扩展 API：**1.0.0**
 
-1.0.19 修复跨入口转服单飞、取消与旧回调竞态、登录限流并发、队列提示冷却及跨服 TAB 名称映射热加载。详见 [发布说明](docs/releases/1.0.19.md)。
+1.0.20 优化在线子服展示，仅显示实际有玩家在线的子服。详见 [发布说明](docs/releases/1.0.20.md)。
 
 ## 完整功能清单
 

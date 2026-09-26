@@ -346,7 +346,10 @@ public final class PlayerListModule implements VelocityModule {
       String name = server.getServerInfo().getName();
       int players = server.getPlayersConnected().size();
       serverCounts.put(name, players);
-      online.add(new OnlineServer(this.config.serverAlias(name), players));
+      // The footer is an online-server summary; empty registered backends add noise.
+      if (shouldDisplayOnlineServer(players)) {
+        online.add(new OnlineServer(this.config.serverAlias(name), players));
+      }
     });
     online.sort(Comparator.comparing(OnlineServer::name));
     StringBuilder labels = new StringBuilder();
@@ -403,6 +406,10 @@ public final class PlayerListModule implements VelocityModule {
   }
 
   private record OnlineServer(String name, int players) {}
+
+  static boolean shouldDisplayOnlineServer(int players) {
+    return players > 0;
+  }
 
   private record NetworkSnapshot(
       int onlinePlayers,
