@@ -305,6 +305,30 @@ final class VelocityBackendBridgeContractTest {
     assertEquals("true", queued.attributes().get("maintenance"));
   }
 
+  @Test
+  void treatsADroppedBackendLinkAsNoCarrier() {
+    ServerConnection dropped = (ServerConnection) Proxy.newProxyInstance(
+        getClass().getClassLoader(),
+        new Class<?>[] {ServerConnection.class},
+        (proxy, method, args) -> {
+          if ("sendPluginMessage".equals(method.getName())) {
+            throw new IllegalStateException("Not connected to server!");
+          }
+          return defaultValue(method.getReturnType());
+        });
+
+    BridgeMessage followUp = VelocityBackendBridge.followUpFor(
+        new BridgeMessage(
+            BridgeProtocol.BACKEND_HELLO,
+            "backend",
+            PlatformKind.PAPER,
+            "",
+            Map.of("capabilities", "bridge.v1")),
+        "request-12").orElseThrow();
+
+    assertFalse(VelocityBackendBridge.sendToBackend(
+        dropped, MinecraftChannelIdentifier.from(BridgeProtocol.CHANNEL), followUp));
+  }
   private RegisteredServer registeredServer(boolean sends) {
     ServerInfo serverInfo = new ServerInfo(
         "factions", new InetSocketAddress("127.0.0.1", 25565));

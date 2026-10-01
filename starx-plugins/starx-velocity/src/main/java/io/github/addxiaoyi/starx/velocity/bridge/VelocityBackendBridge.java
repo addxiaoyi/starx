@@ -508,10 +508,7 @@ public final class VelocityBackendBridge implements VelocityModule {
       BridgeMessage carried = markTransport(message, "player-carrier");
       this.registry.update(registeredName, carried, this.clock.instant());
       followUpFor(carried, UUID.randomUUID().toString()).ifPresent(followUp -> {
-        boolean sent = connection.sendPluginMessage(
-            this.channel,
-            BridgeProtocol.encode(followUp));
-        if (!sent) {
+        if (!sendToBackend(connection, this.channel, followUp)) {
           this.plugin.logger().log(
               Level.FINE,
               "Backend status follow-up had no carrier for {0}",
@@ -523,6 +520,22 @@ public final class VelocityBackendBridge implements VelocityModule {
           Level.WARNING,
           "Rejected StarX backend bridge packet from {0}: {1}",
           new Object[] {registeredName, error.getMessage()});
+    } catch (RuntimeException error) {
+      // The player can leave the backend between the packet and this relay.
+      this.plugin.logger().log(
+          Level.FINE,
+          "Dropped StarX backend bridge packet from {0} during relay",
+          registeredName);
+    }
+  }
+
+  /** Velocity throws instead of returning false once the player left the backend. */
+  static boolean sendToBackend(
+      ServerConnection connection, ChannelIdentifier channel, BridgeMessage message) {
+    try {
+      return connection.sendPluginMessage(channel, BridgeProtocol.encode(message));
+    } catch (IllegalStateException error) {
+      return false;
     }
   }
 
