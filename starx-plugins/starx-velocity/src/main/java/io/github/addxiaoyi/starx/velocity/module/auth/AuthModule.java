@@ -53,6 +53,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -103,6 +104,7 @@ public final class AuthModule implements VelocityModule {
   private final LoginAttemptLimiter loginAttempts = new LoginAttemptLimiter(
       MAX_TRACKED_LOGIN_IDENTITIES, MAX_LOGIN_ATTEMPTS, ATTEMPT_RESET);
   private final Map<UUID, Long> inputBusyNoticeAt = new ConcurrentHashMap<>();
+  private final Set<UUID> premiumHintSent = ConcurrentHashMap.newKeySet();
 
   private JdbcUserRepository userRepository;
   private SessionManager sessionManager;
@@ -811,6 +813,33 @@ public final class AuthModule implements VelocityModule {
     }
   }
 
+  /**
+   * FastLogin never re-checks a name it already stored as cracked, so the one-time command is the
+   * only way a returning premium player unlocks the encrypted login. It is sent after the player
+   * lands on a backend because that is the only place the command exists.
+   */
+  private void schedulePremiumHint(Player player) {
+    FastLoginPremiumBridge bridge = this.fastLoginPremium;
+    if (bridge == null) {
+      return;
+    }
+    boolean available = bridge.isAvailable();
+    boolean verified = available && bridge.isVerified(player);
+    if (!PremiumHintPolicy.shouldHint(
+        available, verified, this.premiumHintSent.contains(player.getUniqueId()))) {
+      return;
+    }
+    this.premiumHintSent.add(player.getUniqueId());
+    this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
+      if (!player.isActive()) {
+        return;
+      }
+      player.sendMessage(Component.text(
+          "正版提示：如果你拥有该用户名的正版账号，输入 /premium 完成一次验证，之后登录即可免密。",
+          NamedTextColor.AQUA));
+    }).delay(Duration.ofSeconds(2)).schedule();
+  }
+
   private void showAuthPrompt(Player player, boolean registered, StarxUser user) {
     if (!this.flows.requiresInput(player)) {
       return;
@@ -869,26 +898,10 @@ public final class AuthModule implements VelocityModule {
     player.sendMessage(Component.text(
         "注册指引：按提示直接在聊天框输入密码；登录完成后可使用 /2fa 开启二步验证。",
         NamedTextColor.GRAY));
-    this.sendPremiumHintIfUseful(player);
     if (this.authUx.actionBarEnabled()) {
       player.sendActionBar(Component.text(messages.registerActionBar(), NamedTextColor.GRAY));
     }
     this.playFeedback(player, this.authUx.promptSound(), 0.55f, 1.15f);
-    this.sendPremiumHintIfUseful(player);
-  }
-
-  /**
-   * FastLogin never re-checks a name it already stored as cracked, so the one-time command is the
-   * only way a returning premium player unlocks the encrypted login. Only shown when it can help.
-   */
-  private void sendPremiumHintIfUseful(Player player) {
-    FastLoginPremiumBridge bridge = this.fastLoginPremium;
-    if (bridge == null || !bridge.isAvailable() || bridge.isVerified(player)) {
-      return;
-    }
-    player.sendMessage(Component.text(
-        "正版提示：如果你拥有该用户名的正版账号，在服务器内输入 /premium 完成一次正版验证，之后登录即可免密。",
-        NamedTextColor.AQUA));
   }
 
   private void showTotpPrompt(Player player) {
@@ -1077,6 +1090,7 @@ public final class AuthModule implements VelocityModule {
     public void onDisconnect(DisconnectEvent event) {
       Player player = event.getPlayer();
       UUID playerId = player.getUniqueId();
+      AuthModule.this.premiumHintSent.remove(playerId);
       AuthLease lease = AuthModule.this.flows.lease(player).orElse(null);
       if (AuthModule.this.flows.close(playerId, player) && lease != null) {
         AuthModule.this.inputBusyNoticeAt.remove(playerId);
@@ -1096,6 +1110,7 @@ public final class AuthModule implements VelocityModule {
         AuthModule.this.flows.lease(player).ifPresent(lease ->
             AuthModule.this.authService.completeAuthenticatedProvisioning(
                 player.getUniqueId(), lease));
+        AuthModule.this.schedulePremiumHint(player);
       } else if (result == AuthFlowIndex.ConnectResult.IGNORED
           && AuthModule.this.flows.requiresAuth(player)) {
         AuthModule.this.logger.log(Level.SEVERE,
