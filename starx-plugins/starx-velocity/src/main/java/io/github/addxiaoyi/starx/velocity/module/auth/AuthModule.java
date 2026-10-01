@@ -869,10 +869,26 @@ public final class AuthModule implements VelocityModule {
     player.sendMessage(Component.text(
         "注册指引：按提示直接在聊天框输入密码；登录完成后可使用 /2fa 开启二步验证。",
         NamedTextColor.GRAY));
+    this.sendPremiumHintIfUseful(player);
     if (this.authUx.actionBarEnabled()) {
       player.sendActionBar(Component.text(messages.registerActionBar(), NamedTextColor.GRAY));
     }
     this.playFeedback(player, this.authUx.promptSound(), 0.55f, 1.15f);
+    this.sendPremiumHintIfUseful(player);
+  }
+
+  /**
+   * FastLogin never re-checks a name it already stored as cracked, so the one-time command is the
+   * only way a returning premium player unlocks the encrypted login. Only shown when it can help.
+   */
+  private void sendPremiumHintIfUseful(Player player) {
+    FastLoginPremiumBridge bridge = this.fastLoginPremium;
+    if (bridge == null || !bridge.isAvailable() || bridge.isVerified(player)) {
+      return;
+    }
+    player.sendMessage(Component.text(
+        "正版提示：如果你拥有该用户名的正版账号，在服务器内输入 /premium 完成一次正版验证，之后登录即可免密。",
+        NamedTextColor.AQUA));
   }
 
   private void showTotpPrompt(Player player) {

@@ -42,6 +42,15 @@ public final class FastLoginPremiumBridge {
     }
   }
 
+  /** True when FastLogin is installed; a missing plugin must never look like a verified player. */
+  public boolean isAvailable() {
+    try {
+      Object pluginManager = invoke(this.proxy, "getPluginManager");
+      return ((Optional<?>) invoke(pluginManager, "getPlugin", "fastlogin")).isPresent();
+    } catch (ReflectiveOperationException | ClassCastException error) {
+      return false;
+    }
+  }
   private static Object invoke(Object target, String name, Object... args)
       throws ReflectiveOperationException {
     for (Method method : target.getClass().getMethods()) {
