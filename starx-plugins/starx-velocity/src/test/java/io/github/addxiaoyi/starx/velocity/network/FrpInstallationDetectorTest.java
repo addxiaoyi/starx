@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.velocity.network;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,6 +29,12 @@ final class FrpInstallationDetectorTest {
     assertFalse(result.configPresent());
     assertEquals(this.temporary.resolve("missing/frpc.toml").toAbsolutePath().normalize(),
         result.mainConfig());
+  }
+
+  @Test
+  void rejectsExplicitConfigEscapingDataDirectory() {
+    assertThrows(IllegalArgumentException.class, () -> FrpInstallationDetector.detect(
+        config("../outside/frpc.toml"), this.temporary, List.of()));
   }
 
   @Test

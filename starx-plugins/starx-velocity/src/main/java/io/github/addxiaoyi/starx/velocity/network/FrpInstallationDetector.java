@@ -113,7 +113,14 @@ final class FrpInstallationDetector {
 
   private static Path resolveConfigured(Path root, String value) {
     Path path = Path.of(value);
-    return path.isAbsolute() ? path.normalize() : root.resolve(path).normalize();
+    if (path.isAbsolute()) {
+      return path.normalize();
+    }
+    Path resolved = root.resolve(path).normalize();
+    if (!resolved.startsWith(root)) {
+      throw new IllegalArgumentException("FRP main-config-file escapes the StarX data directory");
+    }
+    return resolved;
   }
 
   private static List<Path> knownConfigCandidates(Path dataDirectory) {
