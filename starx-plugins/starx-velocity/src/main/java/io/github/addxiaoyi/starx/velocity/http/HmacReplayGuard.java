@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.velocity.http;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Locale;
 
 final class HmacReplayGuard {
   private final int capacity;
@@ -18,12 +19,13 @@ final class HmacReplayGuard {
     if (signature == null || signature.isBlank() || expiresAt <= now) {
       return false;
     }
-    Long existing = claims.get(signature);
+    String replayKey = signature.toLowerCase(Locale.ROOT);
+    Long existing = claims.get(replayKey);
     if (existing != null && existing > now) {
       return false;
     }
     if (existing != null) {
-      claims.remove(signature);
+      claims.remove(replayKey);
     }
     if (claims.size() >= capacity) {
       claims.entrySet().removeIf(entry -> entry.getValue() <= now);
@@ -31,7 +33,7 @@ final class HmacReplayGuard {
     if (claims.size() >= capacity) {
       return false;
     }
-    claims.put(signature, expiresAt);
+    claims.put(replayKey, expiresAt);
     return true;
   }
 

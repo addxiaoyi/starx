@@ -17,6 +17,14 @@ class HmacReplayGuardTest {
   }
 
   @Test
+  void treatsSignatureHexCaseAsTheSameReplayKey() {
+    HmacReplayGuard guard = new HmacReplayGuard(2);
+
+    assertTrue(guard.claim("AbCd", 1_000, 100));
+    assertFalse(guard.claim("aBcD", 1_000, 200));
+  }
+
+  @Test
   void expiredEntriesReleaseCapacity() {
     HmacReplayGuard guard = new HmacReplayGuard(1);
 
