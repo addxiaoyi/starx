@@ -15,7 +15,7 @@ final class StarxAccountClientApprovalTest {
   void createsAnIdentityBoundApprovalAndReturnsItsWebsiteUrl() throws Exception {
     AtomicReference<String> requestBody = new AtomicReference<>();
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.createContext("/v1/admin/approval/create", exchange -> {
+    server.createContext("/starx/v1/admin/approval/create", exchange -> {
       requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
       byte[] body = ("{\"ok\":true,\"message\":\"created\","
           + "\"url\":\"https://star-web.top/minecraft/approve?token=opaque&action=bind_email\","
@@ -28,7 +28,7 @@ final class StarxAccountClientApprovalTest {
     server.start();
     try {
       StarxAccountClient client = new StarxAccountClient(
-          "http://127.0.0.1:" + server.getAddress().getPort(), "test-key");
+          "http://127.0.0.1:" + server.getAddress().getPort() + "/starx", "test-key");
 
       StarxAccountClient.Reply reply = client.createApproval(
           UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7"),

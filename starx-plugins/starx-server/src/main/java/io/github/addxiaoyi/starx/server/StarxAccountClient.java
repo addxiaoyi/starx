@@ -29,10 +29,27 @@ final class StarxAccountClient {
 
   StarxAccountClient(HttpClient http, String baseUrl, String apiKey) {
     this.http = Objects.requireNonNull(http, "http");
-    this.baseUrl = URI.create(Objects.requireNonNull(baseUrl, "baseUrl"));
+    this.baseUrl = normalizeBaseUrl(baseUrl);
     this.apiKey = Objects.requireNonNullElse(apiKey, "").trim();
   }
 
+  private static URI normalizeBaseUrl(String value) {
+    String raw = Objects.requireNonNull(value, "baseUrl").trim();
+    URI uri;
+    try {
+      uri = URI.create(raw);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("account API base URL must be valid HTTP(S)", error);
+    }
+    String scheme = uri.getScheme();
+    if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+        || uri.getHost() == null || uri.getUserInfo() != null
+        || uri.getQuery() != null || uri.getFragment() != null) {
+      throw new IllegalArgumentException(
+          "account API base URL must be HTTP(S) without credentials, query, or fragment");
+    }
+    return uri.normalize();
+  }
   CompletableFuture<Reply> sendEmailChallenge(UUID playerId, String username, String email) {
     JsonObject body = new JsonObject();
     body.addProperty("uuid", playerId.toString());
@@ -84,8 +101,16 @@ final class StarxAccountClient {
     return this.post(path, body);
   }
 
+  private URI resolveEndpoint(String path) {
+    if (path == null || !path.startsWith("/")) {
+      throw new IllegalArgumentException("account API path must be absolute");
+    }
+    String base = this.baseUrl.toString();
+    if (!base.endsWith("/")) base += "/";
+    return URI.create(base).resolve(path.substring(1));
+  }
   private CompletableFuture<Reply> post(String path, JsonObject body) {
-    HttpRequest request = HttpRequest.newBuilder(this.baseUrl.resolve(path))
+    HttpRequest request = HttpRequest.newBuilder(resolveEndpoint(path))
         .timeout(Duration.ofSeconds(8))
         .header("Content-Type", "application/json")
         .header("X-API-Key", this.apiKey)
