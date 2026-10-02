@@ -2,6 +2,11 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.0.38] - 2026-10-02
+
+### Security
+
+- GitHub Release 自动更新现在要求 universal JAR 资产携带格式正确的 SHA-256 digest；缺少摘要或摘要格式错误时 fail-closed，不再自动安装未校验 JAR。
 ## [1.0.37] - 2026-10-02
 
 ### Security

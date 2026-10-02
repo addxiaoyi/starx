@@ -111,6 +111,9 @@ public final class GitHubReleasesClient extends RepositoryClient {
         }
       }
 
+      if (downloadUrl == null || !sha256.matches("[0-9a-fA-F]{64}")) {
+        return Optional.empty();
+      }
       return Optional.of(new VersionInfo(version, name, body,
           downloadUrl != null ? URI.create(downloadUrl) : null, sha256));
     } catch (Exception error) {
