@@ -543,10 +543,24 @@ public static final class HttpConfig {
 
         private static String normalizeUrl(String value) {
             String url = value == null || value.isBlank() ? "https://star-web.top" : value.trim();
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                throw new IllegalArgumentException("auth.binding-website-url must be an HTTP(S) URL");
+            java.net.URI uri;
+            try {
+                uri = java.net.URI.create(url);
+            } catch (IllegalArgumentException error) {
+                throw new IllegalArgumentException("auth.binding-website-url must be a valid HTTP(S) URL", error);
             }
-            return url.replaceAll("/+$", "");
+            String scheme = uri.getScheme();
+            if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    || uri.getHost() == null || uri.getUserInfo() != null
+                    || uri.getQuery() != null || uri.getFragment() != null) {
+                throw new IllegalArgumentException(
+                    "auth.binding-website-url must be an HTTP(S) URL without credentials, query, or fragment");
+            }
+            String normalized = uri.toString();
+            while (normalized.endsWith("/")) {
+                normalized = normalized.substring(0, normalized.length() - 1);
+            }
+            return normalized;
         }
 
         public static AuthConfig defaults() {

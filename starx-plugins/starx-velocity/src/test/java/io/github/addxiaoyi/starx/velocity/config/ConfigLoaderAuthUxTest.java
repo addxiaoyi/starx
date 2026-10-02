@@ -3,6 +3,7 @@ package io.github.addxiaoyi.starx.velocity.config;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -36,6 +37,12 @@ final class ConfigLoaderAuthUxTest {
         () -> assertEquals("✦ StarMC 安全登录中心 ✦", ux.card().title()),
         () -> assertEquals("玩家：", ux.card().playerPrefix()),
         () -> assertEquals("分钟", ux.card().minuteUnit()));
+  }
+
+  @Test
+  void rejectsWebsiteUrlsWithCredentialsOrQueries() throws Exception {
+    assertThrows(IllegalArgumentException.class, () -> load("auth:\n  binding-website-url: https://user:pass@example.com/path\n"));
+    assertThrows(IllegalArgumentException.class, () -> load("auth:\n  binding-website-url: https://example.com/?token=secret\n"));
   }
 
   @Test
