@@ -102,13 +102,22 @@ final class StarxAccountClient {
   }
 
   private URI resolveEndpoint(String path) {
-    if (path == null || !path.startsWith("/") || path.startsWith("//")) {
+    if (!safeEndpointPath(path)) {
       throw new IllegalArgumentException("account API path must be absolute");
     }
     String base = this.baseUrl.toString();
     if (!base.endsWith("/")) base += "/";
     return URI.create(base).resolve(path.substring(1));
   }
+  private static boolean safeEndpointPath(String path) {
+    if (path == null || path.isBlank() || !path.startsWith("/") || path.startsWith("//")
+        || path.indexOf('?') >= 0 || path.indexOf('#') >= 0) return false;
+    for (String segment : path.split("/", -1)) {
+      if (segment.equals(".") || segment.equals("..")) return false;
+    }
+    return true;
+  }
+
   private CompletableFuture<Reply> post(String path, JsonObject body) {
     HttpRequest request = HttpRequest.newBuilder(resolveEndpoint(path))
         .timeout(Duration.ofSeconds(8))

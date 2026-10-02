@@ -2,6 +2,11 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.0.52] - 2026-10-02
+
+### Security
+
+- 后端账号 API endpoint helper 同样拒绝 dot-segment、query、fragment 和主机覆盖，统一所有内部 HTTP 路径边界。
 ## [1.0.51] - 2026-10-02
 
 ### Fixed
