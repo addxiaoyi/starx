@@ -8,7 +8,7 @@ plugins {
 
 allprojects {
     group = "io.github.addxiaoyi.starx"
-    version = "1.0.42"
+    version = "1.0.43"
 
     repositories {
         mavenCentral()

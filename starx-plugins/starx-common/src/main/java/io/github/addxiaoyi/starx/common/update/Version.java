@@ -35,6 +35,9 @@ public final class Version implements Comparable<Version> {
     }
     // 分离构建元数据
     int plus = text.indexOf('+');
+    if (plus == text.length() - 1) {
+      return null;
+    }
     if (plus >= 0) {
       text = text.substring(0, plus);
     }
@@ -44,6 +47,9 @@ public final class Version implements Comparable<Version> {
     if (dash >= 0) {
       prerelease = text.substring(dash + 1);
       text = text.substring(0, dash);
+    }
+    if (prerelease != null && !validPrerelease(prerelease)) {
+      return null;
     }
     String[] parts = text.split("\\.");
     if (parts.length < 1 || parts.length > 3) {
@@ -61,6 +67,20 @@ public final class Version implements Comparable<Version> {
       return null;
     }
   }
+
+  private static boolean validPrerelease(String value) {
+    String[] identifiers = value.split("\\.", -1);
+    for (String identifier : identifiers) {
+      if (identifier.isEmpty() || !identifier.matches("[0-9A-Za-z-]+")) {
+        return false;
+      }
+      if (identifier.matches("0[0-9]+")) {
+        return false;
+      }
+    }
+    return true;
+  }
+
 
   public boolean isPrerelease() {
     return !this.prerelease.isEmpty();
