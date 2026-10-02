@@ -74,7 +74,11 @@ public final class MavenCentralClient extends RepositoryClient {
         "https://search.maven.org/solrsearch/select?q=g:%22" + urlEncode(this.groupId)
             + "%22+AND+a:%22" + urlEncode(this.artifactId) + "%22&rows=20&wt=json&core=gav");
     try (InputStream stream = doFetch(uri)) {
-      String json = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+      byte[] body = stream.readNBytes(512 * 1024);
+      if (stream.read() != -1) {
+        return Optional.empty();
+      }
+      String json = new String(body, StandardCharsets.UTF_8);
       return parseResponse(json);
     } catch (IOException error) {
       return Optional.empty();
