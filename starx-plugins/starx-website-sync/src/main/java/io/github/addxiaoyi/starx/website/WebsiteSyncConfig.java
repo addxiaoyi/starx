@@ -105,7 +105,7 @@ public record WebsiteSyncConfig(
 
   /** Resolves an API path beneath the configured website base path. */
   public URI resolveEndpoint(String path) {
-    if (path == null || !path.startsWith("/") || path.startsWith("//")) {
+    if (!safeEndpointPath(path)) {
       throw new IllegalArgumentException("website-sync endpoint must be an absolute path");
     }
     String base = this.siteUrl.toString();
@@ -114,6 +114,16 @@ public record WebsiteSyncConfig(
     }
     return URI.create(base).resolve(path.substring(1));
   }
+
+  private static boolean safeEndpointPath(String path) {
+    if (path == null || path.isBlank() || !path.startsWith("/") || path.startsWith("//")
+        || path.indexOf('?') >= 0 || path.indexOf('#') >= 0) return false;
+    for (String segment : path.split("/", -1)) {
+      if (segment.equals(".") || segment.equals("..")) return false;
+    }
+    return true;
+  }
+
   public boolean needsEnrollment() {
     return this.enabled && !this.nodeToken.isPresent() && this.bootstrapToken.isPresent();
   }

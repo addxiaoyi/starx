@@ -352,7 +352,7 @@ public static final class HttpConfig {
         }
 
         public java.net.URI resolveEndpoint(String path) {
-            if (path == null || !path.startsWith("/") || path.startsWith("//")) {
+            if (!safeEndpointPath(path)) {
                 throw new IllegalArgumentException("webhook endpoint must be an absolute path");
             }
             String base = java.util.Objects.requireNonNullElse(this.url, "").trim();
@@ -367,7 +367,17 @@ public static final class HttpConfig {
             return java.net.URI.create(normalized).resolve(path.substring(1));
         }
 
+
+        private static boolean safeEndpointPath(String path) {
+            if (path == null || path.isBlank() || !path.startsWith("/") || path.startsWith("//")
+                    || path.indexOf('?') >= 0 || path.indexOf('#') >= 0) return false;
+            for (String segment : path.split("/", -1)) {
+                if (segment.equals(".") || segment.equals("..")) return false;
+            }
+            return true;
+        }
     }
+
     public static final class NapcatConfig {
         private final boolean enabled;
         private final String wsUrl;
