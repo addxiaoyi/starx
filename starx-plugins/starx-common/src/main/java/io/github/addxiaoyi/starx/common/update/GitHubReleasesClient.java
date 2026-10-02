@@ -95,18 +95,24 @@ public final class GitHubReleasesClient extends RepositoryClient {
 
       // 从 assets 中找到 jar 下载链接
       String downloadUrl = null;
+      String sha256 = "";
       JsonArray assets = root.getAsJsonArray("assets");
       for (JsonElement asset : assets) {
         JsonObject item = asset.getAsJsonObject();
         String assetName = item.get("name").getAsString();
         if (assetName.matches("starx-universal(?:-[0-9.]+)?\\.jar")) {
           downloadUrl = item.get("browser_download_url").getAsString();
+          if (item.has("digest") && item.get("digest").isJsonPrimitive()) {
+            String digest = item.get("digest").getAsString();
+            sha256 = digest.startsWith("sha256:")
+                ? digest.substring("sha256:".length()) : digest;
+          }
           break;
         }
       }
 
       return Optional.of(new VersionInfo(version, name, body,
-          downloadUrl != null ? URI.create(downloadUrl) : null));
+          downloadUrl != null ? URI.create(downloadUrl) : null, sha256));
     } catch (Exception error) {
       return Optional.empty();
     }

@@ -19,11 +19,20 @@ public abstract class RepositoryClient {
       Version version,
       String name,
       String rawJson,
-      URI downloadUrl
+      URI downloadUrl,
+      String sha256
   ) {
+    public VersionInfo(Version version, String name, String rawJson, URI downloadUrl) {
+      this(version, name, rawJson, downloadUrl, "");
+    }
+
     public boolean isNewerThan(String currentVersion) {
       Version current = Version.parse(currentVersion);
       return this.version.isNewerThan(current);
+    }
+
+    public boolean hasSha256() {
+      return this.sha256 != null && !this.sha256.isBlank();
     }
   }
 

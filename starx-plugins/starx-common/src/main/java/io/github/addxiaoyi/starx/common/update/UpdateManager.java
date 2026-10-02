@@ -7,6 +7,8 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -109,6 +111,11 @@ public final class UpdateManager {
             + info.version().raw() + ": " + result.errorMessage());
         return CheckResult.DOWNLOAD_FAILED;
       }
+      if (info.hasSha256() && !info.sha256().equalsIgnoreCase(result.sha256())) {
+        deleteQuietly(temp);
+        this.logger.accept("StarX update checksum mismatch for " + info.version().raw());
+        return CheckResult.DOWNLOAD_FAILED;
+      }
       // Prefer an atomic replacement, but keep updates working on filesystems without ATOMIC_MOVE.
       try {
         Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
@@ -141,15 +148,16 @@ public final class UpdateManager {
     }
   }
 
-  private record DownloadResult(boolean success, long bytes, String errorMessage) {
-    static DownloadResult ok(long bytes) {
-      return new DownloadResult(true, bytes, "");
+  private record DownloadResult(boolean success, long bytes, String errorMessage, String sha256) {
+    static DownloadResult ok(long bytes, String sha256) {
+      return new DownloadResult(true, bytes, "", sha256);
     }
 
     static DownloadResult fail(String message) {
-      return new DownloadResult(false, 0, message);
+      return new DownloadResult(false, 0, message, "");
     }
   }
+
 
   private DownloadResult fetchToFile(URI uri, Path target) throws IOException {
     java.net.http.HttpClient client = SHARED_HTTP_CLIENT;
@@ -168,6 +176,12 @@ public final class UpdateManager {
         }
         return DownloadResult.fail("HTTP " + response.statusCode());
       }
+      MessageDigest digest;
+      try {
+        digest = MessageDigest.getInstance("SHA-256");
+      } catch (java.security.NoSuchAlgorithmException error) {
+        throw new IOException("SHA-256 unavailable", error);
+      }
       long total = 0;
       try (InputStream body = response.body();
            var out = Files.newOutputStream(target)) {
@@ -175,6 +189,7 @@ public final class UpdateManager {
         int read;
         while ((read = body.read(buffer)) >= 0) {
           total += read;
+          digest.update(buffer, 0, read);
           if (total > this.maxJarSizeBytes) {
             return DownloadResult.fail("download exceeds size limit");
           }
@@ -184,7 +199,7 @@ public final class UpdateManager {
       if (total == 0) {
         return DownloadResult.fail("empty body");
       }
-      return DownloadResult.ok(total);
+      return DownloadResult.ok(total, HexFormat.of().formatHex(digest.digest()));
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       return DownloadResult.fail("interrupted");

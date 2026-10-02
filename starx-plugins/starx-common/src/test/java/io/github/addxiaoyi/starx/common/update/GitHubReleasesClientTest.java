@@ -13,13 +13,14 @@ final class GitHubReleasesClientTest {
     String json = """
         {"tag_name":"v1.0.28","name":"StarX 1.0.28","assets":[
           {"name":"starx-server-1.0.28.jar","browser_download_url":"https://example.invalid/server.jar"},
-          {"name":"starx-universal-1.0.28.jar","browser_download_url":"https://example.invalid/universal.jar"}
+          {"name":"starx-universal-1.0.28.jar","browser_download_url":"https://example.invalid/universal.jar","digest":"sha256:abc123"}
         ]}
         """;
 
     RepositoryClient.VersionInfo info = GitHubReleasesClient.parseResponse(json).orElseThrow();
 
     assertEquals(URI.create("https://example.invalid/universal.jar"), info.downloadUrl());
+    assertEquals("abc123", info.sha256());
   }
 
   @Test
