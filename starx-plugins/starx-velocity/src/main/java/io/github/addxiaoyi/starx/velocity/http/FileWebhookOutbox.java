@@ -68,9 +68,12 @@ public final class FileWebhookOutbox {
         if (pending == null || entries.putIfAbsent(pending.id(), pending) != null) {
           throw new IllegalStateException("Webhook outbox contains invalid entries: " + file);
         }
+        if (pending.body().getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES) {
+          throw new IllegalStateException("Webhook outbox entry exceeds 1 MiB: " + file);
+        }
         validateUrl(pending.url());
       }
-    } catch (IOException | JsonParseException | IllegalArgumentException error) {
+    } catch (IOException | RuntimeException error) {
       throw new IllegalStateException("Failed to read webhook outbox: " + file, error);
     }
   }

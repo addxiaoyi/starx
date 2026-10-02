@@ -36,6 +36,16 @@ class FileWebhookOutboxTest {
   }
 
   @Test
+  void malformedEntryFailsLoudlyInsteadOfCrashingWithNullPointer() throws Exception {
+    Path file = tempDir.resolve("webhook-outbox.json");
+    Files.writeString(file, "[{\"id\":null,\"url\":\"https://star-web.top/events\",\"body\":\"{}\",\"createdAt\":1}]");
+
+    IllegalStateException error = assertThrows(
+        IllegalStateException.class, () -> new FileWebhookOutbox(file));
+    assertTrue(error.getMessage().contains(file.toString()));
+  }
+
+  @Test
   void recoveryQuarantinesCorruptFileAndReturnsUsableOutbox() throws Exception {
     Path file = tempDir.resolve("webhook-outbox.json");
     Files.writeString(file, "not-json");
