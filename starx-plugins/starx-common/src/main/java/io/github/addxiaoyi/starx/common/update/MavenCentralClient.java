@@ -79,7 +79,7 @@ public final class MavenCentralClient extends RepositoryClient {
         return Optional.empty();
       }
       String json = new String(body, StandardCharsets.UTF_8);
-      return parseResponse(json);
+      return parseResponse(json).flatMap(this::withChecksum);
     } catch (IOException error) {
       return Optional.empty();
     }
@@ -129,11 +129,27 @@ public final class MavenCentralClient extends RepositoryClient {
       if (latestDoc == null || latestVersionStr == null) {
         return Optional.empty();
       }
-      return buildVersionInfo(versions.last(), latestVersionStr, latestDoc);
+      Optional<VersionInfo> parsed = buildVersionInfo(versions.last(), latestVersionStr, latestDoc);
+      return parsed;
     } catch (RuntimeException error) {
       return Optional.empty();
     }
   }
+
+  private Optional<VersionInfo> withChecksum(VersionInfo info) {
+    try (InputStream stream = this.doFetch(URI.create(info.downloadUrl().toString() + ".sha256"))) {
+      byte[] body = stream.readNBytes(8_192);
+      if (stream.read() != -1) return Optional.empty();
+      String text = new String(body, StandardCharsets.UTF_8).trim();
+      String digest = text.split("\\s+", 2)[0];
+      return digest.matches("[0-9a-fA-F]{64}")
+          ? Optional.of(new VersionInfo(info.version(), info.name(), info.rawJson(), info.downloadUrl(), digest))
+          : Optional.empty();
+    } catch (IOException error) {
+      return Optional.empty();
+    }
+  }
+
 
   private static Optional<VersionInfo> buildVersionInfo(
       Version version, String versionStr, JsonObject item) {
