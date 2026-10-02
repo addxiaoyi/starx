@@ -2,6 +2,12 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.0.35] - 2026-10-02
+
+### Fixed
+
+- Webhook 邮件网关现在复用 WebhookConfig 的子路径解析，修复网站部署在子目录时邮件请求丢失基础路径的问题。
+- Webhook 配置 URL 的 scheme、host、凭据边界在配置构造阶段统一校验；通用事件 webhook 仍保留合法 query，固定 API endpoint 会拒绝 query/fragment。
 ## [1.0.34] - 2026-10-02
 
 ### Fixed

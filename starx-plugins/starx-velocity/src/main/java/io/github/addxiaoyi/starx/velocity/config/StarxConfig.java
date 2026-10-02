@@ -312,8 +312,31 @@ public static final class HttpConfig {
         private final String secret;
 
         public WebhookConfig(String url, String secret) {
-            this.url = url;
-            this.secret = secret;
+            this.url = normalizeUrl(url);
+            this.secret = java.util.Objects.requireNonNullElse(secret, "").trim();
+        }
+
+        private static String normalizeUrl(String value) {
+            if (value == null || value.isBlank()) {
+                return "";
+            }
+            java.net.URI uri;
+            try {
+                uri = java.net.URI.create(value.trim());
+            } catch (IllegalArgumentException error) {
+                throw new IllegalArgumentException("webhook.url must be a valid HTTP(S) URL", error);
+            }
+            String scheme = uri.getScheme();
+            if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    || uri.getHost() == null || uri.getUserInfo() != null) {
+                throw new IllegalArgumentException(
+                    "webhook.url must be an HTTP(S) URL without credentials");
+            }
+            String normalized = uri.toString();
+            while (normalized.endsWith("/")) {
+                normalized = normalized.substring(0, normalized.length() - 1);
+            }
+            return normalized;
         }
 
         public String url() {
@@ -327,8 +350,24 @@ public static final class HttpConfig {
         public boolean isConfigured() {
             return this.url != null && !this.url.isBlank();
         }
-    }
 
+        public java.net.URI resolveEndpoint(String path) {
+            if (path == null || !path.startsWith("/")) {
+                throw new IllegalArgumentException("webhook endpoint must be an absolute path");
+            }
+            String base = java.util.Objects.requireNonNullElse(this.url, "").trim();
+            if (base.isEmpty()) {
+                throw new IllegalStateException("webhook URL is not configured");
+            }
+            java.net.URI baseUri = java.net.URI.create(base);
+            if (baseUri.getQuery() != null || baseUri.getFragment() != null) {
+                throw new IllegalArgumentException("webhook endpoint base must not contain query or fragment");
+            }
+            String normalized = base.endsWith("/") ? base : base + "/";
+            return java.net.URI.create(normalized).resolve(path.substring(1));
+        }
+
+    }
     public static final class NapcatConfig {
         private final boolean enabled;
         private final String wsUrl;

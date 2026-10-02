@@ -25,6 +25,23 @@ import java.nio.file.Path;
 class WebhookClientSignatureTest {
   @TempDir Path tempDir;
   @Test
+  void webhookConfigPreservesBasePathAndRejectsCredentials() {
+    StarxConfig.WebhookConfig config = new StarxConfig.WebhookConfig(
+        "https://example.com/starx", "secret");
+
+    assertEquals(
+        "https://example.com/starx/api/v1/plugin/email-challenge/send",
+        config.resolveEndpoint("/api/v1/plugin/email-challenge/send").toString());
+    assertThrows(IllegalArgumentException.class,
+        () -> new StarxConfig.WebhookConfig("https://user:pass@example.com/hook", "secret"));
+    StarxConfig.WebhookConfig queryConfig = new StarxConfig.WebhookConfig(
+        "https://example.com/hook?channel=qq", "secret");
+    assertThrows(IllegalArgumentException.class,
+        () -> queryConfig.resolveEndpoint("/api/v1/plugin/email-challenge/send"));
+  }
+
+
+  @Test
   void signsMethodTargetTimestampAndExactBody() {
     RecordingTransport transport = new RecordingTransport();
     Clock clock = Clock.fixed(Instant.parse("2026-07-23T12:00:00Z"), ZoneOffset.UTC);

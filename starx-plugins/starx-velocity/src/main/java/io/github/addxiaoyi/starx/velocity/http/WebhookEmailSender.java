@@ -25,7 +25,7 @@ final class WebhookEmailSender implements EmailSender {
     if (url.isEmpty() || this.secret.isEmpty()) {
       throw new IllegalArgumentException("网站邮件网关 webhook.url/secret 未配置");
     }
-    this.endpoint = URI.create(url).resolve("/api/v1/plugin/email-challenge/send");
+    this.endpoint = config.resolveEndpoint("/api/v1/plugin/email-challenge/send");
   }
 
   @Override
