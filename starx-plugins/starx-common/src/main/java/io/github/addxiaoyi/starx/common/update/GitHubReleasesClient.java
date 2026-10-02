@@ -71,7 +71,11 @@ public final class GitHubReleasesClient extends RepositoryClient {
     URI uri = URI.create(
         "https://api.github.com/repos/" + this.owner + "/" + this.repo + "/releases/latest");
     try (InputStream stream = doFetch(uri)) {
-      String json = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+      byte[] body = stream.readNBytes(512 * 1024);
+      if (stream.read() != -1) {
+        return Optional.empty();
+      }
+      String json = new String(body, StandardCharsets.UTF_8);
       return parseResponse(json);
     } catch (IOException error) {
       return Optional.empty();
@@ -95,7 +99,7 @@ public final class GitHubReleasesClient extends RepositoryClient {
       for (JsonElement asset : assets) {
         JsonObject item = asset.getAsJsonObject();
         String assetName = item.get("name").getAsString();
-        if (assetName.endsWith(".jar")) {
+        if (assetName.matches("starx-universal(?:-[0-9.]+)?\\.jar")) {
           downloadUrl = item.get("browser_download_url").getAsString();
           break;
         }

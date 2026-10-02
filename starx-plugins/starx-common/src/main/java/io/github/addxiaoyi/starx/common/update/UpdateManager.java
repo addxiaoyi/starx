@@ -109,9 +109,16 @@ public final class UpdateManager {
             + info.version().raw() + ": " + result.errorMessage());
         return CheckResult.DOWNLOAD_FAILED;
       }
-      // 原子替换，避免半写入文件被插件加载
+      // Prefer an atomic replacement, but keep updates working on filesystems without ATOMIC_MOVE.
       try {
         Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+        try {
+          Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException moveError) {
+          deleteQuietly(temp);
+          throw moveError;
+        }
       } catch (IOException moveError) {
         deleteQuietly(temp);
         throw moveError;
