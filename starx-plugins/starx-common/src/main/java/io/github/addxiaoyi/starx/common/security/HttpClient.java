@@ -18,7 +18,7 @@ public final class HttpClient {
     private static final Gson gson = new Gson();
     private static final java.net.http.HttpClient sharedClient = java.net.http.HttpClient.newBuilder()
             .connectTimeout(HttpConstants.DEFAULT_CONNECT_TIMEOUT)
-            .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+            .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
             .version(java.net.http.HttpClient.Version.HTTP_2)
             .build();
     private final java.net.http.HttpClient client;
