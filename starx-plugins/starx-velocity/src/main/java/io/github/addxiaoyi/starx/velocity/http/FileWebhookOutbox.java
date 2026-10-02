@@ -19,6 +19,7 @@ import java.util.UUID;
 public final class FileWebhookOutbox {
   private static final int MAX_PENDING = 4096;
   private static final int MAX_BODY_BYTES = 1024 * 1024;
+  private static final long MAX_FILE_BYTES = 64L * 1024 * 1024;
 
   private final Path file;
   private final Gson gson = new Gson();
@@ -60,6 +61,9 @@ public final class FileWebhookOutbox {
   private void load() {
     if (!Files.exists(file)) return;
     try {
+      if (Files.size(file) > MAX_FILE_BYTES) {
+        throw new IllegalStateException("Webhook outbox file exceeds 64 MiB: " + file);
+      }
       String json = Files.readString(file, StandardCharsets.UTF_8);
       PendingWebhook[] saved = gson.fromJson(json, PendingWebhook[].class);
       if (saved == null) throw new JsonParseException("expected an array");
