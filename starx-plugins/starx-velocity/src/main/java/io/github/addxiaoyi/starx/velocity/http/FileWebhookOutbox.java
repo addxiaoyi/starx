@@ -126,8 +126,9 @@ public final class FileWebhookOutbox {
     URI uri = URI.create(Objects.requireNonNull(value, "url"));
     boolean supportedScheme = "https".equalsIgnoreCase(uri.getScheme())
         || "http".equalsIgnoreCase(uri.getScheme());
-    if (!supportedScheme || uri.getHost() == null) {
-      throw new IllegalArgumentException("Webhook URL must be absolute HTTP(S)");
+    if (!supportedScheme || uri.getHost() == null || uri.getUserInfo() != null
+        || uri.getFragment() != null) {
+      throw new IllegalArgumentException("Webhook URL must be absolute HTTP(S) without credentials or fragment");
     }
   }
 }

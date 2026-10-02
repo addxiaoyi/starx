@@ -30,6 +30,7 @@ implements WebhookHttpTransport {
 
     @Override
     public CompletableFuture<Void> post(String url, String body, Map<String, String> headers) {
+        validateUrl(url);
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url)).timeout(HttpConstants.DEFAULT_REQUEST_TIMEOUT).POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
         headers.forEach(builder::header);
         return this.httpClient.sendAsync(builder.build(), HttpResponse.BodyHandlers.discarding())
@@ -39,5 +40,14 @@ implements WebhookHttpTransport {
                         throw new WebhookDeliveryException(status);
                     }
                 });
+    }
+
+    private static void validateUrl(String value) {
+        URI uri = URI.create(Objects.requireNonNull(value, "url"));
+        String scheme = uri.getScheme();
+        if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+            || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null) {
+            throw new IllegalArgumentException("Webhook URL must be HTTP(S) without credentials or fragment");
+        }
     }
 }
