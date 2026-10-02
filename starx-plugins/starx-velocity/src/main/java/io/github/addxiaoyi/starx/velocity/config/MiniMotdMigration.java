@@ -21,6 +21,8 @@ import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 
 final class MiniMotdMigration {
   private static final long MAX_CONFIG_BYTES = 1_048_576;
@@ -178,11 +180,24 @@ final class MiniMotdMigration {
       if (!safeRegularFile(path) || Files.size(path) > MAX_ICON_BYTES) {
         return false;
       }
-      BufferedImage image = ImageIO.read(path.toFile());
-      return image != null && image.getWidth() > 0 && image.getHeight() > 0
-          && image.getWidth() <= MAX_ICON_DIMENSION
-          && image.getHeight() <= MAX_ICON_DIMENSION
-          && (long) image.getWidth() * image.getHeight() <= MAX_ICON_PIXELS;
+      try (ImageInputStream input = ImageIO.createImageInputStream(path.toFile())) {
+        if (input == null) return false;
+        var readers = ImageIO.getImageReaders(input);
+        if (!readers.hasNext()) return false;
+        ImageReader reader = readers.next();
+        try {
+          reader.setInput(input, true, true);
+          int width = reader.getWidth(0);
+          int height = reader.getHeight(0);
+          if (width <= 0 || height <= 0 || width > MAX_ICON_DIMENSION
+              || height > MAX_ICON_DIMENSION || (long) width * height > MAX_ICON_PIXELS) {
+            return false;
+          }
+          return reader.read(0) != null;
+        } finally {
+          reader.dispose();
+        }
+      }
     } catch (IOException | RuntimeException ignored) {
       return false;
     }
