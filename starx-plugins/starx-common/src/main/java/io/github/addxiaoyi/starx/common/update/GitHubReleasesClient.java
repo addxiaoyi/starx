@@ -57,7 +57,11 @@ public final class GitHubReleasesClient extends RepositoryClient {
     }
     try {
       Optional<VersionInfo> result = this.doFetchLatestVersion();
-      this.circuitBreaker.recordSuccess();
+      if (result.isPresent()) {
+        this.circuitBreaker.recordSuccess();
+      } else {
+        this.circuitBreaker.recordFailure();
+      }
       return result;
     } catch (Exception error) {
       this.circuitBreaker.recordFailure();
