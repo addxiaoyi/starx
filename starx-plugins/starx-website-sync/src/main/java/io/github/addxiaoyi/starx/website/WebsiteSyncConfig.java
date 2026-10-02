@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.website;
 
+import java.util.Locale;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
@@ -173,7 +174,7 @@ public record WebsiteSyncConfig(
       int batchSize
   ) {
     public Textures {
-      source = Objects.requireNonNullElse(source, "skinsrestorer").trim().toLowerCase();
+      source = Objects.requireNonNullElse(source, "skinsrestorer").trim().toLowerCase(Locale.ROOT);
       if (!SOURCE.matcher(source).matches()) {
         throw new IllegalArgumentException(
             "website-sync.textures.source must match " + SOURCE.pattern());

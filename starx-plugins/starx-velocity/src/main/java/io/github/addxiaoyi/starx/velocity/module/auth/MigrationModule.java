@@ -194,7 +194,7 @@ public final class MigrationModule implements VelocityModule {
         String email = null;
         boolean premium = false;
 
-        switch (schemaMode.toLowerCase()) {
+        switch (schemaMode.toLowerCase(Locale.ROOT)) {
             case "authme" -> {
                 username = rs.getString("username");
                 uuidStr = rs.getString("uuid");
@@ -240,7 +240,7 @@ public final class MigrationModule implements VelocityModule {
     }
 
     private Connection getSourceConnection() throws Exception {
-        String backend = config.backend().toLowerCase();
+        String backend = config.backend().toLowerCase(Locale.ROOT);
         Map<String, Object> conn = config.connection();
 
         return switch (backend) {

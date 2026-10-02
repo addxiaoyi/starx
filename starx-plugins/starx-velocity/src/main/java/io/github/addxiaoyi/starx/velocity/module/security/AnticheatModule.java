@@ -22,6 +22,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.security;
 
+import java.util.Locale;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandMeta;
@@ -363,7 +364,7 @@ implements VelocityModule {
                 this.showSummary(source);
                 return;
             }
-            switch (subCommand = args[1].toLowerCase()) {
+            switch (subCommand = args[1].toLowerCase(Locale.ROOT)) {
                 case "stats": {
                     this.showSummary(source);
                     break;

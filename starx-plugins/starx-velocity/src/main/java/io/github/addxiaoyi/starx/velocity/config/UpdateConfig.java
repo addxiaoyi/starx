@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.velocity.config;
 
+import java.util.Locale;
 import java.time.Duration;
 
 /**
@@ -21,7 +22,7 @@ public record UpdateConfig(
   private static final int MAX_INTERVAL_MINUTES = 24 * 60;
 
   public UpdateConfig {
-    source = source == null || source.isBlank() ? SOURCE_GITHUB : source.trim().toLowerCase();
+    source = source == null || source.isBlank() ? SOURCE_GITHUB : source.trim().toLowerCase(Locale.ROOT);
     if (!SOURCE_GITHUB.equals(source) && !SOURCE_MAVEN.equals(source)) {
       throw new IllegalArgumentException("update.source must be github or maven");
     }

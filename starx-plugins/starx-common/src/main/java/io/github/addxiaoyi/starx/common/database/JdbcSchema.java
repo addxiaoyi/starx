@@ -62,7 +62,7 @@ final class JdbcSchema {
       if (columns.next()) return true;
     }
     try (ResultSet columns = connection.getMetaData().getColumns(
-        connection.getCatalog(), null, table.toUpperCase(), column.toUpperCase())) {
+        connection.getCatalog(), null, table.toUpperCase(Locale.ROOT), column.toUpperCase(Locale.ROOT))) {
       return columns.next();
     }
   }

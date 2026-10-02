@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.velocity.http;
 
+import java.util.Locale;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -496,7 +497,7 @@ public final class HttpApiServer implements RouteRegistrar {
             return;
         }
         String path = exchange.getRequestURI().getPath();
-        String method = exchange.getRequestMethod().toUpperCase();
+        String method = exchange.getRequestMethod().toUpperCase(Locale.ROOT);
         Map<String, RouteHandler> methods = this.routes.get(path);
         RouteHandler handler = methods != null ? methods.get(method) : null;
         if (handler == null) {

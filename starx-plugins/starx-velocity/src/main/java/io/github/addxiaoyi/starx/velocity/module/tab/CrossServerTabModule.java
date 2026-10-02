@@ -267,7 +267,7 @@ public final class CrossServerTabModule implements VelocityModule {
       if (this.latency < 0 || other.latency < 0) {
         return this.latency != other.latency;
       }
-      return Math.abs(this.latency - other.latency) >= LATENCY_CHANGE_THRESHOLD_MS;
+      return Math.abs((long) this.latency - other.latency) >= LATENCY_CHANGE_THRESHOLD_MS;
     }
   }
 }

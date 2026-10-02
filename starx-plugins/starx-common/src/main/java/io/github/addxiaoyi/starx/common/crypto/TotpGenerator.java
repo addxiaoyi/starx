@@ -3,6 +3,7 @@
  */
 package io.github.addxiaoyi.starx.common.crypto;
 
+import java.util.Locale;
 import com.eatthepath.otp.TimeBasedOneTimePasswordGenerator;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -152,7 +153,7 @@ public final class TotpGenerator {
         }
 
         static byte[] decode(String input) {
-            String normalized = input.toUpperCase().replace("=", "");
+            String normalized = input.toUpperCase(Locale.ROOT).replace("=", "");
             int outputLength = normalized.length() * 5 / 8;
             byte[] output = new byte[outputLength];
             int buffer = 0;

@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.velocity.module.proxytools;
 
+import java.util.Locale;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.SimpleCommand;
@@ -112,7 +113,7 @@ public final class TutorialModule implements VelocityModule {
         show(player);
         return;
       }
-      switch (args[0].toLowerCase()) {
+      switch (args[0].toLowerCase(Locale.ROOT)) {
         case "start", "reset" -> { progress.reset(player.getUniqueId().toString()); show(player); }
         case "next" -> { progress.advance(player.getUniqueId().toString()); show(player); }
         case "skip" -> { progress.complete(player.getUniqueId().toString()); show(player); }

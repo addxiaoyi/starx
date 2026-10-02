@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.runtime.autocomplete;
 
+import java.util.Locale;
 import io.github.addxiaoyi.starx.api.extension.StarxAutoCompleter;
 import io.github.addxiaoyi.starx.api.extension.StarxService;
 import java.util.List;
@@ -43,7 +44,7 @@ public final class CommandCompleter implements StarxAutoCompleter {
           "/starx config"
       );
     }
-    String lower = input.toLowerCase();
+    String lower = input.toLowerCase(Locale.ROOT);
     if (lower.startsWith("/starx")) {
       return List.of(
           "/starx reload",

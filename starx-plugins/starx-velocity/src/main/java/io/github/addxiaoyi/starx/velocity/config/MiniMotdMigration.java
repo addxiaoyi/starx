@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.velocity.config;
 
+import java.util.Locale;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
 import com.typesafe.config.ConfigFactory;
@@ -162,7 +163,7 @@ final class MiniMotdMigration {
     }
     try (var stream = Files.list(icons)) {
       List<Path> candidates = stream
-          .filter(path -> path.getFileName().toString().toLowerCase().endsWith(".png"))
+          .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png"))
           .filter(MiniMotdMigration::validPng)
           .sorted(Comparator.comparing(path -> path.getFileName().toString()))
           .toList();

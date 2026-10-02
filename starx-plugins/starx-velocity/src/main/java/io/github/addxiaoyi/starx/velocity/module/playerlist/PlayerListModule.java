@@ -396,7 +396,7 @@ public final class PlayerListModule implements VelocityModule {
       DisplayedLatency previous = this.displayedLatency.get(playerId);
       boolean changedEnough = previous == null
           || previous.smoothedPing() < 0 != latency.smoothedPing() < 0
-          || Math.abs(previous.smoothedPing() - latency.smoothedPing()) >= 5
+          || Math.abs((long) previous.smoothedPing() - latency.smoothedPing()) >= 5
           || now - previous.displayedAtNanos() >= Duration.ofSeconds(1).toNanos();
       if (changedEnough && this.needsLatencyData) {
         this.displayedLatency.put(playerId, new DisplayedLatency(latency.smoothedPing(), now));

@@ -14,6 +14,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.proxytools;
 
+import java.util.Locale;
 import io.github.addxiaoyi.starx.api.compat.CompatibilityCheck;
 import io.github.addxiaoyi.starx.api.compat.CompatibilityReport;
 import io.github.addxiaoyi.starx.api.compat.CompatibilityStatus;
@@ -112,7 +113,7 @@ implements VelocityModule {
                 this.sendHelp(invocation);
                 return;
             }
-            switch (args[0].toLowerCase()) {
+            switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "info": {
                     this.sendInfo(invocation);
                     break;

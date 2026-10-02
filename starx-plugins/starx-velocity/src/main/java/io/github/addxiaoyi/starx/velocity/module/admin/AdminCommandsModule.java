@@ -16,6 +16,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.admin;
 
+import java.util.Locale;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandMeta;
@@ -124,7 +125,7 @@ implements VelocityModule {
         @Override public void execute(SimpleCommand.Invocation invocation) {
             String[] args = invocation.arguments();
             if (args.length == 0) { invocation.source().sendMessage(Component.text("用法：/sxadmin <report|history|note|notes|announce|bind|setpassword> ...", NamedTextColor.YELLOW)); return; }
-            SimpleCommand delegate = switch (args[0].toLowerCase()) {
+            SimpleCommand delegate = switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "report" -> new ReportCommand(); case "history" -> new HistoryCommand();
                 case "note" -> new NoteCommand(); case "notes" -> new NotesCommand();
                 case "announce" -> new AnnounceCommand(); case "bind" -> new BindCommand(); case "setpassword" -> new SetPasswordCommand(); default -> null;
@@ -136,10 +137,10 @@ implements VelocityModule {
             String[] args = invocation.arguments();
             List<String> actions = List.of("report", "history", "note", "notes", "announce", "bind", "setpassword");
             if (args.length <= 1) {
-                String prefix = args.length == 0 ? "" : args[0].toLowerCase();
+                String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
                 return actions.stream().filter(action -> action.startsWith(prefix)).toList();
             }
-            SimpleCommand delegate = switch (args[0].toLowerCase()) {
+            SimpleCommand delegate = switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "report" -> new ReportCommand(); case "history" -> new HistoryCommand();
                 case "note" -> new NoteCommand(); case "notes" -> new NotesCommand();
                 case "announce" -> new AnnounceCommand(); case "bind" -> new BindCommand(); case "setpassword" -> new SetPasswordCommand(); default -> null;
@@ -168,10 +169,10 @@ implements VelocityModule {
 
         @Override public List<String> suggest(SimpleCommand.Invocation inv) {
             if (inv.arguments().length <= 1) {
-                String prefix = inv.arguments().length == 0 ? "" : inv.arguments()[0].toLowerCase();
+                String prefix = inv.arguments().length == 0 ? "" : inv.arguments()[0].toLowerCase(Locale.ROOT);
                 return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream()
                     .map(Player::getUsername)
-                    .filter(name -> name.toLowerCase().startsWith(prefix))
+                    .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
                     .toList();
             }
             return List.of();
@@ -205,7 +206,7 @@ implements VelocityModule {
                 return;
             }
             String targetName = args[0];
-            String category = args[1].toUpperCase();
+            String category = args[1].toUpperCase(Locale.ROOT);
             if (!REPORT_CATEGORIES.contains(category)) {
                 inv.source().sendMessage((Component)Component.text((String)("无效分类，可选值：" + String.join((CharSequence)", ", REPORT_CATEGORIES)), (TextColor)NamedTextColor.RED));
                 return;
@@ -227,12 +228,12 @@ implements VelocityModule {
         public List<String> suggest(SimpleCommand.Invocation inv) {
             String[] args = (String[])inv.arguments();
             if (args.length <= 1) {
-                String prefix = args.length == 0 ? "" : args[0].toLowerCase();
-                return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase().startsWith(prefix)).collect(Collectors.toList());
+                String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
+                return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase(Locale.ROOT).startsWith(prefix)).collect(Collectors.toList());
             }
             if (args.length == 2) {
-                String prefix = args[1].toLowerCase();
-                return REPORT_CATEGORIES.stream().filter(c -> c.toLowerCase().startsWith(prefix)).collect(Collectors.toList());
+                String prefix = args[1].toLowerCase(Locale.ROOT);
+                return REPORT_CATEGORIES.stream().filter(c -> c.toLowerCase(Locale.ROOT).startsWith(prefix)).collect(Collectors.toList());
             }
             return List.of();
         }
@@ -285,8 +286,8 @@ implements VelocityModule {
 
         public List<String> suggest(SimpleCommand.Invocation inv) {
             if (((String[])inv.arguments()).length <= 1) {
-                String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase();
-                return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase().startsWith(prefix)).collect(Collectors.toList());
+                String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase(Locale.ROOT);
+                return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase(Locale.ROOT).startsWith(prefix)).collect(Collectors.toList());
             }
             return List.of();
         }
@@ -317,7 +318,7 @@ implements VelocityModule {
             String severity = "INFO";
             int contentEnd = args.length;
             if (args.length >= 4 && "-s".equalsIgnoreCase(args[args.length - 2])) {
-                severity = args[args.length - 1].toUpperCase();
+                severity = args[args.length - 1].toUpperCase(Locale.ROOT);
                 if (!NOTE_SEVERITIES.contains(severity)) {
                     inv.source().sendMessage((Component)Component.text((String)("无效严重级别：" + severity), (TextColor)NamedTextColor.RED));
                     return;
@@ -343,8 +344,8 @@ implements VelocityModule {
         public List<String> suggest(SimpleCommand.Invocation inv) {
             String[] args = (String[])inv.arguments();
             if (args.length <= 1) {
-                String prefix = args.length == 0 ? "" : args[0].toLowerCase();
-                return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase().startsWith(prefix)).collect(Collectors.toList());
+                String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
+                return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase(Locale.ROOT).startsWith(prefix)).collect(Collectors.toList());
             }
             if (args.length >= 2 && "-s".equalsIgnoreCase(args[args.length - 1])) {
                 return NOTE_SEVERITIES;
@@ -387,8 +388,8 @@ implements VelocityModule {
         }
 
         public List<String> suggest(SimpleCommand.Invocation inv) {
-            String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase();
-            return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase().startsWith(prefix)).collect(Collectors.toList());
+            String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase(Locale.ROOT);
+            return AdminCommandsModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase(Locale.ROOT).startsWith(prefix)).collect(Collectors.toList());
         }
     }
 
@@ -462,7 +463,7 @@ implements VelocityModule {
 
         public List<String> suggest(SimpleCommand.Invocation inv) {
             if (((String[])inv.arguments()).length <= 1) {
-                String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase();
+                String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase(Locale.ROOT);
                 return List.of("qq").stream().filter(s -> s.startsWith(prefix)).collect(Collectors.toList());
             }
             return List.of();

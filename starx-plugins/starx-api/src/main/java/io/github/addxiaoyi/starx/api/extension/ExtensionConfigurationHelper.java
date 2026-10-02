@@ -17,6 +17,7 @@
 
 package io.github.addxiaoyi.starx.api.extension;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -165,7 +166,7 @@ public interface ExtensionConfigurationHelper {
         String value = getString(config, key, defaultValue.name());
         try {
             @SuppressWarnings("unchecked")
-            T result = (T) Enum.valueOf((Class<T>) defaultValue.getClass(), value.toUpperCase());
+            T result = (T) Enum.valueOf((Class<T>) defaultValue.getClass(), value.toUpperCase(Locale.ROOT));
             return result;
         } catch (IllegalArgumentException e) {
             return defaultValue;

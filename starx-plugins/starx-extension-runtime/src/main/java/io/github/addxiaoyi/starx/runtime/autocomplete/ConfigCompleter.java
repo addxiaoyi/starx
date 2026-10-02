@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.runtime.autocomplete;
 
+import java.util.Locale;
 import io.github.addxiaoyi.starx.api.extension.StarxAutoCompleter;
 import java.util.List;
 
@@ -39,7 +40,7 @@ public final class ConfigCompleter implements StarxAutoCompleter {
           "extension.auto-reload"
       );
     }
-    String lower = input.toLowerCase();
+    String lower = input.toLowerCase(Locale.ROOT);
     return List.of(
         "database." + lower,
         "server." + lower,

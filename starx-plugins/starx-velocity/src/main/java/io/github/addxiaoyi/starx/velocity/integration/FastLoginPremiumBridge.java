@@ -31,10 +31,12 @@ public final class FastLoginPremiumBridge {
       Object session = map.get(address);
       if (session == null) return false;
       Object profile = invoke(session, "getProfile");
+      if (profile == null) return false;
       boolean premium = (boolean) invoke(profile, "isPremium");
       UUID verifiedUuid = (UUID) invoke(profile, "getId");
       String verifiedName = (String) invoke(profile, "getName");
-      return premium && player.getUniqueId().equals(verifiedUuid)
+      return premium && verifiedUuid != null && verifiedName != null
+          && player.getUniqueId().equals(verifiedUuid)
           && player.getUsername().equalsIgnoreCase(verifiedName);
     } catch (ReflectiveOperationException | ClassCastException error) {
       logger.log(Level.FINE, "FastLogin premium state unavailable; keeping password authentication", error);

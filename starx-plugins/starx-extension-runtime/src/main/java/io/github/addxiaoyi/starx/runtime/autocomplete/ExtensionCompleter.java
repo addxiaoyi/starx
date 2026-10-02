@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.runtime.autocomplete;
 
+import java.util.Locale;
 import io.github.addxiaoyi.starx.api.extension.StarxAutoCompleter;
 import io.github.addxiaoyi.starx.api.extension.StarxExtensionSnapshot;
 import io.github.addxiaoyi.starx.api.extension.StarxService;
@@ -39,9 +40,9 @@ public final class ExtensionCompleter implements StarxAutoCompleter {
           .map(s -> s.descriptor().id())
           .collect(Collectors.toList());
     }
-    String lower = input.toLowerCase();
+    String lower = input.toLowerCase(Locale.ROOT);
     return extensions.stream()
-        .filter(s -> s.descriptor().id().toLowerCase().contains(lower))
+        .filter(s -> s.descriptor().id().toLowerCase(Locale.ROOT).contains(lower))
         .map(s -> s.descriptor().id())
         .collect(Collectors.toList());
   }

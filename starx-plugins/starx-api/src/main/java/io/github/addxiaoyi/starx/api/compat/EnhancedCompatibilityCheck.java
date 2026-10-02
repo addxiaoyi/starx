@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.api.compat;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -100,7 +101,7 @@ public record EnhancedCompatibilityCheck(
    * 获取简短的诊断代码。
    */
   public String diagnosticCode() {
-    return component.toUpperCase().replace("-", "_") + "_" + status.name();
+    return component.toUpperCase(Locale.ROOT).replace("-", "_") + "_" + status.name();
   }
 
   /**

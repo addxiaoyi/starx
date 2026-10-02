@@ -2,6 +2,7 @@
  * Decompiled with CFR 0.152.
  */
 package io.github.addxiaoyi.starx.common.config;
+import java.util.Locale;
 
 public record DatabaseConfig(String type, String host, int port, String database, String username, String password, String url, int poolMaxSize, long connectionTimeoutMs, long poolTimeoutMs) {
     public DatabaseConfig {
@@ -33,7 +34,7 @@ public record DatabaseConfig(String type, String host, int port, String database
         if (this.hasUrl()) {
             return this.url;
         }
-        return switch (this.type.toLowerCase()) {
+        return switch (this.type.toLowerCase(Locale.ROOT)) {
             case "h2" -> "jdbc:h2:mem:" + this.database;
             case "mysql" -> "jdbc:mysql://" + this.host + ":" + this.port + "/" + this.database + "?useSSL=false&serverTimezone=UTC";
             case "postgresql" -> "jdbc:postgresql://" + this.host + ":" + this.port + "/" + this.database;

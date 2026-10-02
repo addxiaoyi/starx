@@ -3,6 +3,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.http.admin;
 
+import java.util.Locale;
 import io.github.addxiaoyi.starx.common.database.JdbcStaffNoteRepository;
 import io.github.addxiaoyi.starx.common.model.StaffNote;
 import io.github.addxiaoyi.starx.velocity.http.JsonHttpExchange;
@@ -83,7 +84,7 @@ implements AdminHandler {
             ctx.status(400).json(Map.of("error", e.getMessage()));
             return;
         }
-        String string = severity = req.severity != null ? req.severity.toUpperCase() : "INFO";
+        String string = severity = req.severity != null ? req.severity.toUpperCase(Locale.ROOT) : "INFO";
         if (!(severity.equals("INFO") || severity.equals("WARNING") || severity.equals("CRITICAL"))) {
             ctx.status(400).json(Map.of("error", "severity must be INFO, WARNING, or CRITICAL"));
             return;

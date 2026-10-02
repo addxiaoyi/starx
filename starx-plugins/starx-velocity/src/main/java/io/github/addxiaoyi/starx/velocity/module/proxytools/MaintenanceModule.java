@@ -14,6 +14,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.proxytools;
 
+import java.util.Locale;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.SimpleCommand;
@@ -190,7 +191,7 @@ implements VelocityModule {
                 invocation.source().sendMessage((Component)Component.text((String)"用法：/sxmaintain <on|off|status>"));
                 return;
             }
-            switch (args[0].toLowerCase()) {
+            switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "on": {
                     MaintenanceModule.this.setEnabled(true);
                     break;
@@ -218,7 +219,7 @@ implements VelocityModule {
         public List<String> suggest(SimpleCommand.Invocation invocation) {
             String[] args = invocation.arguments();
             if (args.length > 1) return List.of();
-            String prefix = args.length == 0 ? "" : args[0].toLowerCase();
+            String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
             return List.of("on", "off", "status").stream()
                 .filter(option -> option.startsWith(prefix))
                 .toList();

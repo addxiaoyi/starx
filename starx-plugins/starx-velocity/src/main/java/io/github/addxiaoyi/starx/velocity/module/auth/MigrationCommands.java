@@ -11,6 +11,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.auth;
 
+import java.util.Locale;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.SimpleCommand;
@@ -71,7 +72,7 @@ implements VelocityModule {
                 this.showHelp(invocation);
                 return;
             }
-            switch (args[0].toLowerCase()) {
+            switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "import": {
                     this.handleImport(invocation, args);
                     break;
@@ -128,7 +129,7 @@ implements VelocityModule {
                 this.showMigrateHelp(invocation);
                 return;
             }
-            String source = args[1].toLowerCase();
+            String source = args[1].toLowerCase(Locale.ROOT);
             if ("starvc".equals(source)) {
                 boolean dryRun = false;
                 for (int i = 2; i < args.length; ++i) {

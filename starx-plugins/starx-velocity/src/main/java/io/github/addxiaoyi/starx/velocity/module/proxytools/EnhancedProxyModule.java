@@ -17,6 +17,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.proxytools;
 
+import java.util.Locale;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.SimpleCommand;
@@ -94,7 +95,7 @@ implements VelocityModule {
         @Override public void execute(SimpleCommand.Invocation invocation) {
             String[] args = invocation.arguments();
             if (args.length == 0) { invocation.source().sendMessage(Component.text("用法：/sxnet <list|find|send|alert|ping|diagnose|drain> ...", NamedTextColor.YELLOW)); return; }
-            String action = args[0].toLowerCase();
+            String action = args[0].toLowerCase(Locale.ROOT);
             SimpleCommand delegate = switch (action) {
                 case "list" -> glistCommand;
                 case "find" -> findCommand;
@@ -112,10 +113,10 @@ implements VelocityModule {
             String[] args = invocation.arguments();
             List<String> actions = List.of("list", "find", "send", "alert", "ping", "diagnose", "drain");
             if (args.length <= 1) {
-                String prefix = args.length == 0 ? "" : args[0].toLowerCase();
+                String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
                 return actions.stream().filter(action -> action.startsWith(prefix)).toList();
             }
-            SimpleCommand delegate = switch (args[0].toLowerCase()) {
+            SimpleCommand delegate = switch (args[0].toLowerCase(Locale.ROOT)) {
                 case "list" -> glistCommand; case "find" -> findCommand; case "send" -> sendCommand;
                 case "alert" -> alertCommand; case "ping" -> pingCommand; case "diagnose" -> diagnoseCommand;
                 case "drain" -> kickAllCommand; default -> null;
@@ -272,7 +273,7 @@ implements VelocityModule {
 
         public List<String> suggest(SimpleCommand.Invocation invocation) {
             String lastArg = ((String[])invocation.arguments()).length > 0 ? ((String[])invocation.arguments())[((String[])invocation.arguments()).length - 1] : "";
-            return EnhancedProxyModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(name -> name.toLowerCase().startsWith(lastArg.toLowerCase())).sorted().collect(Collectors.toList());
+            return EnhancedProxyModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(name -> name.toLowerCase(Locale.ROOT).startsWith(lastArg.toLowerCase(Locale.ROOT))).sorted().collect(Collectors.toList());
         }
     }
 
@@ -356,10 +357,10 @@ implements VelocityModule {
             String[] args = (String[])invocation.arguments();
             if (args.length <= 1) {
                 String lastArg = args.length == 0 ? "" : args[0];
-                return EnhancedProxyModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(name -> name.toLowerCase().startsWith(lastArg.toLowerCase())).sorted().collect(Collectors.toList());
+                return EnhancedProxyModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(name -> name.toLowerCase(Locale.ROOT).startsWith(lastArg.toLowerCase(Locale.ROOT))).sorted().collect(Collectors.toList());
             }
             String lastArg = args[args.length - 1];
-            return EnhancedProxyModule.this.plugin.proxy().getAllServers().stream().map(s -> s.getServerInfo().getName()).filter(name -> name.toLowerCase().startsWith(lastArg.toLowerCase())).sorted().collect(Collectors.toList());
+            return EnhancedProxyModule.this.plugin.proxy().getAllServers().stream().map(s -> s.getServerInfo().getName()).filter(name -> name.toLowerCase(Locale.ROOT).startsWith(lastArg.toLowerCase(Locale.ROOT))).sorted().collect(Collectors.toList());
         }
     }
 
@@ -425,7 +426,7 @@ implements VelocityModule {
 
         public List<String> suggest(SimpleCommand.Invocation invocation) {
             String lastArg = ((String[])invocation.arguments()).length > 0 ? ((String[])invocation.arguments())[((String[])invocation.arguments()).length - 1] : "";
-            return EnhancedProxyModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(name -> name.toLowerCase().startsWith(lastArg.toLowerCase())).sorted().collect(Collectors.toList());
+            return EnhancedProxyModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(name -> name.toLowerCase(Locale.ROOT).startsWith(lastArg.toLowerCase(Locale.ROOT))).sorted().collect(Collectors.toList());
         }
     }
 
@@ -511,7 +512,7 @@ implements VelocityModule {
 
         public List<String> suggest(SimpleCommand.Invocation invocation) {
             String lastArg = ((String[])invocation.arguments()).length > 0 ? ((String[])invocation.arguments())[((String[])invocation.arguments()).length - 1] : "";
-            return EnhancedProxyModule.this.plugin.proxy().getAllServers().stream().map(s -> s.getServerInfo().getName()).filter(name -> name.toLowerCase().startsWith(lastArg.toLowerCase())).sorted().collect(Collectors.toList());
+            return EnhancedProxyModule.this.plugin.proxy().getAllServers().stream().map(s -> s.getServerInfo().getName()).filter(name -> name.toLowerCase(Locale.ROOT).startsWith(lastArg.toLowerCase(Locale.ROOT))).sorted().collect(Collectors.toList());
         }
     }
 

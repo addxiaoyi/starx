@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.common.auth.uniauth;
 
+import java.util.Locale;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -152,7 +153,7 @@ public final class UniAuthClient {
 
   private static boolean isIntegrityFailure(RuntimeException exception) {
     String message = exception.getMessage();
-    return message != null && message.toLowerCase().contains("checksum");
+    return message != null && message.toLowerCase(Locale.ROOT).contains("checksum");
   }
 
   public CompletableFuture<LoginResponse> login(String username, String password) {

@@ -17,6 +17,7 @@
  */
 package io.github.addxiaoyi.starx.velocity.module.vote;
 
+import java.util.Locale;
 import com.velocitypowered.api.command.Command;
 import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandSource;
@@ -139,8 +140,8 @@ implements VelocityModule {
 
         public List<String> suggest(SimpleCommand.Invocation inv) {
             if (((String[])inv.arguments()).length <= 1) {
-                String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase();
-                return VoteModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase().startsWith(prefix)).collect(Collectors.toList());
+                String prefix = ((String[])inv.arguments()).length == 0 ? "" : ((String[])inv.arguments())[0].toLowerCase(Locale.ROOT);
+                return VoteModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername).filter(n -> n.toLowerCase(Locale.ROOT).startsWith(prefix)).collect(Collectors.toList());
             }
             return List.of();
         }
@@ -177,7 +178,7 @@ implements VelocityModule {
                 inv.source().sendMessage((Component)Component.text((String)"用法：/sxvote <yes|no>", (TextColor)NamedTextColor.YELLOW));
                 return;
             }
-            String choice = args[0].toLowerCase();
+            String choice = args[0].toLowerCase(Locale.ROOT);
             if (!"yes".equals(choice) && !"no".equals(choice)) {
                 inv.source().sendMessage((Component)Component.text((String)"请使用 yes 或 no 投票。", (TextColor)NamedTextColor.RED));
                 return;
@@ -206,7 +207,7 @@ implements VelocityModule {
                 inv.source().sendMessage((Component)Component.text((String)"你已经投过票了。", (TextColor)NamedTextColor.RED));
                 return;
             }
-            inv.source().sendMessage((Component)Component.text((String)("投票成功：" + choice.toUpperCase()), (TextColor)NamedTextColor.GREEN));
+            inv.source().sendMessage((Component)Component.text((String)("投票成功：" + choice.toUpperCase(Locale.ROOT)), (TextColor)NamedTextColor.GREEN));
             int yesCount = VoteModule.this.voteRepo.countYes(vote.id());
             Optional<StaffVote> updated = VoteModule.this.voteRepo.findById(vote.id());
             if (updated.isPresent() && yesCount >= (current = updated.get()).requiredYes()) {
@@ -222,14 +223,14 @@ implements VelocityModule {
         public List<String> suggest(SimpleCommand.Invocation inv) {
             String[] args = (String[]) inv.arguments();
             if (args.length <= 1) {
-                String prefix = args.length == 0 ? "" : args[0].toLowerCase();
+                String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
                 return List.of("start", "info", "yes", "no").stream()
                     .filter(s -> s.startsWith(prefix)).collect(Collectors.toList());
             }
             if ("start".equalsIgnoreCase(args[0]) && args.length == 2) {
-                String prefix = args[1].toLowerCase();
+                String prefix = args[1].toLowerCase(Locale.ROOT);
                 return VoteModule.this.plugin.proxy().getAllPlayers().stream().map(Player::getUsername)
-                    .filter(n -> n.toLowerCase().startsWith(prefix)).collect(Collectors.toList());
+                    .filter(n -> n.toLowerCase(Locale.ROOT).startsWith(prefix)).collect(Collectors.toList());
             }
             return List.of();
         }
