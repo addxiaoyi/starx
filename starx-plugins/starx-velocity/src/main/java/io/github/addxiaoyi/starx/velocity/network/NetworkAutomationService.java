@@ -963,7 +963,7 @@ public final class NetworkAutomationService implements AutoCloseable {
     return value
         .replaceAll("(?i)(authorization\\s*[:=]\\s*)bearer\\s+[^\\s,;]+", "$1Bearer <redacted>")
         .replaceAll(
-            "(?i)((?:token|secret|password|authorization)\\s*[:=]\\s*)"
+            "(?i)((?:token|secret|password|authorization|api[-_]?key|access[-_]?token|client[-_]?token|private[-_]?key)\\s*[:=]\\s*)"
                 + "(?:\\\"[^\\\"]*\\\"|\'[^\']*\'|[^\\s,;]+)",
             "$1<redacted>");
   }

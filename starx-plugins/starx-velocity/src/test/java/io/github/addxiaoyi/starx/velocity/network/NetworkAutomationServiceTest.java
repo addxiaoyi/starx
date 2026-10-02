@@ -27,6 +27,18 @@ final class NetworkAutomationServiceTest {
   Path temporary;
 
   @Test
+  void commandSummaryRedactsApiKeysAndAccessTokens() {
+    NetworkAutomationService.CommandResult result = new NetworkAutomationService.CommandResult(
+        1, "api-key=secret access_token=opaque", false, "");
+
+    String summary = result.summary();
+
+    assertFalse(summary.contains("secret"));
+    assertFalse(summary.contains("opaque"));
+    assertTrue(summary.contains("<redacted>"));
+  }
+
+  @Test
   void managedDetectionWritesRemotePortZeroWithoutExecutingAnything() throws Exception {
     List<List<String>> commands = new ArrayList<>();
     NetworkAutomationConfig config = config(
