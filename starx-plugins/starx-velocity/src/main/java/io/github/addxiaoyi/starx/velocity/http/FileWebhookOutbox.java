@@ -42,7 +42,12 @@ public final class FileWebhookOutbox {
     PendingWebhook pending = new PendingWebhook(
         UUID.randomUUID().toString(), url, body, createdAt);
     entries.put(pending.id(), pending);
-    persist();
+    try {
+      persist();
+    } catch (RuntimeException error) {
+      entries.remove(pending.id());
+      throw error;
+    }
     return pending;
   }
 
@@ -50,7 +55,12 @@ public final class FileWebhookOutbox {
     Objects.requireNonNull(id, "id");
     PendingWebhook removed = entries.remove(id);
     if (removed == null) return false;
-    persist();
+    try {
+      persist();
+    } catch (RuntimeException error) {
+      entries.put(id, removed);
+      throw error;
+    }
     return true;
   }
 
@@ -87,7 +97,11 @@ public final class FileWebhookOutbox {
     Path temp = file.resolveSibling(file.getFileName() + ".tmp");
     try {
       if (parent != null) Files.createDirectories(parent);
-      Files.writeString(temp, gson.toJson(new ArrayList<>(entries.values())), StandardCharsets.UTF_8);
+      byte[] serialized = gson.toJson(new ArrayList<>(entries.values())).getBytes(StandardCharsets.UTF_8);
+      if (serialized.length > MAX_FILE_BYTES) {
+        throw new IllegalStateException("Webhook outbox exceeds 64 MiB: " + file);
+      }
+      Files.write(temp, serialized);
       try {
         Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
       } catch (AtomicMoveNotSupportedException ignored) {
