@@ -113,7 +113,7 @@ implements VelocityModule {
         this.websiteSyncConfig = websiteSync;
         this.websiteCommandClient = websiteSync.enabled() ? new WebsiteSyncHttpClient(websiteSync) : null;
         this.skinProfileBaseUrl = websiteSync.enabled()
-            ? websiteSync.siteUrl().resolve("/api/public/skin-profile").toString()
+            ? websiteSync.resolveEndpoint("/api/public/skin-profile").toString()
             : null;
         this.repositoryFactory = null;
         this.backendSkinCache = new BackendSkinFallbackCache(

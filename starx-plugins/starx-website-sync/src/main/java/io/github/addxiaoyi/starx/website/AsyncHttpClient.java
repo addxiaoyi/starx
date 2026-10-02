@@ -332,11 +332,16 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
             ex instanceof java.util.concurrent.TimeoutException ? 408 : 0, "{}"));
   }
 
+  private URI resolveSiteEndpoint(String path) {
+    String base = this.siteUrl.toString();
+    if (!base.endsWith("/")) base += "/";
+    return URI.create(base).resolve(path.substring(1));
+  }
   private URI endpoint(String path) {
     if (path == null || !path.startsWith("/api/v1/plugin/")) {
       throw new IllegalArgumentException("Unsupported website sync endpoint");
     }
-    return this.siteUrl.resolve(path);
+    return this.resolveSiteEndpoint(path);
   }
 
   private static String requireSecret(SecretValue value, String label) {

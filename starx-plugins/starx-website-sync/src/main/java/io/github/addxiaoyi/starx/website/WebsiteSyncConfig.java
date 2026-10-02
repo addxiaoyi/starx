@@ -103,6 +103,17 @@ public record WebsiteSyncConfig(
             this.textures.batchSize()));
   }
 
+  /** Resolves an API path beneath the configured website base path. */
+  public URI resolveEndpoint(String path) {
+    if (path == null || !path.startsWith("/")) {
+      throw new IllegalArgumentException("website-sync endpoint must be an absolute path");
+    }
+    String base = this.siteUrl.toString();
+    if (!base.endsWith("/")) {
+      base += "/";
+    }
+    return URI.create(base).resolve(path.substring(1));
+  }
   public boolean needsEnrollment() {
     return this.enabled && !this.nodeToken.isPresent() && this.bootstrapToken.isPresent();
   }

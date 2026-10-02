@@ -43,6 +43,17 @@ class WebsiteSyncCoreTest {
   }
 
   @Test
+  void resolvesEndpointsUnderConfiguredBasePath() {
+    WebsiteSyncConfig config = new WebsiteSyncConfig(
+        true, URI.create("https://example.com/starx"), "proxy-1", WebsitePlatform.VELOCITY,
+        SecretValue.empty(), SecretValue.empty(), WebsiteSyncConfig.Heartbeat.defaults(),
+        WebsiteSyncConfig.Textures.defaults());
+
+    assertEquals(URI.create("https://example.com/starx/api/v1/plugin/heartbeat"),
+        config.resolveEndpoint("/api/v1/plugin/heartbeat"));
+  }
+
+  @Test
   void nodeAndServerSnapshotsPreserveUnknownValuesAsNull() {
     ServerSnapshot child = new ServerSnapshot(
         "survival-1",
