@@ -352,7 +352,7 @@ public static final class HttpConfig {
         }
 
         public java.net.URI resolveEndpoint(String path) {
-            if (path == null || !path.startsWith("/")) {
+            if (path == null || !path.startsWith("/") || path.startsWith("//")) {
                 throw new IllegalArgumentException("webhook endpoint must be an absolute path");
             }
             String base = java.util.Objects.requireNonNullElse(this.url, "").trim();

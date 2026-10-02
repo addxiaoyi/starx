@@ -105,7 +105,7 @@ public record WebsiteSyncConfig(
 
   /** Resolves an API path beneath the configured website base path. */
   public URI resolveEndpoint(String path) {
-    if (path == null || !path.startsWith("/")) {
+    if (path == null || !path.startsWith("/") || path.startsWith("//")) {
       throw new IllegalArgumentException("website-sync endpoint must be an absolute path");
     }
     String base = this.siteUrl.toString();

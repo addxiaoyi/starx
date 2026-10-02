@@ -51,6 +51,8 @@ class WebsiteSyncCoreTest {
 
     assertEquals(URI.create("https://example.com/starx/api/v1/plugin/heartbeat"),
         config.resolveEndpoint("/api/v1/plugin/heartbeat"));
+    assertThrows(IllegalArgumentException.class,
+        () -> config.resolveEndpoint("//evil.example/plugin"));
   }
 
   @Test

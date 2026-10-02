@@ -38,6 +38,8 @@ class WebhookClientSignatureTest {
         "https://example.com/hook?channel=qq", "secret");
     assertThrows(IllegalArgumentException.class,
         () -> queryConfig.resolveEndpoint("/api/v1/plugin/email-challenge/send"));
+    assertThrows(IllegalArgumentException.class,
+        () -> config.resolveEndpoint("//evil.example/plugin"));
   }
 
 
