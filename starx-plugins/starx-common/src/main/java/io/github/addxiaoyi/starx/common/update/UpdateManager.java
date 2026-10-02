@@ -134,7 +134,7 @@ public final class UpdateManager {
           + " downloaded to " + target.getFileName()
           + "; restart to apply (" + (result.bytes() / 1024) + " KiB)");
       return CheckResult.UPDATE_DOWNLOADED;
-    } catch (IOException error) {
+    } catch (IOException | RuntimeException error) {
       this.logger.accept("StarX update I/O failed: " + error.getClass().getSimpleName());
       return CheckResult.DOWNLOAD_FAILED;
     }
@@ -160,6 +160,10 @@ public final class UpdateManager {
 
 
   private DownloadResult fetchToFile(URI uri, Path target) throws IOException {
+    if (uri == null || uri.getHost() == null
+        || !("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))) {
+      return DownloadResult.fail("download URL must be HTTP(S)");
+    }
     java.net.http.HttpClient client = SHARED_HTTP_CLIENT;
     java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
         .uri(uri)
