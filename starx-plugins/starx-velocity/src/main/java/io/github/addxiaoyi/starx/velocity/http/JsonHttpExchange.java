@@ -21,6 +21,7 @@ public final class JsonHttpExchange {
     private byte[] rawBody;
     private int responseStatus = 200;
     private boolean authenticated;
+    private boolean responseStarted;
 
     public JsonHttpExchange(HttpExchange exchange) {
         this.exchange = exchange;
@@ -38,6 +39,10 @@ public final class JsonHttpExchange {
         this.authenticated = true;
     }
 
+    boolean responseStarted() {
+        return this.responseStarted;
+    }
+
     public JsonHttpExchange status(int code) {
         this.responseStatus = code;
         return this;
@@ -47,6 +52,7 @@ public final class JsonHttpExchange {
         String json = GSON.toJson(data);
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
         this.exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        this.responseStarted = true;
         this.exchange.sendResponseHeaders(this.responseStatus, bytes.length);
         this.exchange.getResponseBody().write(bytes);
         this.exchange.getResponseBody().close();

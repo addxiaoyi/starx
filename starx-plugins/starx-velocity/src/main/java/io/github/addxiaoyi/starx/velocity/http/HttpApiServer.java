@@ -514,10 +514,14 @@ public final class HttpApiServer implements RouteRegistrar {
             }
             handler.handle(ctx);
         } catch (AuthenticationRequiredException ignored) {
-            try {
-                ctx.status(401).json(Map.of("error", "authentication_required"));
-            } catch (IOException responseError) {
+            if (ctx.responseStarted()) {
                 exchange.close();
+            } else {
+                try {
+                    ctx.status(401).json(Map.of("error", "authentication_required"));
+                } catch (IOException responseError) {
+                    exchange.close();
+                }
             }
         } catch (IllegalArgumentException error) {
             if ("Payload too large".equals(error.getMessage())) {
