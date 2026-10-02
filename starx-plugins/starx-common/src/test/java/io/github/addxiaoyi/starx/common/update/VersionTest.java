@@ -24,6 +24,7 @@ final class VersionTest {
     assertEquals(null, Version.parse("1.0.0-alpha..1"));
     assertEquals(null, Version.parse("1.0.0-alpha.01"));
     assertEquals(null, Version.parse("1.0.0+"));
+    assertEquals(null, Version.parse("1.0.0+build..1"));
   }
 
   @Test

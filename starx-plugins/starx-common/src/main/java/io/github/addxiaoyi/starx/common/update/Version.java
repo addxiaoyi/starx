@@ -35,6 +35,9 @@ public final class Version implements Comparable<Version> {
     }
     // 分离构建元数据
     int plus = text.indexOf('+');
+    if (plus >= 0 && !validBuildMetadata(text.substring(plus + 1))) {
+      return null;
+    }
     if (plus == text.length() - 1) {
       return null;
     }
@@ -67,6 +70,17 @@ public final class Version implements Comparable<Version> {
       return null;
     }
   }
+
+  private static boolean validBuildMetadata(String value) {
+    String[] identifiers = value.split("\\.", -1);
+    for (String identifier : identifiers) {
+      if (identifier.isEmpty() || !identifier.matches("[0-9A-Za-z-]+")) {
+        return false;
+      }
+    }
+    return true;
+  }
+
 
   private static boolean validPrerelease(String value) {
     String[] identifiers = value.split("\\.", -1);
