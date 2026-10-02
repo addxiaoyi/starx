@@ -28,23 +28,17 @@ public final class Version implements Comparable<Version> {
     if (value == null || value.isBlank()) {
       return null;
     }
-    // 去掉开头的 "v" 前缀（GitHub Releases 常见格式）
     String text = value.trim();
     if (text.startsWith("v") || text.startsWith("V")) {
       text = text.substring(1);
     }
-    // 分离构建元数据
-    int plus = text.indexOf('+');
+    int plus = text.indexOf('+' );
     if (plus >= 0 && !validBuildMetadata(text.substring(plus + 1))) {
-      return null;
-    }
-    if (plus == text.length() - 1) {
       return null;
     }
     if (plus >= 0) {
       text = text.substring(0, plus);
     }
-    // 分离预发布标识
     String prerelease = null;
     int dash = text.indexOf('-');
     if (dash >= 0) {
@@ -54,21 +48,25 @@ public final class Version implements Comparable<Version> {
     if (prerelease != null && !validPrerelease(prerelease)) {
       return null;
     }
-    String[] parts = text.split("\\.");
-    if (parts.length < 1 || parts.length > 3) {
+    String[] parts = text.split("\\.", -1);
+    if (parts.length < 1 || parts.length > 3
+        || !validCoreIdentifier(parts[0])
+        || (parts.length > 1 && !validCoreIdentifier(parts[1]))
+        || (parts.length > 2 && !validCoreIdentifier(parts[2]))) {
       return null;
     }
     try {
       int major = Integer.parseInt(parts[0]);
       int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
       int patch = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
-      if (major < 0 || minor < 0 || patch < 0) {
-        return null;
-      }
       return new Version(major, minor, patch, prerelease, value.trim());
     } catch (NumberFormatException error) {
       return null;
     }
+  }
+
+  private static boolean validCoreIdentifier(String value) {
+    return value.matches("0|[1-9][0-9]*");
   }
 
   private static boolean validBuildMetadata(String value) {
