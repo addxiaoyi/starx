@@ -97,6 +97,10 @@ public final class FileWebhookOutbox {
     Path temp = file.resolveSibling(file.getFileName() + ".tmp");
     try {
       if (parent != null) Files.createDirectories(parent);
+      long estimatedBytes = entries.values().stream().mapToLong(this::estimatedEntryBytes).sum();
+      if (estimatedBytes > MAX_FILE_BYTES) {
+        throw new IllegalStateException("Webhook outbox exceeds 64 MiB: " + file);
+      }
       byte[] serialized = gson.toJson(new ArrayList<>(entries.values())).getBytes(StandardCharsets.UTF_8);
       if (serialized.length > MAX_FILE_BYTES) {
         throw new IllegalStateException("Webhook outbox exceeds 64 MiB: " + file);
@@ -110,6 +114,12 @@ public final class FileWebhookOutbox {
     } catch (IOException error) {
       throw new IllegalStateException("Failed to persist webhook outbox: " + file, error);
     }
+  }
+
+  private long estimatedEntryBytes(PendingWebhook pending) {
+    return pending.id().getBytes(StandardCharsets.UTF_8).length
+        + pending.url().getBytes(StandardCharsets.UTF_8).length
+        + pending.body().getBytes(StandardCharsets.UTF_8).length + 64L;
   }
 
   private static void validateUrl(String value) {

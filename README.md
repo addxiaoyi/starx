@@ -1,12 +1,12 @@
 # StarX
 
-StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-1.0.54.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
+StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-1.0.55.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
 
-当前插件版本：**1.0.54**
+当前插件版本：**1.0.55**
 
 公共扩展 API：**1.0.0**
 
-1.0.54 修复更新校验、子路径部署、HMAC 重放和配置/文件边界问题。详见 [发布说明](docs/releases/1.0.54.md)。
+1.0.55 修复更新校验、子路径部署、HMAC 重放和配置/文件边界问题。详见 [发布说明](docs/releases/1.0.55.md)。
 
 ## 完整功能清单
 
@@ -268,7 +268,7 @@ Extension API 1.0.0 提供版本协商、平台与能力查询、扩展注册、
 从 [GitHub Releases](https://github.com/addxiaoyi/starx/releases) 下载：
 
 ```text
-starx-universal-1.0.54.jar
+starx-universal-1.0.55.jar
 ```
 
 下载附件可保留其版本化文件名；生产部署脚本会使用 `starx-universal.jar`。将同一个文件分别放入：
@@ -500,6 +500,6 @@ REAL_CLIENT_UWORLD_ACCEPTANCE_VERIFIED
 ## 许可证
 
 StarX 自有代码采用 GNU Affero General Public License v3。内置或派生的第三方组件保留各自许可证和声明，见 `LICENSE`、`LICENSES/`、`NOTICE` 以及源码文件头。
-# 当前插件版本：**1.0.54**
+# 当前插件版本：**1.0.55**
 
-本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-1.0.54.jar`
+本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-1.0.55.jar`
