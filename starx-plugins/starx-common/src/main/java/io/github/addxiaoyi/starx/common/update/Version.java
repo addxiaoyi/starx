@@ -87,8 +87,39 @@ public final class Version implements Comparable<Version> {
     if (!this.isPrerelease() && other.isPrerelease()) {
       return 1;
     }
-    return this.prerelease.compareTo(other.prerelease);
+    return comparePrerelease(this.prerelease, other.prerelease);
   }
+
+  private static int comparePrerelease(String left, String right) {
+    String[] leftParts = left.split("\\.", -1);
+    String[] rightParts = right.split("\\.", -1);
+    int shared = Math.min(leftParts.length, rightParts.length);
+    for (int index = 0; index < shared; index++) {
+      String a = leftParts[index];
+      String b = rightParts[index];
+      boolean aNumeric = a.matches("0|[1-9][0-9]*");
+      boolean bNumeric = b.matches("0|[1-9][0-9]*");
+      if (aNumeric && bNumeric) {
+        int numeric = compareNumericIdentifier(a, b);
+        if (numeric != 0) return numeric;
+      } else if (aNumeric != bNumeric) {
+        return aNumeric ? -1 : 1;
+      } else {
+        int text = a.compareTo(b);
+        if (text != 0) return text;
+      }
+    }
+    return Integer.compare(leftParts.length, rightParts.length);
+  }
+
+  private static int compareNumericIdentifier(String left, String right) {
+    String normalizedLeft = left.replaceFirst("^0+(?!$)", "");
+    String normalizedRight = right.replaceFirst("^0+(?!$)", "");
+    int length = Integer.compare(normalizedLeft.length(), normalizedRight.length());
+    return length != 0 ? length : normalizedLeft.compareTo(normalizedRight);
+  }
+
+
 
   public boolean isNewerThan(Version other) {
     return other == null || this.compareTo(other) > 0;
