@@ -104,9 +104,9 @@ public interface BytesTransformer {
             byte[] resizedArray = new byte[this.newSize];
             if (this.mode == Mode.RESIZE_KEEP_FROM_MAX_LENGTH) {
                 if (this.newSize > currentArray.length) {
-                    System.arraycopy(currentArray, 0, resizedArray, Math.max(0, Math.abs(this.newSize - currentArray.length)), Math.min(this.newSize, currentArray.length));
+                    System.arraycopy(currentArray, 0, resizedArray, this.newSize - currentArray.length, currentArray.length);
                 } else {
-                    System.arraycopy(currentArray, Math.max(0, Math.abs(this.newSize - currentArray.length)), resizedArray, Math.min(0, Math.abs(this.newSize - currentArray.length)), Math.min(this.newSize, currentArray.length));
+                    System.arraycopy(currentArray, currentArray.length - this.newSize, resizedArray, 0, this.newSize);
                 }
             } else {
                 System.arraycopy(currentArray, 0, resizedArray, 0, Math.min(currentArray.length, resizedArray.length));

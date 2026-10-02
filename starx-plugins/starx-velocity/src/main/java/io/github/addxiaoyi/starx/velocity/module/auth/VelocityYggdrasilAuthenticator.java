@@ -93,6 +93,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
         this.httpClient.sendAsync(HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.timeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .header("Content-Type", "application/json")
                 .build(), HttpResponse.BodyHandlers.ofString())
@@ -113,6 +114,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
         this.httpClient.sendAsync(HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
                 .build(), HttpResponse.BodyHandlers.ofString())
             .thenAccept(response -> {
@@ -151,6 +153,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
         this.httpClient.sendAsync(HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
                 .build(), HttpResponse.BodyHandlers.ofString())
             .thenAccept(response -> {
@@ -181,6 +184,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
         this.httpClient.sendAsync(HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
                 .build(), HttpResponse.BodyHandlers.ofString())
             .thenAccept(response -> {
@@ -204,6 +208,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
         this.httpClient.sendAsync(HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.timeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .header("Content-Type", "application/json")
                 .build(), HttpResponse.BodyHandlers.ofString())
@@ -239,6 +244,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
         this.httpClient.sendAsync(HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.timeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .header("Content-Type", "application/json")
                 .build(), HttpResponse.BodyHandlers.ofString())

@@ -84,7 +84,7 @@ implements VelocityModule {
             return future;
         }
         String url = baseUrl + "session/minecraft/profile/" + uuid.toString().replace("-", "");
-        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
+        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofMillis(this.config.timeout())).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
             if (response.statusCode() == 200) {
                 boolean exists = matchesProfileUuid(response.body(), uuid);
                 if (exists) {
@@ -156,7 +156,7 @@ implements VelocityModule {
         if (this.config.verifyIp() && ip != null) {
             urlBuilder.append("&ip=").append(encodeQuery(ip));
         }
-        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(urlBuilder.toString())).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
+        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(urlBuilder.toString())).timeout(Duration.ofMillis(this.config.timeout())).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
             if (response.statusCode() == 200) {
                 future.complete((String)response.body());
             } else {
