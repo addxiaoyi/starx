@@ -25,6 +25,8 @@ import javax.imageio.ImageIO;
 final class MiniMotdMigration {
   private static final long MAX_CONFIG_BYTES = 1_048_576;
   private static final long MAX_ICON_BYTES = 8 * 1_024 * 1_024;
+  private static final int MAX_ICON_DIMENSION = 2_048;
+  private static final long MAX_ICON_PIXELS = 4_194_304L;
   private static final String MARKER = ".minimotd-migrated";
   private static final Pattern SAFE_BASENAME = Pattern.compile("[A-Za-z0-9_-]+");
 
@@ -177,7 +179,10 @@ final class MiniMotdMigration {
         return false;
       }
       BufferedImage image = ImageIO.read(path.toFile());
-      return image != null && image.getWidth() > 0 && image.getHeight() > 0;
+      return image != null && image.getWidth() > 0 && image.getHeight() > 0
+          && image.getWidth() <= MAX_ICON_DIMENSION
+          && image.getHeight() <= MAX_ICON_DIMENSION
+          && (long) image.getWidth() * image.getHeight() <= MAX_ICON_PIXELS;
     } catch (IOException | RuntimeException ignored) {
       return false;
     }

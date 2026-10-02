@@ -152,6 +152,22 @@ class MiniMotdMigrationTest {
   }
 
   @Test
+  void rejectsImagesWithDangerousDimensions() throws Exception {
+    Path starx = Files.createDirectories(temp.resolve("starx"));
+    Path icons = Files.createDirectories(temp.resolve("minimotd-velocity/icons"));
+    Files.writeString(icons.getParent().resolve("main.conf"),
+        "motds=[{line1=\"one\",line2=\"two\",icon=\"huge\"}]\nicon-enabled=true\n");
+    BufferedImage huge = new BufferedImage(2049, 1, BufferedImage.TYPE_INT_ARGB);
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    ImageIO.write(huge, "png", output);
+    Files.write(icons.resolve("huge.png"), output.toByteArray());
+
+    MiniMotdMigration.Result result = MiniMotdMigration.migrate(starx, root(), ignored -> { });
+
+    assertFalse(result.iconCopied());
+  }
+
+  @Test
   void rejectsSymlinkAndOversizedPngCandidates() throws Exception {
     Path starx = Files.createDirectories(temp.resolve("starx"));
     Path icons = Files.createDirectories(temp.resolve("minimotd-velocity/icons"));
