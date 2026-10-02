@@ -142,6 +142,7 @@ public final class JsonHttpExchange {
 
     public void result(String text) throws IOException {
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        this.responseStarted = true;
         this.exchange.sendResponseHeaders(this.responseStatus, bytes.length);
         this.exchange.getResponseBody().write(bytes);
         this.exchange.getResponseBody().close();
