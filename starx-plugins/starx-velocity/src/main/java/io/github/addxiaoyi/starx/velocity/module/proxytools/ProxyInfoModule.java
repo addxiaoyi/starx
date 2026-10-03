@@ -44,8 +44,8 @@ implements VelocityModule {
     private static final long SERVER_PROBE_TTL_MILLIS = 5000L;
     private final StarxVelocityPlugin plugin;
     private final Config config;
-    private final Map<String, ProbeResult> serverProbeCache = new ConcurrentHashMap<>();
-    private final Map<String, CompletableFuture<Boolean>> serverProbes = new ConcurrentHashMap<>();
+    private final Map<ServerProbeKey, ProbeResult> serverProbeCache = new ConcurrentHashMap<>();
+    private final Map<ServerProbeKey, CompletableFuture<Boolean>> serverProbes = new ConcurrentHashMap<>();
     private CommandMeta commandMeta;
 
     public ProxyInfoModule(StarxVelocityPlugin plugin, Config config) {
@@ -198,20 +198,37 @@ implements VelocityModule {
 
         private CompletableFuture<Boolean> probe(RegisteredServer server) {
             String name = server.getServerInfo().getName();
+            ServerProbeKey probeKey = new ServerProbeKey(server);
             long now = System.currentTimeMillis();
-            ProbeResult cached = ProxyInfoModule.this.serverProbeCache.get(name);
+            ProbeResult cached = ProxyInfoModule.this.serverProbeCache.get(probeKey);
             if (cached != null && now - cached.checkedAt() < SERVER_PROBE_TTL_MILLIS) {
                 return CompletableFuture.completedFuture(cached.online());
             }
-            return ProxyInfoModule.this.serverProbes.computeIfAbsent(name, ignored ->
+            return ProxyInfoModule.this.serverProbes.computeIfAbsent(probeKey, ignored ->
                 server.ping().orTimeout(1, TimeUnit.SECONDS)
                     .handle((ping, error) -> error == null && ping != null)
                     .whenComplete((online, error) -> {
                         boolean reachable = error == null && Boolean.TRUE.equals(online);
                         ProxyInfoModule.this.serverProbeCache.put(
-                            name, new ProbeResult(reachable, System.currentTimeMillis()));
-                        ProxyInfoModule.this.serverProbes.remove(name);
+                            probeKey, new ProbeResult(reachable, System.currentTimeMillis()));
+                        ProxyInfoModule.this.serverProbes.remove(probeKey);
                     }));
+        }
+    }
+
+    private record ServerProbeKey(RegisteredServer server) {
+        private ServerProbeKey {
+            Objects.requireNonNull(server, "server");
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof ServerProbeKey key && this.server == key.server;
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(this.server);
         }
     }
 

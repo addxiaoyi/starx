@@ -1,12 +1,12 @@
 # StarX
 
-StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-1.0.71.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
+StarX 是面向 Velocity、Paper 和 Folia 网络的 Java 21 字节码插件；Paper 26.x 实例按平台要求使用 Java 25。本地构建和生产部署使用固定文件名 `starx-universal.jar`；GitHub Release 下载附件使用版本化文件名 `starx-universal-1.0.72.jar`。同一个 JAR 放入代理端和每个后端实例，由平台加载器选择对应入口。
 
-当前插件版本：**1.0.71**
+当前插件版本：**1.0.72**
 
 公共扩展 API：**1.0.0**
 
-1.0.71 修复重连目标记录过早消费，节点暂不可用时会保留上次服务器以便后续恢复。详见 [发布说明](docs/releases/1.0.71.md)。
+1.0.72 隔离不同 RegisteredServer 实例的节点探测缓存，避免同名节点替换后复用旧状态。详见 [发布说明](docs/releases/1.0.72.md)。
 
 ## 完整功能清单
 
@@ -503,6 +503,7 @@ StarX 自有代码采用 GNU Affero General Public License v3。内置或派生�
 # 当前插件版本：**1.0.63**
 
 本地构建/生产部署产物：`starx-universal.jar`；GitHub Release 附件：`starx-universal-1.0.63.jar`
+
 
 
 
