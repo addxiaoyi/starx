@@ -10,6 +10,7 @@ import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -30,6 +31,7 @@ public final class PremiumPlayerHandler {
     private static final ConcurrentMap<String, Instant> recentPremiumAuth = new ConcurrentHashMap<>();
     private static final long CACHE_TTL_MS = 300000L; // 5 分钟
     private static final long VERIFICATION_TTL_MS = 600000L; // 10 分钟
+    private static final int MAX_CACHE_ENTRIES = 8_192;
 
     private final PremiumResolver premiumResolver;
     private final UserRepository userRepository;
@@ -68,7 +70,7 @@ public final class PremiumPlayerHandler {
         boolean isPremium = premiumResolver.isPremium(uuid, onlineMode);
 
         // 缓存验证结果
-        verificationCache.put(uuid, new PremiumVerification(isPremium));
+        cacheVerification(uuid, new PremiumVerification(isPremium));
 
         return isPremium;
     }
@@ -86,7 +88,7 @@ public final class PremiumPlayerHandler {
         yggdrasilAuth.authenticate(username, serverId, ip, serverName)
             .thenAccept(result -> {
                 if (PremiumProfileVerifier.matches(result, uuid, username)) {
-                    verificationCache.put(uuid, new PremiumVerification(true));
+                    cacheVerification(uuid, new PremiumVerification(true));
                     markRecentAuth(uuid.toString());
                     callback.accept(true);
                     return;
@@ -104,7 +106,13 @@ public final class PremiumPlayerHandler {
      * 标记最近的正版认证成功
      */
     public void markRecentAuth(String key) {
-        recentPremiumAuth.put(key, Instant.now().plusMillis(CACHE_TTL_MS));
+        Objects.requireNonNull(key, "key");
+        synchronized (recentPremiumAuth) {
+            Instant now = Instant.now();
+            recentPremiumAuth.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+            trimRecentAuthCache();
+            recentPremiumAuth.put(key, now.plusMillis(CACHE_TTL_MS));
+        }
     }
 
     /**
@@ -178,6 +186,30 @@ public final class PremiumPlayerHandler {
         premiumResolver.clearCache();
     }
 
+    private static void cacheVerification(UUID uuid, PremiumVerification verification) {
+        synchronized (verificationCache) {
+            verificationCache.entrySet().removeIf(
+                entry -> entry.getValue().isExpired(VERIFICATION_TTL_MS));
+            while (verificationCache.size() >= MAX_CACHE_ENTRIES) {
+                verificationCache.entrySet().stream()
+                    .min(java.util.Map.Entry.comparingByValue(
+                        java.util.Comparator.comparingLong(PremiumVerification::timestamp)))
+                    .ifPresent(oldest -> verificationCache.remove(
+                        oldest.getKey(), oldest.getValue()));
+            }
+            verificationCache.put(uuid, verification);
+        }
+    }
+
+    private static void trimRecentAuthCache() {
+        while (recentPremiumAuth.size() >= MAX_CACHE_ENTRIES) {
+            recentPremiumAuth.entrySet().stream()
+                .min(java.util.Map.Entry.comparingByValue())
+                .ifPresent(oldest -> recentPremiumAuth.remove(
+                    oldest.getKey(), oldest.getValue()));
+        }
+    }
+
     /**
      * 获取缓存统计信息
      */
@@ -209,6 +241,10 @@ public final class PremiumPlayerHandler {
 
         public boolean isExpired(long ttlMs) {
             return System.currentTimeMillis() - timestamp > ttlMs;
+        }
+
+        long timestamp() {
+            return this.timestamp;
         }
     }
 }
