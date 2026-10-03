@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -76,7 +77,7 @@ public final class ConfigLayout {
     }
     Spec spec = parseSpec(root, entrypoint);
     for (String name : spec.files()) {
-      Path fragment = spec.directory().resolve(name).normalize();
+      Path fragment = resolveFragment(spec, name);
       if (Files.notExists(fragment)) {
         copyResource("/config/" + name, fragment);
       }
@@ -99,7 +100,7 @@ public final class ConfigLayout {
       }
     });
     for (String name : spec.files()) {
-      Path fragment = spec.directory().resolve(name).normalize();
+      Path fragment = resolveFragment(spec, name);
       if (!Files.isRegularFile(fragment)) {
         throw new IOException("Missing StarX configuration fragment: " + fragment);
       }
@@ -135,7 +136,7 @@ public final class ConfigLayout {
       addedPaths.add("schema-version");
     }
     for (String name : spec.files()) {
-      Path fragment = spec.directory().resolve(name).normalize();
+      Path fragment = resolveFragment(spec, name);
       Map<String, Object> current = readFile(fragment);
       Map<String, Object> fragmentDefaults = defaultsFor(name, spec, defaults);
       Map<String, Object> completed = mergeMissing(fragmentDefaults, current, "", addedPaths);
@@ -218,7 +219,7 @@ public final class ConfigLayout {
     Files.copy(entrypoint, backup, StandardCopyOption.COPY_ATTRIBUTES);
     for (Map.Entry<String, Map<String, Object>> fragment : fragments.entrySet()) {
       writeAtomically(
-          spec.directory().resolve(fragment.getKey()),
+          resolveFragment(spec, fragment.getKey()),
           dump(fragment.getValue()));
     }
     writeAtomically(entrypoint, dump(indexRoot(spec, root.get("schema-version"))));
@@ -246,7 +247,7 @@ public final class ConfigLayout {
     return merged;
   }
 
-  private static Spec parseSpec(Map<String, Object> root, Path entrypoint) {
+  private static Spec parseSpec(Map<String, Object> root, Path entrypoint) throws IOException {
     Object rawNode = root.get(CONFIG_FILES_KEY);
     if (!(rawNode instanceof Map<?, ?> map)) {
       throw new IllegalArgumentException("config-files must be a mapping");
@@ -264,6 +265,7 @@ public final class ConfigLayout {
     if (!directory.startsWith(parent)) {
       throw new IllegalArgumentException("config-files.directory escapes the plugin directory");
     }
+    validateDirectoryBoundary(parent, directory);
     List<String> files = stringList(node.get("files"), "config-files.files");
     if (files.isEmpty()) {
       throw new IllegalArgumentException("config-files.files must not be empty");
@@ -283,12 +285,43 @@ public final class ConfigLayout {
     return files;
   }
 
-  private static Spec defaultSpec(Path entrypoint) {
+  private static Spec defaultSpec(Path entrypoint) throws IOException {
     Path parent = entrypoint.toAbsolutePath().normalize().getParent();
     if (parent == null) {
       throw new IllegalArgumentException("Configuration path has no parent: " + entrypoint);
     }
-    return new Spec(parent.resolve(DEFAULT_DIRECTORY), DEFAULT_FILES);
+    Path directory = parent.resolve(DEFAULT_DIRECTORY);
+    validateDirectoryBoundary(parent, directory);
+    return new Spec(directory, DEFAULT_FILES);
+  }
+
+  private static Path resolveFragment(Spec spec, String name) throws IOException {
+    Path fragment = spec.directory().resolve(name).normalize();
+    if (!fragment.startsWith(spec.directory())
+        || Files.isSymbolicLink(spec.directory())
+        || Files.isSymbolicLink(fragment)) {
+      throw new IOException("StarX configuration fragment must stay inside the plugin directory: "
+          + fragment);
+    }
+    return fragment;
+  }
+
+  private static void validateDirectoryBoundary(Path parent, Path directory) throws IOException {
+    if (Files.isSymbolicLink(directory)) {
+      throw new IllegalArgumentException("config-files.directory must not be a symbolic link");
+    }
+    Path realParent = parent.toRealPath();
+    Path existing = directory;
+    while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+      existing = existing.getParent();
+    }
+    if (existing == null) {
+      throw new IOException("Unable to resolve StarX configuration directory: " + directory);
+    }
+    Path realExisting = existing.toRealPath();
+    if (!realExisting.startsWith(realParent)) {
+      throw new IllegalArgumentException("config-files.directory escapes the plugin directory");
+    }
   }
 
   private static Map<String, Object> indexRoot(Spec spec, Object schemaVersion) {
@@ -562,14 +595,14 @@ public final class ConfigLayout {
 
     private Path owner(String topLevelKey) throws IOException {
       for (String name : this.spec.files()) {
-        Path candidate = this.spec.directory().resolve(name).normalize();
+        Path candidate = resolveFragment(this.spec, name);
         if (readFile(candidate).containsKey(topLevelKey)) {
           return candidate;
         }
       }
       String preferred = DEFAULT_OWNERS.get(topLevelKey);
       if (preferred != null && this.spec.files().contains(preferred)) {
-        return this.spec.directory().resolve(preferred).normalize();
+        return resolveFragment(this.spec, preferred);
       }
       throw new IllegalArgumentException(
           "No StarX configuration fragment owns top-level key: " + topLevelKey);

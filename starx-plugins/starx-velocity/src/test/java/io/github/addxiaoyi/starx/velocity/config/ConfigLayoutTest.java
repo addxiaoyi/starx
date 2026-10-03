@@ -6,11 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -138,6 +140,54 @@ final class ConfigLayoutTest {
           () -> ConfigLoader.load(entrypoint));
       assertTrue(error.getMessage().contains("config-files"));
     }
+  }
+
+  @Test
+  void rejectsConfigurationDirectorySymlink() throws Exception {
+    Path outside = this.tempDir.resolveSibling("starx-config-outside");
+    Files.createDirectories(outside);
+    Path link = this.tempDir.resolve("config-link");
+    try {
+      Files.createSymbolicLink(link, outside);
+    } catch (UnsupportedOperationException | IOException error) {
+      Assumptions.assumeTrue(false, "symbolic links are unavailable: " + error.getMessage());
+    }
+    Path entrypoint = this.tempDir.resolve("config.yml");
+    Files.writeString(entrypoint, """
+        schema-version: 5
+        config-files:
+          directory: config-link
+          files: [core.yml]
+        """, StandardCharsets.UTF_8);
+
+    IllegalArgumentException error = assertThrows(
+        IllegalArgumentException.class,
+        () -> ConfigLoader.load(entrypoint));
+    assertTrue(error.getMessage().contains("symbolic link"));
+  }
+
+  @Test
+  void rejectsConfigurationFragmentSymlink() throws Exception {
+    Path outside = this.tempDir.resolveSibling("starx-fragment-outside.yml");
+    Files.writeString(outside, "api-key: outside\n", StandardCharsets.UTF_8);
+    Path directory = this.tempDir.resolve("config");
+    Files.createDirectories(directory);
+    Path link = directory.resolve("core.yml");
+    try {
+      Files.createSymbolicLink(link, outside);
+    } catch (UnsupportedOperationException | IOException error) {
+      Assumptions.assumeTrue(false, "symbolic links are unavailable: " + error.getMessage());
+    }
+    Path entrypoint = this.tempDir.resolve("config.yml");
+    Files.writeString(entrypoint, """
+        schema-version: 5
+        config-files:
+          directory: config
+          files: [core.yml]
+        """, StandardCharsets.UTF_8);
+
+    IOException error = assertThrows(IOException.class, () -> ConfigLoader.load(entrypoint));
+    assertTrue(error.getMessage().contains("configuration fragment"));
   }
 
   private void write(String relative, String content) throws Exception {
