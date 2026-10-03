@@ -46,6 +46,7 @@ public final class AuthService {
     private static final Type RECOVERY_CODE_HASHES_TYPE =
         new TypeToken<List<String>>() {}.getType();
     private static final int RECOVERY_CODE_UPDATE_ATTEMPTS = 3;
+    private static final int RECOVERY_LOCK_STRIPES = 64;
     private static final Duration TOTP_ENROLLMENT_TTL = Duration.ofMinutes(5);
     private static final String EXTERNAL_HANDSHAKE_SOURCE = "external-handshake";
     private static final String EXTERNAL_HANDSHAKE_IDENTITY_ERROR =
@@ -66,8 +67,8 @@ public final class AuthService {
     private volatile java.util.function.Consumer<UUID> minecraftIdentityRollback = ignored -> { };
     private final Map<UUID, ProvisionedLogin> provisionedLogins = new ConcurrentHashMap<>();
     private final Map<UUID, PendingTotp> pendingTotp = new ConcurrentHashMap<>();
-    // Per-user mutex for recovery code consumption to prevent race conditions
-    private final ConcurrentHashMap<UUID, Object> recoveryCodeLocks = new ConcurrentHashMap<>();
+    // Fixed lock stripes preserve per-user serialization without retaining every UUID forever.
+    private final Object[] recoveryCodeLocks = createRecoveryLockStripes();
     private final RiskDecisionEngine riskDecisions = new RiskDecisionEngine();
     private volatile WebLoginApprovalGateway webLoginApprovals;
     private volatile boolean totpAvailable = true;
@@ -1079,8 +1080,7 @@ public final class AuthService {
             // The check on the matched recovery code happens BEFORE acquiring the lock,
             // and the database replace uses an optimistic check (stored -> replacement)
             // which is the second layer of protection.
-            synchronized (this.recoveryCodeLocks.computeIfAbsent(
-                    user.uuid(), k -> new Object())) {
+            synchronized (this.recoveryLock(user.uuid())) {
                 // Re-read user state inside the lock
                 if (!this.sessionManager.isState(
                         uuid, lease, AuthSession.State.AUTHENTICATING)) {
@@ -1887,6 +1887,18 @@ public final class AuthService {
     private static UUID offlineUuid(String username) {
         return UUID.nameUUIDFromBytes(
             ("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static Object[] createRecoveryLockStripes() {
+        Object[] locks = new Object[RECOVERY_LOCK_STRIPES];
+        for (int index = 0; index < locks.length; index++) {
+            locks[index] = new Object();
+        }
+        return locks;
+    }
+
+    private Object recoveryLock(UUID uuid) {
+        return this.recoveryCodeLocks[Math.floorMod(uuid.hashCode(), this.recoveryCodeLocks.length)];
     }
 
     private static List<String> parseTrustedDevices(String json) {
