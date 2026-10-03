@@ -71,4 +71,31 @@ final class WebsiteSkinRepositoryTest {
       server.stop(0);
     }
   }
+
+  @Test
+  void rejectsOversizedWebsiteProfileResponses() throws Exception {
+    AtomicInteger requests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/oversized.json", exchange -> {
+      requests.incrementAndGet();
+      byte[] body = new byte[70_000];
+      java.util.Arrays.fill(body, (byte) 'x');
+      exchange.sendResponseHeaders(200, body.length);
+      try (OutputStream output = exchange.getResponseBody()) {
+        output.write(body);
+      }
+    });
+    server.start();
+
+    try {
+      WebsiteSkinRepository repository = new WebsiteSkinRepository(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          Logger.getLogger(WebsiteSkinRepositoryTest.class.getName()));
+
+      assertTrue(repository.findProfile("oversized").isEmpty());
+      assertEquals(1, requests.get());
+    } finally {
+      server.stop(0);
+    }
+  }
 }

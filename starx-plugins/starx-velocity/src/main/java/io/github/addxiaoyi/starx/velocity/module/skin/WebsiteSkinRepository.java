@@ -7,10 +7,12 @@ import io.github.addxiaoyi.starx.api.dto.SkinDto;
 import io.github.addxiaoyi.starx.api.repository.SkinRepository;
 import io.github.addxiaoyi.starx.common.smart.SmartCache;
 import com.google.gson.Gson;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
@@ -25,6 +27,7 @@ implements SkinRepository {
     private static final int CACHE_MAX_SIZE = 500;
     private static final int PROFILE_CACHE_TTL_MS = 300000;
     private static final int PROFILE_CACHE_MAX_SIZE = 2000;
+    private static final int MAX_PROFILE_BYTES = 64 * 1024;
     private final String skinProfileBaseUrl;
     private final Logger logger;
     private final HttpClient httpClient;
@@ -128,12 +131,22 @@ implements SkinRepository {
         String url = this.skinProfileBaseUrl + "/" + name + ".json";
         try {
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(5L)).GET().build();
-            HttpResponse<String> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<InputStream> response = this.httpClient.send(
+                request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() != 200) {
+                response.body().close();
+                return this.fallbackCache.get(name, Instant.now());
+            }
+            byte[] body;
+            try (InputStream input = response.body()) {
+                body = input.readNBytes(MAX_PROFILE_BYTES + 1);
+            }
+            if (body.length > MAX_PROFILE_BYTES) {
+                this.logger.warning("Website texture profile exceeds response limit for " + name);
                 return this.fallbackCache.get(name, Instant.now());
             }
             Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.parse(
-                response.body(), this.gson, this.textureUrlPolicy);
+                new String(body, StandardCharsets.UTF_8), this.gson, this.textureUrlPolicy);
             profile.ifPresent(value -> this.fallbackCache.put(name, value, Instant.now()));
             return profile.or(() -> this.fallbackCache.get(name, Instant.now()));
         }
