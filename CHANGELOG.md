@@ -2,6 +2,13 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.0.68] - 2026-10-03
+
+### Security
+
+- UniAuth 和 Yggdrasil 认证客户端关闭自动重定向，避免认证请求被转发到非预期地址。
+- 认证响应分别限制为 256 KiB 和 64 KiB，超限按认证失败处理。
+
 ## [1.0.67] - 2026-10-03
 
 ### Security
@@ -791,7 +798,8 @@
 
 ### Added
 
-- 配置入口拆分为 `config/core.yml`、`auth.yml`、`network.yml`、`modules.yml` 和 `uworld.yml`，默认模板加入中文保姆式注释。
+- 配置入口拆分为 `config/core.yml`、`auth.yml`、
+etwork.yml`、`modules.yml` 和 `uworld.yml`，默认模板加入中文保姆式注释。
 - Uworld 支持从 `plugins/starx/assets/uworld/` 加载 `.schem`、`.schematic`、`.nbt` 和 `.litematic` 投影文件，并对配置路径做安全校验。
 - 代理端生成并持久化外部握手密钥，受信连接可沿用现有可信登录流程免密进入。
 
@@ -1010,3 +1018,4 @@
 - 修复全局关闭 TOTP 后高风险账号仍被要求输入不可用验证码的问题。
 - 修复认证异步派发异常和网页登录审批超时后残留认证会话的问题。
 - 修复管理端网站绑定状态与已验证绑定表不一致的问题，并让正版免密开关真正生效。
+

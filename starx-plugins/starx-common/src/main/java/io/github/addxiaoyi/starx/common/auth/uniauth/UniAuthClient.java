@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.common.auth.uniauth;
 
+import io.github.addxiaoyi.starx.common.security.BoundedHttpResponses;
 import java.util.Locale;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -20,6 +21,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class UniAuthClient {
+  private static final int MAX_RESPONSE_BYTES = 256 * 1024;
   private static final Logger LOGGER = Logger.getLogger(UniAuthClient.class.getName());
   private static final Gson GSON = new Gson();
   private static final String SERVICE_UNAVAILABLE_MESSAGE = "认证服务暂时不可用，请稍后重试";
@@ -32,6 +34,7 @@ public final class UniAuthClient {
     this.config = Objects.requireNonNull(config, "config");
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofMillis(config.timeoutMs()))
+        .followRedirects(HttpClient.Redirect.NEVER)
         .build();
   }
 
@@ -57,7 +60,7 @@ public final class UniAuthClient {
           .GET()
           .build();
       HttpResponse<String> response =
-          httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+          httpClient.send(request, BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES));
       if (response.statusCode() != 200) {
         throw new IllegalStateException(
             "Failed to fetch public key: HTTP " + response.statusCode());
@@ -109,7 +112,7 @@ public final class UniAuthClient {
           .POST(HttpRequest.BodyPublishers.ofString(encrypted, StandardCharsets.UTF_8))
           .build();
       HttpResponse<String> response =
-          httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+          httpClient.send(request, BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
         throw new IllegalStateException(
             "UniAuth returned HTTP " + response.statusCode() + " for " + endpoint);

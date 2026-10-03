@@ -7,6 +7,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.common.auth.PremiumResolver;
+import io.github.addxiaoyi.starx.common.security.BoundedHttpResponses;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.net.URI;
@@ -25,6 +26,7 @@ import java.util.logging.Logger;
 
 public final class YggdrasilModule
 implements VelocityModule {
+    private static final int MAX_RESPONSE_BYTES = 64 * 1024;
     private static final long PREMIUM_CACHE_TTL_MS = 3600000L;
     private static final long AUTH_CACHE_TTL_MS = 300000L;
     
@@ -45,6 +47,7 @@ implements VelocityModule {
         this.config = Objects.requireNonNull(config, "config");
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofMillis(config.timeout()))
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
         this.premiumResolver = premiumResolver != null ? premiumResolver : new PremiumResolver();
         this.logger = plugin.logger();
@@ -84,7 +87,7 @@ implements VelocityModule {
             return future;
         }
         String url = baseUrl + "session/minecraft/profile/" + uuid.toString().replace("-", "");
-        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofMillis(this.config.timeout())).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
+        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofMillis(this.config.timeout())).GET().build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES)).thenAccept(response -> {
             if (response.statusCode() == 200) {
                 boolean exists = matchesProfileUuid(response.body(), uuid);
                 if (exists) {
@@ -156,7 +159,7 @@ implements VelocityModule {
         if (this.config.verifyIp() && ip != null) {
             urlBuilder.append("&ip=").append(encodeQuery(ip));
         }
-        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(urlBuilder.toString())).timeout(Duration.ofMillis(this.config.timeout())).GET().build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
+        ((CompletableFuture)this.httpClient.sendAsync(HttpRequest.newBuilder().uri(URI.create(urlBuilder.toString())).timeout(Duration.ofMillis(this.config.timeout())).GET().build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES)).thenAccept(response -> {
             if (response.statusCode() == 200) {
                 future.complete((String)response.body());
             } else {

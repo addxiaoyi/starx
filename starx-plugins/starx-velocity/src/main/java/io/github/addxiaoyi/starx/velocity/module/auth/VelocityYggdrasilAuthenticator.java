@@ -5,6 +5,7 @@
 package io.github.addxiaoyi.starx.velocity.module.auth;
 
 import io.github.addxiaoyi.starx.common.auth.YggdrasilAuthenticator;
+import io.github.addxiaoyi.starx.common.security.BoundedHttpResponses;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
@@ -24,6 +25,7 @@ import java.util.logging.Level;
  * 提供与 Mojang 正版认证服务的完整集成
  */
 public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
+    private static final int MAX_RESPONSE_BYTES = 64 * 1024;
 
     private static final String MOJANG_AUTH_URL = "https://authserver.mojang.com/";
     private static final String MOJANG_SESSION_URL = "https://sessionserver.mojang.com/";
@@ -41,6 +43,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
         this.config = Objects.requireNonNull(config, "config");
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofMillis(config.timeout()))
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
         this.authServers = new java.util.HashMap<>(config.servers());
     }
@@ -66,7 +69,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
                 .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
                 .header("User-Agent", USER_AGENT)
-                .build(), HttpResponse.BodyHandlers.ofString())
+                .build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES))
             .thenAccept(response -> {
                 if (response.statusCode() == 200) {
                     future.complete(response.body());
@@ -96,7 +99,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
                 .timeout(Duration.ofMillis(config.timeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .header("Content-Type", "application/json")
-                .build(), HttpResponse.BodyHandlers.ofString())
+                .build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES))
             .thenAccept(response -> {
                 future.complete(response.statusCode() == 204);
             })
@@ -116,7 +119,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
                 .uri(URI.create(url))
                 .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
-                .build(), HttpResponse.BodyHandlers.ofString())
+                .build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES))
             .thenAccept(response -> {
                 if (response.statusCode() == 200) {
                     try {
@@ -155,7 +158,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
                 .uri(URI.create(url))
                 .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
-                .build(), HttpResponse.BodyHandlers.ofString())
+                .build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES))
             .thenAccept(response -> {
                 if (response.statusCode() == 200) {
                     try {
@@ -186,7 +189,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
                 .uri(URI.create(url))
                 .timeout(Duration.ofMillis(config.timeout()))
                 .GET()
-                .build(), HttpResponse.BodyHandlers.ofString())
+                .build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES))
             .thenAccept(response -> {
                 future.complete(response.statusCode() == 200);
             })
@@ -211,7 +214,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
                 .timeout(Duration.ofMillis(config.timeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .header("Content-Type", "application/json")
-                .build(), HttpResponse.BodyHandlers.ofString())
+                .build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES))
             .thenAccept(response -> {
                 if (response.statusCode() == 200) {
                     try {
@@ -247,7 +250,7 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
                 .timeout(Duration.ofMillis(config.timeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .header("Content-Type", "application/json")
-                .build(), HttpResponse.BodyHandlers.ofString())
+                .build(), BoundedHttpResponses.utf8(MAX_RESPONSE_BYTES))
             .thenAccept(response -> {
                 if (response.statusCode() == 200) {
                     future.complete(null);
