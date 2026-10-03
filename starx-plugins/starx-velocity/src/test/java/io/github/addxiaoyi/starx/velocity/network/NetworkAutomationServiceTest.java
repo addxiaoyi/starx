@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -36,6 +37,53 @@ final class NetworkAutomationServiceTest {
     assertFalse(summary.contains("secret"));
     assertFalse(summary.contains("opaque"));
     assertTrue(summary.contains("<redacted>"));
+  }
+
+  @Test
+  void refusesReportPathThroughSymlinkedDirectory() throws Exception {
+    Path outside = this.temporary.resolveSibling("starx-network-report-outside");
+    Files.createDirectories(outside);
+    Path reports = this.temporary.resolve("reports");
+    try {
+      Files.createSymbolicLink(reports, outside);
+    } catch (UnsupportedOperationException | java.io.IOException error) {
+      Assumptions.assumeTrue(false, "symbolic links are unavailable: " + error.getMessage());
+    }
+    NetworkAutomationConfig config = new NetworkAutomationConfig(
+        true,
+        "reports/network.json",
+        new NetworkAutomationConfig.PublicAddress(false, 2, 1000, List.of()),
+        offFrp(),
+        NetworkAutomationConfig.Certificate.defaults());
+
+    try (NetworkAutomationService service = service(config, new ArrayList<>(), command ->
+        new NetworkAutomationService.CommandResult(0, "", false, ""))) {
+      IllegalArgumentException error = org.junit.jupiter.api.Assertions.assertThrows(
+          IllegalArgumentException.class, service::refreshNow);
+      assertTrue(error.getMessage().contains("managed file path"));
+    }
+  }
+
+  @Test
+  void refusesManagedConfigThroughSymlinkedDirectory() throws Exception {
+    Path outside = this.temporary.resolveSibling("starx-frp-outside");
+    Files.createDirectories(outside);
+    Path frp = this.temporary.resolve("frp");
+    try {
+      Files.createSymbolicLink(frp, outside);
+    } catch (UnsupportedOperationException | java.io.IOException error) {
+      Assumptions.assumeTrue(false, "symbolic links are unavailable: " + error.getMessage());
+    }
+    NetworkAutomationConfig config = config(
+        managedFrp(false, ""),
+        NetworkAutomationConfig.Certificate.defaults());
+
+    try (NetworkAutomationService service = service(config, new ArrayList<>(), command ->
+        new NetworkAutomationService.CommandResult(0, "", false, ""))) {
+      IllegalArgumentException error = org.junit.jupiter.api.Assertions.assertThrows(
+          IllegalArgumentException.class, service::refreshNow);
+      assertTrue(error.getMessage().contains("managed file path"));
+    }
   }
 
   @Test

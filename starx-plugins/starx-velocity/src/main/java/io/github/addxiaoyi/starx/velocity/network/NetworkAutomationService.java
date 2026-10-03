@@ -12,6 +12,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
@@ -827,7 +828,31 @@ public final class NetworkAutomationService implements AutoCloseable {
     if (!resolved.startsWith(this.dataDirectory)) {
       throw new IllegalArgumentException("managed file path escapes the StarX data directory");
     }
+    validateDataFileBoundary(resolved);
     return resolved;
+  }
+
+  private void validateDataFileBoundary(Path target) {
+    if (Files.isSymbolicLink(target)) {
+      throw new IllegalArgumentException("managed file path must not be a symbolic link");
+    }
+    Path realRoot;
+    try {
+      realRoot = this.dataDirectory.toRealPath();
+    } catch (IOException error) {
+      throw new IllegalArgumentException("StarX data directory cannot be resolved", error);
+    }
+    Path existing = target;
+    try {
+      while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+        existing = existing.getParent();
+      }
+      if (existing == null || !existing.toRealPath().startsWith(realRoot)) {
+        throw new IllegalArgumentException("managed file path escapes the StarX data directory");
+      }
+    } catch (IOException error) {
+      throw new IllegalArgumentException("managed file path cannot be resolved", error);
+    }
   }
 
   private boolean mainConfigIncludes(Path mainConfig, String configuredValue, Path managedConfig)
