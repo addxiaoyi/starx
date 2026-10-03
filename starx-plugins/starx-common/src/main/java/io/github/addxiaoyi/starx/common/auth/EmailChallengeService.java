@@ -30,6 +30,7 @@ public final class EmailChallengeService {
   private static final String EMAIL_CODE_FORMAT = "%06d";
   private static final int MAX_ATTEMPTS = 6;
   private static final int MAX_CODE_ALLOCATION_ATTEMPTS = 8;
+  private static final int MAX_MEMORY_CHALLENGES = 8_192;
 
   private final EmailSender sender;
   private final Duration ttl;
@@ -104,6 +105,16 @@ public final class EmailChallengeService {
         throw error;
       }
       return;
+    }
+    synchronized (this.challenges) {
+      Instant now = this.clock.instant();
+      this.challenges.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
+      while (this.challenges.size() >= MAX_MEMORY_CHALLENGES) {
+        this.challenges.entrySet().stream()
+            .min(Map.Entry.comparingByValue(
+                java.util.Comparator.comparing(Challenge::expiresAt)))
+            .ifPresent(oldest -> this.challenges.remove(oldest.getKey(), oldest.getValue()));
+      }
     }
     String code = nextCode();
     this.sender.sendVerificationCode(email, code);
