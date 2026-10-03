@@ -117,9 +117,11 @@ public final class FileWebhookOutbox {
   }
 
   private long estimatedEntryBytes(PendingWebhook pending) {
-    return pending.id().getBytes(StandardCharsets.UTF_8).length
-        + pending.url().getBytes(StandardCharsets.UTF_8).length
-        + pending.body().getBytes(StandardCharsets.UTF_8).length + 64L;
+    long idBytes = pending.id().getBytes(StandardCharsets.UTF_8).length;
+    long urlBytes = pending.url().getBytes(StandardCharsets.UTF_8).length;
+    long bodyBytes = pending.body().getBytes(StandardCharsets.UTF_8).length;
+    long escapedBody = bodyBytes > MAX_FILE_BYTES / 6L ? MAX_FILE_BYTES : bodyBytes * 6L;
+    return Math.min(MAX_FILE_BYTES, idBytes + urlBytes + escapedBody + 64L);
   }
 
   private static void validateUrl(String value) {
