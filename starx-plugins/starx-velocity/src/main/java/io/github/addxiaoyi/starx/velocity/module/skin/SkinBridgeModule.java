@@ -309,6 +309,10 @@ implements VelocityModule {
 
     private void applyBackendSkinData(BackendSkinData skin, boolean cached) {
         this.proxy.getPlayer(skin.uuid()).ifPresent(player -> {
+            if (!backendSkinMatchesPlayer(player.getUniqueId(), player.getUsername(), skin)) {
+                LOGGER.warning("Ignoring stale backend skin response for " + skin.name());
+                return;
+            }
             player.setGameProfileProperties(skin.merge(player.getGameProfileProperties()));
             this.appliedSkinProviders.put(skin.uuid(), cached
                 ? skin.provider() + " (缓存)"
@@ -322,6 +326,14 @@ implements VelocityModule {
                 "uuid", skin.uuid().toString(), "provider", skin.provider(),
                 "cached", Boolean.toString(cached)));
         });
+    }
+
+    static boolean backendSkinMatchesPlayer(UUID currentUuid, String currentName, BackendSkinData skin) {
+        return currentUuid != null
+            && skin != null
+            && currentUuid.equals(skin.uuid())
+            && currentName != null
+            && currentName.equalsIgnoreCase(skin.name());
     }
 
     static String backendSkinAppliedMessage(UUID uuid, String provider) {

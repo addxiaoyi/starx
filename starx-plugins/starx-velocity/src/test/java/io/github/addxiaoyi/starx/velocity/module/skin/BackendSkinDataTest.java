@@ -14,6 +14,15 @@ import org.junit.jupiter.api.Test;
 final class BackendSkinDataTest {
 
   @Test
+  void rejectsResponseForDifferentCurrentPlayerName() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    BackendSkinData skin = new BackendSkinData(uuid, "OldName", "paper", "value", "sig");
+
+    assertTrue(!SkinBridgeModule.backendSkinMatchesPlayer(uuid, "NewName", skin));
+    assertTrue(SkinBridgeModule.backendSkinMatchesPlayer(uuid, "oldname", skin));
+  }
+
+  @Test
   void parsesResponseAndReplacesOnlyTextureProperty() {
     UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
     BridgeMessage response = BridgeMessage.skinResponse(
