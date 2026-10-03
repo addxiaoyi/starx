@@ -24,6 +24,7 @@ import java.util.function.Function;
 public final class CrossDeviceApprovalService {
   private static final int TOKEN_BYTES = 32;
   private static final int MAX_TOKEN_ALLOCATION_ATTEMPTS = 8;
+  private static final int MAX_PENDING_APPROVALS = 8_192;
 
   private final Clock clock;
   private final Duration ttl;
@@ -178,6 +179,14 @@ public final class CrossDeviceApprovalService {
       AuthLease authLease,
       String payload,
       Instant expiresAt) {
+    Instant now = this.clock.instant();
+    this.pending.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
+    while (this.pending.size() >= MAX_PENDING_APPROVALS) {
+      this.pending.entrySet().stream()
+          .min(java.util.Map.Entry.comparingByValue(
+              java.util.Comparator.comparing(Pending::expiresAt)))
+          .ifPresent(oldest -> this.pending.remove(oldest.getKey(), oldest.getValue()));
+    }
     for (int attempt = 0; attempt < MAX_TOKEN_ALLOCATION_ATTEMPTS; attempt++) {
       String token = nextToken();
       Pending challenge = new Pending(
