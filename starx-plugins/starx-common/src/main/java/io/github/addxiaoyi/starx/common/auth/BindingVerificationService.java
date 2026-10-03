@@ -23,6 +23,7 @@ public final class BindingVerificationService {
   private static final long CODE_TTL_MS = 300_000L;
   private static final int CODE_BOUND = 1_000_000;
   private static final int MAX_CODE_ALLOCATION_ATTEMPTS = 8;
+  private static final int MAX_PENDING_CODES = 8_192;
 
   private final ConcurrentMap<String, PendingCode> pendingCodes = new ConcurrentHashMap<>();
   private final BindingChallengeService persistentChallenges;
@@ -126,6 +127,14 @@ public final class BindingVerificationService {
       throw new IllegalStateException("Unable to allocate a unique verification code", conflict);
     }
     synchronized (this.pendingCodes) {
+      long nowMillis = this.clock.millis();
+      this.pendingCodes.entrySet().removeIf(entry -> nowMillis >= entry.getValue().expiresAt());
+      while (this.pendingCodes.size() >= MAX_PENDING_CODES) {
+        this.pendingCodes.entrySet().stream()
+            .min(java.util.Map.Entry.comparingByValue(
+                java.util.Comparator.comparingLong(PendingCode::expiresAt)))
+            .ifPresent(oldest -> this.pendingCodes.remove(oldest.getKey(), oldest.getValue()));
+      }
       for (int attempt = 0; attempt < MAX_CODE_ALLOCATION_ATTEMPTS; attempt++) {
         String code = nextCode();
         PendingCode pending = new PendingCode(
