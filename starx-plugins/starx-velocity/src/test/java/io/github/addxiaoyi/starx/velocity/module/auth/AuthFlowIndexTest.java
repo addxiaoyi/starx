@@ -104,6 +104,21 @@ final class AuthFlowIndexTest {
   }
 
   @Test
+  void reconnectReceivesANewLeaseSoDelayedHintsCannotCrossConnections() {
+    UUID playerId = UUID.randomUUID();
+    Object first = new Object();
+    Object replacement = new Object();
+    AuthFlowIndex<Object, Object, String> flows = new AuthFlowIndex<>();
+
+    assertEquals(AuthFlowIndex.BeginResult.ACCEPTED, flows.begin(playerId, first, "duplicate"));
+    var firstLease = flows.lease(first).orElseThrow();
+    assertTrue(flows.close(playerId, first));
+    assertEquals(AuthFlowIndex.BeginResult.ACCEPTED, flows.begin(playerId, replacement, "duplicate"));
+
+    assertFalse(firstLease.equals(flows.lease(replacement).orElseThrow()));
+  }
+
+  @Test
   void acceptedFlowExposesOneConnectionLease() {
     UUID playerId = UUID.randomUUID();
     Object player = new Object();

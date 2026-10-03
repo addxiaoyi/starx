@@ -818,9 +818,12 @@ public final class AuthModule implements VelocityModule {
    * only way a returning premium player unlocks the encrypted login. It is sent after the player
    * lands on a backend because that is the only place the command exists.
    */
-  private void schedulePremiumHint(Player player) {
+  private void schedulePremiumHint(Player player, AuthLease lease) {
     FastLoginPremiumBridge bridge = this.fastLoginPremium;
     if (bridge == null) {
+      return;
+    }
+    if (lease == null || this.flows.lease(player).filter(lease::equals).isEmpty()) {
       return;
     }
     boolean available = bridge.isAvailable();
@@ -831,7 +834,7 @@ public final class AuthModule implements VelocityModule {
     }
     this.premiumHintSent.add(player.getUniqueId());
     this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
-      if (!player.isActive()) {
+      if (!player.isActive() || this.flows.lease(player).filter(lease::equals).isEmpty()) {
         return;
       }
       player.sendMessage(Component.text(
@@ -1110,7 +1113,8 @@ public final class AuthModule implements VelocityModule {
         AuthModule.this.flows.lease(player).ifPresent(lease ->
             AuthModule.this.authService.completeAuthenticatedProvisioning(
                 player.getUniqueId(), lease));
-        AuthModule.this.schedulePremiumHint(player);
+        AuthModule.this.flows.lease(player).ifPresent(lease ->
+            AuthModule.this.schedulePremiumHint(player, lease));
       } else if (result == AuthFlowIndex.ConnectResult.IGNORED
           && AuthModule.this.flows.requiresAuth(player)) {
         AuthModule.this.logger.log(Level.SEVERE,
