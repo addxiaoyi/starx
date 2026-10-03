@@ -166,6 +166,9 @@ public final class WebhookClient {
     }
 
     private static boolean isRetryable(Throwable error) {
+        if (error instanceof IllegalArgumentException) {
+            return false;
+        }
         if (!(error instanceof WebhookDeliveryException delivery)) {
             return true;
         }
