@@ -108,7 +108,7 @@ implements VelocityModule {
             return;
         }
         Player player = event.getPlayer();
-        Optional<String> remembered = this.lastServers.consume(player.getUniqueId());
+        Optional<String> remembered = this.lastServers.peek(player.getUniqueId());
         if (remembered.isEmpty()) {
             return;
         }
@@ -118,7 +118,11 @@ implements VelocityModule {
         }
         String lastServerName = selected.get();
         ProxyServer proxy = this.plugin.proxy();
-        proxy.getServer(lastServerName).ifPresent(event::setInitialServer);
+        proxy.getServer(lastServerName).ifPresent(server -> {
+            if (this.lastServers.consumeIf(player.getUniqueId(), remembered.get())) {
+                event.setInitialServer(server);
+            }
+        });
     }
 
     public static interface Config {

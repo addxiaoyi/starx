@@ -37,6 +37,13 @@ final class ReconnectTargetStore {
     return target == null ? Optional.empty() : Optional.of(target.server());
   }
 
+  synchronized boolean consumeIf(UUID playerId, String expectedServer) {
+    Target target = this.targets.get(playerId);
+    if (target == null || !target.server().equals(expectedServer)) return false;
+    this.targets.remove(playerId);
+    return true;
+  }
+
   synchronized int size() { return this.targets.size(); }
   synchronized void clear() { this.targets.clear(); }
 

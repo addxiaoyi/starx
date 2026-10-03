@@ -19,6 +19,18 @@ final class ReconnectTargetStoreTest {
   }
 
   @Test
+  void keepsTargetWhenConditionalConsumeDoesNotMatch() {
+    ReconnectTargetStore store = new ReconnectTargetStore(4);
+    UUID playerId = UUID.randomUUID();
+    store.remember(playerId, "survival", 1);
+
+    assertTrue(!store.consumeIf(playerId, "lobby"));
+    assertEquals("survival", store.peek(playerId).orElseThrow());
+    assertTrue(store.consumeIf(playerId, "survival"));
+    assertTrue(store.peek(playerId).isEmpty());
+  }
+
+  @Test
   void evictsOldestPendingTargetAtCapacity() {
     ReconnectTargetStore store = new ReconnectTargetStore(2);
     UUID first = UUID.randomUUID();
