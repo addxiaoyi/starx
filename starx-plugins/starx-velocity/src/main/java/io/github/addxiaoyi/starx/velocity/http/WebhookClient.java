@@ -143,13 +143,13 @@ public final class WebhookClient {
     }
 
     private CompletableFuture<Void> deliver(String url, String body, int attempt) {
+    CompletableFuture<Void> delivery;
+    try {
         Map<String, String> headers = this.signedHeaders(url, body);
-        CompletableFuture<Void> delivery;
-        try {
-            delivery = this.transport.post(url, body, headers);
-        } catch (RuntimeException error) {
-            delivery = CompletableFuture.failedFuture(error);
-        }
+        delivery = this.transport.post(url, body, headers);
+    } catch (RuntimeException error) {
+        delivery = CompletableFuture.failedFuture(error);
+    }
         return delivery.handle((ignored, error) -> {
             if (error == null) {
                 return CompletableFuture.<Void>completedFuture(null);
