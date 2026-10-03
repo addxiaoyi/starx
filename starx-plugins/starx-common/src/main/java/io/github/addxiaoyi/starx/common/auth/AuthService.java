@@ -47,6 +47,7 @@ public final class AuthService {
         new TypeToken<List<String>>() {}.getType();
     private static final int RECOVERY_CODE_UPDATE_ATTEMPTS = 3;
     private static final int RECOVERY_LOCK_STRIPES = 64;
+    private static final int MAX_PENDING_TOTP = 8_192;
     private static final Duration TOTP_ENROLLMENT_TTL = Duration.ofMinutes(5);
     private static final String EXTERNAL_HANDSHAKE_SOURCE = "external-handshake";
     private static final String EXTERNAL_HANDSHAKE_IDENTITY_ERROR =
@@ -1214,7 +1215,19 @@ public final class AuthService {
         }
         String secret = TotpGenerator.generateSecret();
         Instant expiresAt = Instant.now().plus(TOTP_ENROLLMENT_TTL);
-        this.pendingTotp.put(user.uuid(), new PendingTotp(user.uuid(), secret, expiresAt));
+        synchronized (this.pendingTotp) {
+            Instant now = Instant.now();
+            this.pendingTotp.entrySet().removeIf(
+                entry -> !entry.getValue().expiresAt().isAfter(now));
+            while (this.pendingTotp.size() >= MAX_PENDING_TOTP) {
+                this.pendingTotp.entrySet().stream()
+                    .min(java.util.Map.Entry.comparingByValue(
+                        java.util.Comparator.comparing(PendingTotp::expiresAt)))
+                    .ifPresent(oldest -> this.pendingTotp.remove(
+                        oldest.getKey(), oldest.getValue()));
+            }
+            this.pendingTotp.put(user.uuid(), new PendingTotp(user.uuid(), secret, expiresAt));
+        }
         return new TotpEnrollment(
             secret,
             TotpProvisioning.uri("StarMC", user.username(), secret).toString(),
