@@ -11,15 +11,15 @@ class PremiumResolverTest {
   private static final UUID OFFLINE_UUID = UUID.nameUUIDFromBytes("OfflinePlayer:add".getBytes());
 
   @Test
-  void acceptsProtocolVerifiedHistoricalOfflineUuid() {
+  void failsClosedWithoutAnAuthoritativeVerification() {
     PremiumResolver resolver = new PremiumResolver();
-    assertTrue(resolver.isPremium(ONLINE_UUID, true));
+    assertFalse(resolver.isPremium(ONLINE_UUID, true));
 
     PremiumResolver resolver2 = new PremiumResolver();
     assertFalse(resolver2.isPremium(ONLINE_UUID, false));
 
     PremiumResolver resolver3 = new PremiumResolver();
-    assertTrue(resolver3.isPremium(OFFLINE_UUID, true));
+    assertFalse(resolver3.isPremium(OFFLINE_UUID, true));
   }
 
   @Test
@@ -33,7 +33,7 @@ class PremiumResolverTest {
   @Test
   void offlineConnectionCannotReuseOnlineModeCache() {
     PremiumResolver resolver = new PremiumResolver();
-    assertTrue(resolver.isPremium(ONLINE_UUID, true));
+    assertFalse(resolver.isPremium(ONLINE_UUID, true));
     assertFalse(resolver.isPremium(ONLINE_UUID, false));
     assertFalse(resolver.getCacheSize() > 0);
   }

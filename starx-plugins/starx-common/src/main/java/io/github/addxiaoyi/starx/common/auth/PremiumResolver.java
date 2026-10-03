@@ -30,8 +30,9 @@ public final class PremiumResolver {
             return cached;
         }
         
-        premiumCache.put(uuid, true);
-        return true;
+        // Online-mode is a transport hint, not proof of account ownership. A
+        // trusted Yggdrasil/FastLogin result must populate the cache first.
+        return false;
     }
     
     public void invalidate(UUID uuid) {
