@@ -43,6 +43,7 @@ public final class ProxyInfoModule
 implements VelocityModule {
     private static final long STARTUP_TIME = System.currentTimeMillis();
     private static final long SERVER_PROBE_TTL_MILLIS = 5000L;
+    private static final int MAX_PROBE_CACHE_ENTRIES = 512;
     private final StarxVelocityPlugin plugin;
     private final Config config;
     private final Map<ServerProbeKey, ProbeResult> serverProbeCache = new ConcurrentHashMap<>();
@@ -221,6 +222,14 @@ implements VelocityModule {
                         ProxyInfoModule.this.serverProbes.remove(probeKey);
                     }));
         }
+    }
+
+    private void cacheProbeResult(ServerProbeKey key, ProbeResult result) {
+        this.serverProbeCache.put(key, result);
+        if (this.serverProbeCache.size() <= MAX_PROBE_CACHE_ENTRIES) return;
+        this.serverProbeCache.entrySet().stream()
+            .min(Map.Entry.comparingByValue(java.util.Comparator.comparingLong(ProbeResult::checkedAt)))
+            .ifPresent(oldest -> this.serverProbeCache.remove(oldest.getKey(), oldest.getValue()));
     }
 
     private record ServerProbeKey(RegisteredServer server, long epoch) {
