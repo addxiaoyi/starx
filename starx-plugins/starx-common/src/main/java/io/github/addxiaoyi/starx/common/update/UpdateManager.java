@@ -26,11 +26,6 @@ import java.util.function.Consumer;
 public final class UpdateManager {
   private static final Duration MIN_CHECK_INTERVAL = Duration.ofMinutes(30);
   private static final long MAX_JAR_SIZE_BYTES = 64L * 1024 * 1024; // 64 MiB
-  private static final java.net.http.HttpClient SHARED_HTTP_CLIENT = java.net.http.HttpClient.newBuilder()
-      .connectTimeout(HttpConstants.UPDATE_CONNECT_TIMEOUT)
-      .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-      .build();
-
   private final String currentVersion;
   private final RepositoryClient repository;
   private final Path updateDirectory;
@@ -161,25 +156,11 @@ public final class UpdateManager {
 
   private DownloadResult fetchToFile(URI uri, Path target) throws IOException {
     if (uri == null || uri.getHost() == null
-        || !("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))) {
-      return DownloadResult.fail("download URL must be HTTP(S)");
+        || !"https".equalsIgnoreCase(uri.getScheme())
+        || uri.getUserInfo() != null || uri.getFragment() != null) {
+      return DownloadResult.fail("download URL must be HTTPS without credentials or fragment");
     }
-    java.net.http.HttpClient client = SHARED_HTTP_CLIENT;
-    java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-        .uri(uri)
-        .timeout(HttpConstants.UPDATE_REQUEST_TIMEOUT)
-        .header("User-Agent", "StarX-Updater")
-        .GET()
-        .build();
     try {
-      java.net.http.HttpResponse<InputStream> response = client.send(
-          request, java.net.http.HttpResponse.BodyHandlers.ofInputStream());
-      if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        try (InputStream ignored = response.body()) {
-          // 关闭连接
-        }
-        return DownloadResult.fail("HTTP " + response.statusCode());
-      }
       MessageDigest digest;
       try {
         digest = MessageDigest.getInstance("SHA-256");
@@ -187,7 +168,11 @@ public final class UpdateManager {
         throw new IOException("SHA-256 unavailable", error);
       }
       long total = 0;
-      try (InputStream body = response.body();
+      try (InputStream body = HttpFetchers.fetchWithTimeout(
+               uri,
+               HttpConstants.UPDATE_REQUEST_TIMEOUT,
+               "application/java-archive, application/octet-stream;q=0.9",
+               "StarX-Updater");
            var out = Files.newOutputStream(target)) {
         byte[] buffer = new byte[8192];
         int read;
@@ -204,9 +189,8 @@ public final class UpdateManager {
         return DownloadResult.fail("empty body");
       }
       return DownloadResult.ok(total, HexFormat.of().formatHex(digest.digest()));
-    } catch (InterruptedException error) {
-      Thread.currentThread().interrupt();
-      return DownloadResult.fail("interrupted");
+    } catch (IllegalArgumentException error) {
+      return DownloadResult.fail(error.getMessage());
     }
   }
 
