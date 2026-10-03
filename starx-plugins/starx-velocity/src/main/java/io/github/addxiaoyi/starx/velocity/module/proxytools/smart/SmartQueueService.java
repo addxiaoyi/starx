@@ -67,7 +67,7 @@ public final class SmartQueueService {
     int position = position(server, player);
     if (position == 0) return 0L;
     long cycles = (position + (long) releasesPerCycle - 1L) / releasesPerCycle;
-    return (cycles * cycleMillis + 999L) / 1_000L;
+    return saturatedWaitSeconds(cycles, cycleMillis);
   }
 
   public boolean removeFromQueue(RegisteredServer server, Player player) {
@@ -132,6 +132,13 @@ public final class SmartQueueService {
       this.dispatching.set(false);
     }
     return dispatched;
+  }
+
+  private static long saturatedWaitSeconds(long cycles, long cycleMillis) {
+    if (cycles > (Long.MAX_VALUE - 999L) / cycleMillis) {
+      return Long.MAX_VALUE;
+    }
+    return (cycles * cycleMillis + 999L) / 1_000L;
   }
 
   private int inFlightCount() {

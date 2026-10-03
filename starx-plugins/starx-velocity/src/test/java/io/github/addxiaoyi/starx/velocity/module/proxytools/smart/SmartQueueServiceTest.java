@@ -178,6 +178,19 @@ class SmartQueueServiceTest {
     assertEquals(1, queue.size(server));
   }
 
+  @Test
+  void etaSaturatesInsteadOfOverflowing() {
+    SmartQueueService queue = new SmartQueueService();
+    RegisteredServer server = server("survival");
+    Player first = player("00000000-0000-0000-0000-000000000001", true);
+    Player second = player("00000000-0000-0000-0000-000000000002", true);
+    queue.enqueue(server, first, 100);
+    queue.enqueue(server, second, 100);
+
+    assertEquals(Long.MAX_VALUE, queue.estimateWaitSeconds(
+        server, second, 1, Long.MAX_VALUE));
+  }
+
   private static RegisteredServer server(String name) {
     ServerInfo info = new ServerInfo(name, new InetSocketAddress("127.0.0.1", 25565));
     return (RegisteredServer) Proxy.newProxyInstance(
