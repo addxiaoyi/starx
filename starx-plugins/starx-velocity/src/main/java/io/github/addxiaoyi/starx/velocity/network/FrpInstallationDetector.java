@@ -77,40 +77,38 @@ final class FrpInstallationDetector {
         return;
       }
       String[] arguments = info.arguments().orElseGet(() -> new String[0]);
-      Path workingDirectory = Path.of(System.getProperty("user.dir", "."))
-          .toAbsolutePath().normalize();
+      // ProcessHandle does not expose another process's working directory. Do not guess it.
       result.add(new ProcessCandidate(
           Path.of(command.orElseThrow()).toAbsolutePath().normalize(),
           List.of(arguments),
-          workingDirectory));
+          null));
     });
     return List.copyOf(result);
   }
-
   private static Optional<Path> configArgument(List<String> arguments, Path workingDirectory) {
     for (int index = 0; index < arguments.size(); index++) {
       String argument = arguments.get(index);
       String value = null;
-      if ("-c".equals(argument) || "--config".equals(argument)) {
-        if (index + 1 < arguments.size()) {
-          value = arguments.get(index + 1);
-        }
+      if (("-c".equals(argument) || "--config".equals(argument))
+          && index + 1 < arguments.size()) {
+        value = arguments.get(index + 1);
       } else if (argument.startsWith("--config=")) {
         value = argument.substring("--config=".length());
       }
-      if (value != null && !value.isBlank()) {
-        Path candidate = Path.of(value);
-        Path base = workingDirectory == null
-            ? Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize()
-            : workingDirectory.toAbsolutePath().normalize();
-        return Optional.of(candidate.isAbsolute()
-            ? candidate.normalize()
-            : base.resolve(candidate).normalize());
+      if (value == null || value.isBlank()) {
+        continue;
       }
+      Path candidate = Path.of(value);
+      if (!candidate.isAbsolute() && workingDirectory == null) {
+        return Optional.empty();
+      }
+      Path resolved = candidate.isAbsolute()
+          ? candidate.normalize()
+          : workingDirectory.toAbsolutePath().normalize().resolve(candidate).normalize();
+      return Optional.of(resolved);
     }
     return Optional.empty();
   }
-
   private static Path resolveConfigured(Path root, String value) {
     Path path = Path.of(value);
     if (path.isAbsolute()) {
