@@ -20,7 +20,9 @@ final class TextureUrlPolicy {
     if (host == null) {
       throw new IllegalArgumentException("Website profile URL must have a host");
     }
-    return new TextureUrlPolicy(Set.of(MOJANG_TEXTURE_HOST, host, "star-web.top"));
+    return new TextureUrlPolicy(host.equals("star-web.top")
+        ? Set.of(MOJANG_TEXTURE_HOST, host)
+        : Set.of(MOJANG_TEXTURE_HOST, host, "star-web.top"));
   }
 
   static TextureUrlPolicy officialTexturesOnly() {

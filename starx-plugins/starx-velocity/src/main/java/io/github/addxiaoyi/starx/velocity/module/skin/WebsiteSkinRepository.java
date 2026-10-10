@@ -135,15 +135,15 @@ implements SkinRepository {
         }
         if (!this.inFlightProfiles.add(cacheKey)) return Optional.empty();
         try {
-            Optional<WebsiteSkinProfile> profile = fetchProfile(uuid, name);
-            profile.ifPresent(value -> {
+            ProfileFetch fetched = fetchProfile(uuid, name);
+            fetched.profile().ifPresent(value -> {
                 synchronized (this.profileCache) {
                     this.profileCache.put(cacheKey, new CachedProfile(
-                        value, System.currentTimeMillis() + PROFILE_CACHE_TTL_MS, null));
+                        value, System.currentTimeMillis() + PROFILE_CACHE_TTL_MS, fetched.etag()));
                     trim(this.profileCache, PROFILE_CACHE_MAX_SIZE);
                 }
             });
-            return profile;
+            return fetched.profile();
         } finally {
             this.inFlightProfiles.remove(cacheKey);
         }
@@ -165,28 +165,28 @@ implements SkinRepository {
         }
     }
 
-    private Optional<WebsiteSkinProfile> fetchProfile(UUID uuid, String name) {
+    private ProfileFetch fetchProfile(UUID uuid, String name) {
         try {
             HttpResponse<String> response = fetchProfileResponse(uuid == null ? name : uuid.toString());
             if (response.statusCode() == 304 && uuid != null) {
                 synchronized (this.profileCache) {
                     CachedProfile cached = this.profileCache.get(uuid.toString());
-                    if (cached != null) return Optional.of(cached.profile());
+                    if (cached != null) return new ProfileFetch(Optional.of(cached.profile()), cached.etag());
                 }
             }
             if (response.statusCode() == 404 && uuid != null) response = fetchProfileResponse(name);
-            if (response.statusCode() == 404 || response.statusCode() == 304) return Optional.empty();
-            if (response.statusCode() != 200) return fallbackCache.get(name, Instant.now());
+            if (response.statusCode() == 404 || response.statusCode() == 304) return ProfileFetch.empty();
+            if (response.statusCode() != 200) return new ProfileFetch(fallbackCache.get(name, Instant.now()), null);
             Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.parse(
                 response.body(), this.gson, this.textureUrlPolicy);
             profile.ifPresent(value -> this.fallbackCache.put(name, value, Instant.now()));
-            return profile;
+            return new ProfileFetch(profile, response.headers().firstValue("etag").orElse(null));
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            return Optional.empty();
+            return ProfileFetch.empty();
         } catch (Exception error) {
             this.logger.log(Level.FINE, "Website skin profile request failed for " + name, error);
-            return fallbackCache.get(name, Instant.now());
+            return new ProfileFetch(fallbackCache.get(name, Instant.now()), null);
         }
     }
 
@@ -213,6 +213,10 @@ implements SkinRepository {
 
     private static <K, V> void trim(java.util.LinkedHashMap<K, V> cache, int maxSize) {
         while (cache.size() > maxSize) cache.remove(cache.keySet().iterator().next());
+    }
+
+    private record ProfileFetch(Optional<WebsiteSkinProfile> profile, String etag) {
+        static ProfileFetch empty() { return new ProfileFetch(Optional.empty(), null); }
     }
 
     private record CachedProfile(WebsiteSkinProfile profile, long expiresAtMillis, String etag) { }
