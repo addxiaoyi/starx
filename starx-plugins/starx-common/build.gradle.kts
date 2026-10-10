@@ -27,7 +27,7 @@ dependencies {
     compileOnly("org.yaml:snakeyaml:2.2")
     // HikariCP 和 JDBC 驱动 - 需要被 shadow 到最终 JAR
     implementation("com.zaxxer:HikariCP:5.1.0")
-    implementation("org.xerial:sqlite-jdbc:3.45.1.0")
+    implementation("org.xerial:sqlite-jdbc:3.53.2.1")
     compileOnly("org.slf4j:slf4j-api:2.0.9")
     // Note: OTP (TOTP) 和 BCrypt 源码已直接复制到项目中
 
