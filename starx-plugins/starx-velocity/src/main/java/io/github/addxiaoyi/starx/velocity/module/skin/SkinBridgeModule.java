@@ -282,10 +282,15 @@ implements VelocityModule {
     }
 
     private void refreshWebsiteSkinAsync(Player player) {
+        refreshWebsiteSkinAsync(player, false);
+    }
+
+    private void refreshWebsiteSkinAsync(Player player, boolean invalidateCache) {
         UUID uuid = player.getUniqueId();
         String name = player.getUsername();
         WebsiteSkinRepository repository = this.websiteRepository;
         if (repository == null || !this.websiteLookups.add(uuid)) return;
+        if (invalidateCache) repository.invalidate(uuid);
         try {
             this.skinLookupExecutor.execute(() -> {
                 try {
@@ -384,15 +389,13 @@ implements VelocityModule {
 
     public boolean refreshSkinFromWebsite(UUID uuid, String playerName) {
         Objects.requireNonNull(uuid, "uuid");
-        Objects.requireNonNull(playerName, "playerName");
-        if (this.skinProfileBaseUrl == null || this.skinProfileBaseUrl.isBlank()) {
-            LOGGER.warning("Website skin base URL is not configured, cannot refresh from website.");
-            return false;
-        }
-        if (this.websiteRepository == null) {
-            return false;
-        }
-        return this.applyWebsiteSkin(uuid, playerName, true);
+        if (this.websiteRepository == null || this.plugin == null) return false;
+        Player player = this.proxy.getPlayer(uuid).orElse(null);
+        if (player == null || !player.isActive()) return false;
+        String name = playerName == null || playerName.isBlank() ? player.getUsername() : playerName.trim();
+        this.websiteRepository.invalidate(uuid);
+        refreshWebsiteSkinAsync(player, true);
+        return true;
     }
 
     private boolean applyWebsiteSkin(UUID uuid, String playerName) {

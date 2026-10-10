@@ -223,7 +223,8 @@ public final class HttpApiServer implements RouteRegistrar {
             this.identityAwareFullUsernameResolver)
                 .register(this, requireAuth);
         new SkinRefreshHandler(
-            this.skinBridge, this.userRepository, this.identityAwareFullUsernameResolver)
+            this.skinBridge, this.userRepository, this.identityAwareFullUsernameResolver,
+            this.canonicalUuidResolver)
             .register(this, requireAuth);
         if (this.authService != null) {
             RouteHandler sensitiveAuth = this.requireSensitiveAuth();

@@ -19,12 +19,17 @@ final class WebsiteSkinProfile {
   private final String name;
   private final Map<String, TextureInfo> textures;
   private final Gson gson;
+  private final long version;
+  private final boolean textureError;
 
-  private WebsiteSkinProfile(String id, String name, Map<String, TextureInfo> textures, Gson gson) {
+  private WebsiteSkinProfile(String id, String name, Map<String, TextureInfo> textures, Gson gson,
+      long version, boolean textureError) {
     this.id = id;
     this.name = name;
     this.textures = Map.copyOf(textures);
     this.gson = gson;
+    this.version = version;
+    this.textureError = textureError;
   }
 
   static Optional<WebsiteSkinProfile> parse(String body, Gson gson, TextureUrlPolicy urlPolicy) {
@@ -38,10 +43,10 @@ final class WebsiteSkinProfile {
     Map<String, TextureInfo> textures = new LinkedHashMap<>();
     copyTexture(response.textures, textures, "SKIN", urlPolicy);
     copyTexture(response.textures, textures, "CAPE", urlPolicy);
-    if (textures.isEmpty()) {
-      return Optional.empty();
-    }
-    return Optional.of(new WebsiteSkinProfile(response.id, response.name, textures, gson));
+    if (textures.isEmpty()) return Optional.empty();
+    boolean hasSignatureError = response.textureError != null && !response.textureError.isBlank();
+    return Optional.of(new WebsiteSkinProfile(response.id, response.name, textures, gson,
+        Math.max(0L, response.version), hasSignatureError));
   }
 
   static Optional<WebsiteSkinProfile> externalSkin(UUID uuid, String playerName, String skinUrl) {
@@ -52,7 +57,7 @@ final class WebsiteSkinProfile {
     TextureInfo skin = new TextureInfo();
     skin.url = skinUrl.trim();
     return Optional.of(new WebsiteSkinProfile(
-        uuid.toString(), playerName.trim(), Map.of("SKIN", skin), new Gson()));
+        uuid.toString(), playerName.trim(), Map.of("SKIN", skin), new Gson(), 0L, false));
   }
 
   private static void copyTexture(
@@ -129,6 +134,10 @@ final class WebsiteSkinProfile {
     return id;
   }
 
+  long version() { return version; }
+
+  boolean hasTextureError() { return textureError; }
+
   boolean belongsTo(UUID uuid, String playerName) {
     if (uuid == null || playerName == null || playerName.isBlank()) {
       return false;
@@ -162,6 +171,8 @@ final class WebsiteSkinProfile {
   private static final class ProfileResponse {
     String id;
     String name;
+    long version;
+    String textureError;
     Map<String, TextureInfo> textures;
   }
 

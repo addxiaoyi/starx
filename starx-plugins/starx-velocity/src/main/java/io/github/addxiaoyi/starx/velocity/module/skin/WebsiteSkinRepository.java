@@ -139,13 +139,20 @@ implements SkinRepository {
             profile.ifPresent(value -> {
                 synchronized (this.profileCache) {
                     this.profileCache.put(cacheKey, new CachedProfile(
-                        value, System.currentTimeMillis() + PROFILE_CACHE_TTL_MS));
+                        value, System.currentTimeMillis() + PROFILE_CACHE_TTL_MS, null));
                     trim(this.profileCache, PROFILE_CACHE_MAX_SIZE);
                 }
             });
             return profile;
         } finally {
             this.inFlightProfiles.remove(cacheKey);
+        }
+    }
+
+    void invalidate(UUID uuid) {
+        if (uuid == null) return;
+        synchronized (this.profileCache) {
+            this.profileCache.remove(uuid.toString());
         }
     }
 
@@ -161,10 +168,14 @@ implements SkinRepository {
     private Optional<WebsiteSkinProfile> fetchProfile(UUID uuid, String name) {
         try {
             HttpResponse<String> response = fetchProfileResponse(uuid == null ? name : uuid.toString());
-            if (response.statusCode() == 404 && uuid != null) {
-                response = fetchProfileResponse(name);
+            if (response.statusCode() == 304 && uuid != null) {
+                synchronized (this.profileCache) {
+                    CachedProfile cached = this.profileCache.get(uuid.toString());
+                    if (cached != null) return Optional.of(cached.profile());
+                }
             }
-            if (response.statusCode() == 404) return Optional.empty();
+            if (response.statusCode() == 404 && uuid != null) response = fetchProfileResponse(name);
+            if (response.statusCode() == 404 || response.statusCode() == 304) return Optional.empty();
             if (response.statusCode() != 200) return fallbackCache.get(name, Instant.now());
             Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.parse(
                 response.body(), this.gson, this.textureUrlPolicy);
@@ -181,8 +192,15 @@ implements SkinRepository {
 
     private HttpResponse<String> fetchProfileResponse(String key) throws Exception {
         String url = this.skinProfileBaseUrl + "/" + java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8) + ".json";
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url))
-            .timeout(REQUEST_TIMEOUT).GET().build();
+        HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(url))
+            .timeout(REQUEST_TIMEOUT).GET();
+        synchronized (this.profileCache) {
+            CachedProfile cached = this.profileCache.get(key);
+            if (cached != null && cached.etag() != null && !cached.etag().isBlank()) {
+                builder.header("If-None-Match", cached.etag());
+            }
+        }
+        HttpRequest request = builder.build();
         return this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
@@ -197,6 +215,6 @@ implements SkinRepository {
         while (cache.size() > maxSize) cache.remove(cache.keySet().iterator().next());
     }
 
-    private record CachedProfile(WebsiteSkinProfile profile, long expiresAtMillis) { }
+    private record CachedProfile(WebsiteSkinProfile profile, long expiresAtMillis, String etag) { }
     private record PlayerSkinKey(UUID uuid, String name) { }
 }

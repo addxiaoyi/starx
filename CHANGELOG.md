@@ -2,6 +2,16 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.1.1] - 2026-10-10
+
+### Skin Synchronization
+
+- Website skin refresh requests now use the bound Minecraft UUID as the primary identity.
+- Online refresh dispatch is target-only and does not enumerate or scan all players.
+- Raw website texture URLs remain usable when MineSkin signing is unavailable; signature failures no longer discard the whole profile.
+- Website profile cache invalidation is UUID-specific.
+- The protected admin refresh endpoint accepts UUID payloads and reports whether the target player is online.
+
 ## [1.1.0] - 2026-10-10
 
 ### Performance

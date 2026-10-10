@@ -54,6 +54,19 @@ final class WebsiteSkinProfileTest {
   }
 
   @Test
+  void keepsRawTexturesAvailableWhenWebsiteSigningIsUnavailable() {
+    WebsiteSkinProfile profile = WebsiteSkinProfile.parse("""
+        { "id": "4f06bce032d74d4dbb179f7e92ae8701", "name": "Alex",
+          "textureError": "skin_signature_not_configured",
+          "textures": { "SKIN": { "url": "https://textures.minecraft.net/texture/alex" } } }
+        """, GSON, TextureUrlPolicy.forWebsite("https://star-web.top/api/public/skin-profile"))
+        .orElseThrow();
+
+    assertTrue(profile.hasTextureError());
+    assertEquals("https://textures.minecraft.net/texture/alex", profile.textureUrl());
+  }
+
+  @Test
   void rejectsProfileWithoutSkinOrCape() {
     assertTrue(WebsiteSkinProfile.parse("{\"id\":\"empty\",\"textures\":{}}", GSON,
         TextureUrlPolicy.officialTexturesOnly()).isEmpty());
