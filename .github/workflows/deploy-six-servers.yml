@@ -1,0 +1,99 @@
+name: Deploy StarX to six servers
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to deploy (for example v1.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: starx-six-server-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        include:
+          - name: velocity
+            path: /data/minecraft/vc/plugins/starx-universal.jar
+          - name: lobby
+            path: /data/minecraft/lobby/plugins/starx-universal.jar
+          - name: le
+            path: /data/minecraft/le/plugins/starx-universal.jar
+          - name: pvp
+            path: /data/minecraft/pvp/pvp/plugins/starx-universal.jar
+          - name: thepit
+            path: /data/minecraft/thepit/plugins/starx-universal.jar
+          - name: chasergamer
+            path: /data/minecraft/ChaserGamer#4/plugins/starx-universal.jar
+
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_TAG: ${{ inputs.tag }}
+          WORKFLOW_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          tag="${MANUAL_TAG:-$WORKFLOW_TAG}"
+          [[ "$tag" == v* ]] || { echo "Invalid release tag" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download release JAR and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" \
+            --pattern "starx-universal-*.jar" --pattern SHA256SUMS --dir .release
+          jar=(.release/starx-universal-*.jar)
+          [[ ${#jar[@]} -eq 1 ]] || { echo "Expected exactly one release JAR" >&2; exit 1; }
+          sha256sum -c .release/SHA256SUMS --ignore-missing
+          echo "JAR=${jar[0]}" >> "$GITHUB_ENV"
+
+      - name: Configure SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.STARX_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.STARX_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$DEPLOY_KEY" && -n "$KNOWN_HOSTS" ]] || { echo "Deploy SSH secrets are not configured" >&2; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/starx_deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/starx_deploy_key ~/.ssh/known_hosts
+
+      - name: Backup, verify, and atomically install ${{ matrix.name }}
+        env:
+          HOST: ${{ secrets.STARX_DEPLOY_HOST }}
+          USER: ${{ secrets.STARX_DEPLOY_USER }}
+          TARGET: ${{ matrix.path }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET" == /data/minecraft/*/plugins/starx-universal.jar || "$TARGET" == /data/minecraft/*/*/plugins/starx-universal.jar ]] || { echo "Unsafe target" >&2; exit 1; }
+          ssh=(ssh -i ~/.ssh/starx_deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes "$USER@$HOST")
+          scp=(scp -i ~/.ssh/starx_deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup="${TARGET}.bak.${stamp}"
+          "${ssh[@]}" "test -f '$TARGET' && cp -a -- '$TARGET' '$backup' || true"
+          "${scp[@]}" "$JAR" "$USER@$HOST:/tmp/starx-universal-${{ matrix.name }}-${stamp}.jar"
+          remote="/tmp/starx-universal-${{ matrix.name }}-${stamp}.jar"
+          "${ssh[@]}" "set -e; test -s '$remote'; sha256sum '$remote'; install -m 644 '$remote' '${TARGET}.new'; mv -f '${TARGET}.new' '$TARGET'; rm -f '$remote'; sha256sum '$TARGET'"
