@@ -8,11 +8,11 @@ java {
 }
 
 dependencies {
-    compileOnly("com.google.code.gson:gson:2.10.1")
+    compileOnly("com.google.code.gson:gson:2.14.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("com.google.code.gson:gson:2.10.1")
+    testImplementation("com.google.code.gson:gson:2.14.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
