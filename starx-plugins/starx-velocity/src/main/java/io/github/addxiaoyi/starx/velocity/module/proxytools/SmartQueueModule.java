@@ -176,9 +176,7 @@ implements VelocityModule {
     void processQueues() {
         int maxRelease = this.releaseRate();
         if (maxRelease <= 0) return;
-        Map<String, Integer> queueSnapshot = this.queueService.snapshot();
-        this.queueService.processQueues(
-            (player, serverName) -> this.connect(player, serverName, queueSnapshot), maxRelease);
+        this.queueService.processQueues(this::connect, maxRelease);
     }
 
     private CompletableFuture<Boolean> connect(
