@@ -17,6 +17,7 @@ Release 工作流成功后，`.github/workflows/deploy-six-servers.yml` 会按�
 - `STARX_DEPLOY_USER`：SSH 用户
 - `STARX_DEPLOY_KEY`：专用部署私钥
 - `STARX_DEPLOY_KNOWN_HOSTS`：由管理员核验后生成的目标主机 known_hosts 行
+- `STARX_DEPLOY_SUDO_PASSWORD`：仅用于远端 `sudo install` 原子替换，不写入日志或仓库
 
 部署行为：每个实例串行执行；先备份现有 JAR，再上传到 `/tmp`，校验文件非空和 SHA-256，使用 `.new` 后原子 `mv` 替换。任一实例失败会停止后续实例，不会覆盖未验证文件。
 

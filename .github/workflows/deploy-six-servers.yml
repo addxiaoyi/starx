@@ -63,19 +63,22 @@ jobs:
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" \
-            --pattern "starx-universal-*.jar" --pattern SHA256SUMS --dir .release
+            --pattern "starx-universal-*.jar" --dir .release
+          gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" \
+            --pattern SHA256SUMS --dir .release
           jar=(.release/starx-universal-*.jar)
           [[ ${#jar[@]} -eq 1 ]] || { echo "Expected exactly one release JAR" >&2; exit 1; }
-          sha256sum -c .release/SHA256SUMS --ignore-missing
+          (cd .release && sha256sum -c SHA256SUMS)
           echo "JAR=${jar[0]}" >> "$GITHUB_ENV"
 
       - name: Configure SSH
         env:
           DEPLOY_KEY: ${{ secrets.STARX_DEPLOY_KEY }}
           KNOWN_HOSTS: ${{ secrets.STARX_DEPLOY_KNOWN_HOSTS }}
+          SUDO_PASS: ${{ secrets.STARX_DEPLOY_SUDO_PASSWORD }}
         run: |
           set -euo pipefail
-          [[ -n "$DEPLOY_KEY" && -n "$KNOWN_HOSTS" ]] || { echo "Deploy SSH secrets are not configured" >&2; exit 1; }
+          [[ -n "$DEPLOY_KEY" && -n "$KNOWN_HOSTS" && -n "$SUDO_PASS" ]] || { echo "Deploy SSH secrets are not configured" >&2; exit 1; }
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/starx_deploy_key
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
@@ -85,6 +88,7 @@ jobs:
         env:
           HOST: ${{ secrets.STARX_DEPLOY_HOST }}
           USER: ${{ secrets.STARX_DEPLOY_USER }}
+          SUDO_PASS: ${{ secrets.STARX_DEPLOY_SUDO_PASSWORD }}
           TARGET: ${{ matrix.path }}
         run: |
           set -euo pipefail
@@ -93,7 +97,23 @@ jobs:
           scp=(scp -i ~/.ssh/starx_deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes)
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           backup="${TARGET}.bak.${stamp}"
-          "${ssh[@]}" "test -f '$TARGET' && cp -a -- '$TARGET' '$backup' || true"
           "${scp[@]}" "$JAR" "$USER@$HOST:/tmp/starx-universal-${{ matrix.name }}-${stamp}.jar"
           remote="/tmp/starx-universal-${{ matrix.name }}-${stamp}.jar"
-          "${ssh[@]}" "set -e; test -s '$remote'; sha256sum '$remote'; install -m 644 '$remote' '${TARGET}.new'; mv -f '${TARGET}.new' '$TARGET'; rm -f '$remote'; sha256sum '$TARGET'"
+          remote_script=$(cat <<EOF
+          set -euo pipefail
+          target='$TARGET'
+          remote='$remote'
+          backup='$backup'
+          expected=$(sha256sum "$JAR" | cut -d' ' -f1)
+          test -f "\$target"
+          cp -a -- "\$target" "\$backup"
+          test -s "\$remote"
+          test "\$(sha256sum "\$remote" | cut -d' ' -f1)" = "\$expected"
+          install -m 644 "\$remote" "\$target.new"
+          test "\$(sha256sum "\$target.new" | cut -d' ' -f1)" = "\$expected"
+          mv -f -- "\$target.new" "\$target"
+          rm -f -- "\$remote"
+          test "\$(sha256sum "\$target" | cut -d' ' -f1)" = "\$expected"
+          EOF
+          )
+          printf '%s\n%s' "$SUDO_PASS" "$remote_script" | "${ssh[@]}" "sudo -k -S -p '' bash --noprofile --norc -s"
