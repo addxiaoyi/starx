@@ -71,6 +71,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   private volatile Instant lastTextureSync;
   private volatile String lastErrorCode = "";
   private volatile NodeSnapshot latestSnapshot;
+  private volatile Map<String, String> lastTextureManifest = Map.of();
 
   public WebsiteSyncRuntime(
       WebsiteSyncConfig config,
@@ -255,23 +256,31 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
       List<PlayerTextureRecord> records = new ArrayList<>(this.textureSource.snapshot());
       records.sort(Comparator.comparing(record -> record.manifest().playerUuid()));
       Map<String, TextureBlob> blobs = new HashMap<>();
-      for (PlayerTextureRecord record : records) {
-        record.blob(TextureKind.SKIN).ifPresent(blob -> blobs.put(blob.sha256(), blob));
-        record.blob(TextureKind.CAPE).ifPresent(blob -> blobs.put(blob.sha256(), blob));
-      }
       int batchSize = this.config.textures().batchSize();
       int pages = Math.max(1, (records.size() + batchSize - 1) / batchSize);
       String syncId = java.util.UUID.randomUUID().toString();
+      Map<String, String> currentManifest = manifestFingerprints(records);
+      boolean manifestUnchanged = currentManifest.equals(this.lastTextureManifest);
+      Set<String> uploadedThisSync = new HashSet<>();
       for (int page = 0; page < pages; page++) {
         int offset = page * batchSize;
         int end = Math.min(records.size(), offset + batchSize);
-        List<PlayerTexture> batch = records.subList(offset, end).stream()
+        List<PlayerTextureRecord> pageRecords = records.subList(offset, end);
+        List<PlayerTexture> batch = pageRecords.stream()
             .map(PlayerTextureRecord::manifest)
             .toList();
+        if (manifestUnchanged) {
+          continue;
+        }
         ManifestAck manifest = this.client.submitManifestPage(
             this.nodeToken.get(), syncId, page, pages, batch);
+        for (PlayerTextureRecord record : pageRecords) {
+          record.blob(TextureKind.SKIN).ifPresent(blob -> blobs.put(blob.sha256(), blob));
+          record.blob(TextureKind.CAPE).ifPresent(blob -> blobs.put(blob.sha256(), blob));
+        }
         for (MissingTexture missing : manifest.missingHashes()) {
-          if (this.rejectedTextureHashes.contains(missing.hash())) {
+          if (this.rejectedTextureHashes.contains(missing.hash())
+              || !uploadedThisSync.add(missing.hash())) {
             continue;
           }
           TextureBlob blob = blobs.get(missing.hash());
@@ -305,6 +314,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
           }
         }
       }
+      this.lastTextureManifest = Map.copyOf(currentManifest);
       this.lastTextureSync = this.clock.instant();
       this.textureBackoff.reset();
       this.nextTextureMillis = this.clock.millis()
@@ -314,6 +324,24 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     } catch (Exception error) {
       handleFailure("texture_source_failed", this.textureBackoff.next(), false);
     }
+  }
+
+  static Map<String, String> manifestFingerprints(
+      List<PlayerTextureRecord> records
+  ) {
+    Map<String, String> fingerprints = new HashMap<>(records.size());
+    for (PlayerTextureRecord record : records) {
+      PlayerTexture manifest = record.manifest();
+      fingerprints.put(manifest.playerUuid(), String.join("|",
+          manifest.playerName(),
+          Objects.toString(manifest.skinHash(), ""),
+          Objects.toString(manifest.capeHash(), ""),
+          manifest.model(),
+          manifest.source(),
+          manifest.updatedAt(),
+          Boolean.toString(manifest.deleted())));
+    }
+    return Map.copyOf(fingerprints);
   }
 
   private void handleApiFailure(

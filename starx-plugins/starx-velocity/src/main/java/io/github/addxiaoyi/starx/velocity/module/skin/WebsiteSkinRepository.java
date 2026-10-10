@@ -5,7 +5,6 @@ package io.github.addxiaoyi.starx.velocity.module.skin;
 
 import io.github.addxiaoyi.starx.api.dto.SkinDto;
 import io.github.addxiaoyi.starx.api.repository.SkinRepository;
-import io.github.addxiaoyi.starx.common.smart.SmartCache;
 import com.google.gson.Gson;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -23,46 +22,45 @@ public final class WebsiteSkinRepository
 implements SkinRepository {
     private static final int CACHE_TTL_MS = 60000;
     private static final int CACHE_MAX_SIZE = 500;
-    private static final int PROFILE_CACHE_TTL_MS = 300000;
     private static final int PROFILE_CACHE_MAX_SIZE = 2000;
+    private static final long PROFILE_CACHE_TTL_MS = Duration.ofDays(1).toMillis();
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(3);
     private final String skinProfileBaseUrl;
     private final Logger logger;
     private final HttpClient httpClient;
     private final Gson gson;
     private final TextureUrlPolicy textureUrlPolicy;
-    private final SmartCache<PlayerSkinKey, Optional<SkinDto>> cache;
-    private final SmartCache<String, Optional<WebsiteSkinProfile>> profileCache;
+    private final java.util.LinkedHashMap<PlayerSkinKey, SkinDto> cache =
+        new java.util.LinkedHashMap<>(CACHE_MAX_SIZE, 0.75f, true);
+    private final java.util.LinkedHashMap<String, CachedProfile> profileCache =
+        new java.util.LinkedHashMap<>(PROFILE_CACHE_MAX_SIZE, 0.75f, true);
     private final ProfileFallbackCache fallbackCache;
+    private final java.util.Set<String> inFlightProfiles = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public WebsiteSkinRepository(String skinProfileBaseUrl, Logger logger) {
         this.skinProfileBaseUrl = skinProfileBaseUrl.endsWith("/") ? skinProfileBaseUrl.substring(0, skinProfileBaseUrl.length() - 1) : skinProfileBaseUrl;
         this.logger = logger;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5L)).build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
         this.gson = new Gson();
         this.textureUrlPolicy = TextureUrlPolicy.forWebsite(this.skinProfileBaseUrl);
-        this.cache = new SmartCache<PlayerSkinKey, Optional<SkinDto>>(
-            CACHE_MAX_SIZE, CACHE_TTL_MS, key -> Optional.empty());
-        this.profileCache = new SmartCache<String, Optional<WebsiteSkinProfile>>(
-            PROFILE_CACHE_MAX_SIZE, PROFILE_CACHE_TTL_MS, key -> Optional.empty());
         this.fallbackCache = new ProfileFallbackCache(Duration.ofHours(24));
     }
 
     @Override
     public Optional<SkinDto> findByPlayer(UUID uuid, String name) {
-        PlayerSkinKey cacheKey = new PlayerSkinKey(uuid, name);
-        Optional<SkinDto> cached = this.cache.getIfPresent(cacheKey);
-        if (cached != null) {
-            return cached;
+        PlayerSkinKey key = new PlayerSkinKey(uuid, name);
+        synchronized (this.cache) {
+            SkinDto cached = this.cache.get(key);
+            if (cached != null) return Optional.of(cached);
         }
         Optional<SkinDto> fetched = this.fetchSkin(uuid, name);
-        if (fetched.isPresent()) {
-            this.cache.put(cacheKey, fetched);
-            return fetched;
-        }
-        Optional<SkinDto> fallback = this.fallbackCache.get(name, Instant.now())
-            .map(profile -> new SkinDto(uuid, name, profile.id(), null, null, profile.textureUrl()));
-        this.cache.put(cacheKey, fallback);
-        return fallback;
+        fetched.ifPresent(skin -> {
+            synchronized (this.cache) {
+                this.cache.put(key, skin);
+                trim(this.cache, CACHE_MAX_SIZE);
+            }
+        });
+        return fetched;
     }
 
     @Override
@@ -102,45 +100,90 @@ implements SkinRepository {
         return false;
     }
 
+    Optional<WebsiteSkinProfile> findProfile(UUID uuid, String name) {
+        String cacheKey = uuid == null ? null : uuid.toString();
+        return findProfileInternal(uuid, name, cacheKey, false);
+    }
+
     Optional<WebsiteSkinProfile> findProfile(String name) {
-        return this.findProfile(name, false);
+        return findProfileInternal(null, name, normalizeName(name), false);
     }
 
     Optional<WebsiteSkinProfile> findProfile(String name, boolean forceRefresh) {
-        String cacheKey = normalizeName(name);
-        if (cacheKey == null) {
-            return Optional.empty();
-        }
-        if (forceRefresh) {
-            this.profileCache.remove(cacheKey);
-        } else {
-            Optional<WebsiteSkinProfile> cached = this.profileCache.getIfPresent(cacheKey);
-            if (cached != null) {
-                return cached;
-            }
-        }
-        Optional<WebsiteSkinProfile> profile = this.fetchProfile(name);
-        this.profileCache.put(cacheKey, profile);
-        return profile;
+        return findProfileInternal(null, name, normalizeName(name), forceRefresh);
     }
 
-    private Optional<WebsiteSkinProfile> fetchProfile(String name) {
-        String url = this.skinProfileBaseUrl + "/" + name + ".json";
-        try {
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(5L)).GET().build();
-            HttpResponse<String> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                return this.fallbackCache.get(name, Instant.now());
+    private Optional<WebsiteSkinProfile> findProfileInternal(
+        UUID uuid,
+        String name,
+        String cacheKey,
+        boolean forceRefresh
+    ) {
+        if (cacheKey == null || cacheKey.isBlank()) return Optional.empty();
+        if (forceRefresh) {
+            synchronized (this.profileCache) {
+                this.profileCache.remove(cacheKey);
             }
+        } else {
+            synchronized (this.profileCache) {
+                CachedProfile cached = this.profileCache.get(cacheKey);
+                if (cached != null && cached.expiresAtMillis() > System.currentTimeMillis()) {
+                    return Optional.of(cached.profile());
+                }
+                if (cached != null) this.profileCache.remove(cacheKey);
+            }
+        }
+        if (!this.inFlightProfiles.add(cacheKey)) return Optional.empty();
+        try {
+            Optional<WebsiteSkinProfile> profile = fetchProfile(uuid, name);
+            profile.ifPresent(value -> {
+                synchronized (this.profileCache) {
+                    this.profileCache.put(cacheKey, new CachedProfile(
+                        value, System.currentTimeMillis() + PROFILE_CACHE_TTL_MS));
+                    trim(this.profileCache, PROFILE_CACHE_MAX_SIZE);
+                }
+            });
+            return profile;
+        } finally {
+            this.inFlightProfiles.remove(cacheKey);
+        }
+    }
+
+    void invalidate(String name) {
+        String cacheKey = normalizeName(name);
+        if (cacheKey != null) {
+            synchronized (this.profileCache) {
+                this.profileCache.remove(cacheKey);
+            }
+        }
+    }
+
+    private Optional<WebsiteSkinProfile> fetchProfile(UUID uuid, String name) {
+        try {
+            HttpResponse<String> response = fetchProfileResponse(uuid == null ? name : uuid.toString());
+            if (response.statusCode() == 404 && uuid != null) {
+                response = fetchProfileResponse(name);
+            }
+            if (response.statusCode() == 404) return Optional.empty();
+            if (response.statusCode() != 200) return fallbackCache.get(name, Instant.now());
             Optional<WebsiteSkinProfile> profile = WebsiteSkinProfile.parse(
                 response.body(), this.gson, this.textureUrlPolicy);
             profile.ifPresent(value -> this.fallbackCache.put(name, value, Instant.now()));
-            return profile.or(() -> this.fallbackCache.get(name, Instant.now()));
+            return profile;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            return Optional.empty();
+        } catch (Exception error) {
+            this.logger.log(Level.FINE, "Website skin profile request failed for " + name, error);
+            return fallbackCache.get(name, Instant.now());
         }
-        catch (Exception e) {
-            this.logger.log(Level.WARNING, "Failed to fetch website texture profile for " + name, e);
-            return this.fallbackCache.get(name, Instant.now());
-        }
+    }
+
+    private HttpResponse<String> fetchProfileResponse(String key) throws Exception {
+        String url = this.skinProfileBaseUrl + "/" + java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8) + ".json";
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url))
+            .timeout(REQUEST_TIMEOUT).GET().build();
+        return this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private static String normalizeName(String name) {
@@ -150,5 +193,10 @@ implements SkinRepository {
         return name.trim().toLowerCase(Locale.ROOT);
     }
 
+    private static <K, V> void trim(java.util.LinkedHashMap<K, V> cache, int maxSize) {
+        while (cache.size() > maxSize) cache.remove(cache.keySet().iterator().next());
+    }
+
+    private record CachedProfile(WebsiteSkinProfile profile, long expiresAtMillis) { }
     private record PlayerSkinKey(UUID uuid, String name) { }
 }

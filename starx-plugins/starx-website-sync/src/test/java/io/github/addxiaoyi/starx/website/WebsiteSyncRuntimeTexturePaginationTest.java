@@ -57,6 +57,54 @@ class WebsiteSyncRuntimeTexturePaginationTest {
     }
   }
 
+  @Test
+  void skipsManifestNetworkRequestsWhenTextureManifestIsUnchanged() throws Exception {
+    FakeClient client = new FakeClient();
+    WebsiteSyncConfig config = new WebsiteSyncConfig(
+        true,
+        URI.create("https://star-web.top"),
+        "proxy-1",
+        WebsitePlatform.VELOCITY,
+        SecretValue.empty(),
+        SecretValue.of("stx_node_test"),
+        new WebsiteSyncConfig.Heartbeat(5, 250, 500),
+        new WebsiteSyncConfig.Textures(true, "skinsrestorer", 60, 2));
+    TextureSource textures = () -> List.of(
+        texture("8667ba71-b85a-4004-af54-457a9734eed7", "Steve", "a"));
+    WebsiteSyncRuntime runtime = new WebsiteSyncRuntime(
+        config,
+        client,
+        ignored -> { },
+        () -> new NodeSnapshot("0.2.0", null, 0, 100, null, null, false, List.of()),
+        textures,
+        List.of(NodeCapabilities.NETWORK_STATUS),
+        ignored -> { });
+
+    try {
+      runtime.start();
+      await(() -> runtime.snapshot().lastTextureSyncAt() != null);
+      Thread.sleep(2_200);
+      await(() -> runtime.snapshot().lastHeartbeatAt() != null);
+
+      assertEquals(1, client.pages.size());
+    } finally {
+      runtime.close();
+    }
+  }
+
+  @Test
+  void fingerprintsManifestMetadataButNotTextureBytes() {
+    PlayerTextureRecord previous = texture("8667ba71-b85a-4004-af54-457a9734eed7", "Steve", "a");
+    PlayerTextureRecord sameSkin = texture("8667ba71-b85a-4004-af54-457a9734eed7", "Steve", "a");
+    PlayerTextureRecord changedSkin = texture("8667ba71-b85a-4004-af54-457a9734eed7", "Steve", "b");
+
+    assertEquals(
+        WebsiteSyncRuntime.manifestFingerprints(List.of(previous)),
+        WebsiteSyncRuntime.manifestFingerprints(List.of(sameSkin)));
+    assertTrue(!WebsiteSyncRuntime.manifestFingerprints(List.of(previous))
+        .equals(WebsiteSyncRuntime.manifestFingerprints(List.of(changedSkin))));
+  }
+
   private static PlayerTextureRecord texture(
       String uuid,
       String name,

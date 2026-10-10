@@ -36,6 +36,8 @@ import java.util.function.Supplier;
 
 final class SkinsRestorerTextureSource implements TextureSource {
   private static final int MAX_PLAYERS = 100_000;
+  private static final Duration RECORD_CACHE_TTL = Duration.ofMinutes(15);
+  private static final Duration TEXTURE_CACHE_TTL = Duration.ofHours(1);
 
   record PlayerRef(UUID uuid, String name) {
     PlayerRef {
@@ -60,12 +62,23 @@ final class SkinsRestorerTextureSource implements TextureSource {
   private record CacheKey(TextureKind kind, URI uri) {
   }
 
+  private record PlayerKey(UUID uuid, String name) {
+  }
+
+  @FunctionalInterface
+  interface SkinLookup {
+    Optional<SkinDto> find(UUID uuid, String name);
+  }
+
   private final Supplier<? extends Collection<PlayerRef>> players;
   private final SkinRepository skins;
+  private final SkinLookup skinLookup;
   private final TextureFetcher fetcher;
   private final Clock clock;
   private final Consumer<String> logger;
   private final LruTtlCache<CacheKey, TextureBlob> cache;
+  private final LruTtlCache<PlayerKey, Optional<PlayerTextureRecord>> recordCache;
+  private volatile long lastLoggedSkipTime;
 
   SkinsRestorerTextureSource(
       ProxyServer proxy,
@@ -78,6 +91,7 @@ final class SkinsRestorerTextureSource implements TextureSource {
             .map(player -> new PlayerRef(player.getUniqueId(), player.getUsername()))
             .toList(),
         skins,
+        offlineSafeLookup(skins),
         httpFetcher(heartbeat),
         Clock.systemUTC(),
         logger);
@@ -89,7 +103,7 @@ final class SkinsRestorerTextureSource implements TextureSource {
       WebsiteSyncConfig.Heartbeat heartbeat,
       Consumer<String> logger
   ) {
-    this(players, skins, httpFetcher(heartbeat), Clock.systemUTC(), logger);
+    this(players, skins, offlineSafeLookup(skins), httpFetcher(heartbeat), Clock.systemUTC(), logger);
   }
 
   SkinsRestorerTextureSource(
@@ -99,13 +113,26 @@ final class SkinsRestorerTextureSource implements TextureSource {
       Clock clock,
       Consumer<String> logger
   ) {
+    this(players, skins, offlineSafeLookup(skins), fetcher, clock, logger);
+  }
+
+  SkinsRestorerTextureSource(
+      Supplier<? extends Collection<PlayerRef>> players,
+      SkinRepository skins,
+      SkinLookup skinLookup,
+      TextureFetcher fetcher,
+      Clock clock,
+      Consumer<String> logger
+  ) {
     this.players = Objects.requireNonNull(players, "players");
     this.skins = Objects.requireNonNull(skins, "skins");
+    this.skinLookup = Objects.requireNonNull(skinLookup, "skinLookup");
     this.fetcher = Objects.requireNonNull(fetcher, "fetcher");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.logger = logger == null ? ignored -> { } : logger;
     // 使用基于 TTL 的 LRU 缓存，避免 "满则清空" 导致的抖动
-    this.cache = new LruTtlCache<>(2048, java.time.Duration.ofHours(1).toMillis());
+    this.cache = new LruTtlCache<>(2048, TEXTURE_CACHE_TTL.toMillis());
+    this.recordCache = new LruTtlCache<>(MAX_PLAYERS, RECORD_CACHE_TTL.toMillis());
   }
 
   static List<PlayerRef> mergePlayers(
@@ -136,7 +163,9 @@ final class SkinsRestorerTextureSource implements TextureSource {
     List<PlayerTextureRecord> records = new ArrayList<>(online.size());
     int skipped = 0;
     for (PlayerRef player : online) {
-      Optional<PlayerTextureRecord> record = load(player);
+      PlayerKey key = new PlayerKey(player.uuid(), player.name());
+      Optional<PlayerTextureRecord> record = this.recordCache.computeIfAbsent(
+          key, this.clock.millis(), ignored -> load(player));
       if (record.isPresent()) {
         records.add(record.orElseThrow());
       } else {
@@ -144,16 +173,32 @@ final class SkinsRestorerTextureSource implements TextureSource {
       }
     }
     if (skipped > 0) {
-      this.logger.accept(
-          "StarX website texture snapshot completed: players=" + online.size()
-              + " emitted=" + records.size() + " skipped=" + skipped);
+      if (this.lastLoggedSkipTime < this.clock.millis() - Duration.ofHours(1).toMillis()) {
+        this.lastLoggedSkipTime = this.clock.millis();
+        this.logger.accept(
+            "StarX website texture snapshot completed: players=" + online.size()
+                + " emitted=" + records.size() + " skipped=" + skipped);
+      }
     }
     return List.copyOf(records);
   }
 
+  private static SkinLookup offlineSafeLookup(SkinRepository repository) {
+    Objects.requireNonNull(repository, "skins");
+    if (repository instanceof io.github.addxiaoyi.starx.common.skin.SkinsRestorerSkinRepository skinsRestorer) {
+      skinsRestorer.setAllowMojangApi(false);
+    }
+    return (uuid, name) -> {
+      if (repository instanceof io.github.addxiaoyi.starx.common.skin.SkinsRestorerSkinRepository skinsRestorer) {
+        return skinsRestorer.findByPlayer(uuid, name, false);
+      }
+      return repository.findByPlayer(uuid, name);
+    };
+  }
+
   private Optional<PlayerTextureRecord> load(PlayerRef player) {
     try {
-      Optional<SkinDto> skin = this.skins.findByPlayer(player.uuid(), player.name());
+      Optional<SkinDto> skin = this.skinLookup.find(player.uuid(), player.name());
       if (skin.isEmpty()) {
         return Optional.empty();
       }
@@ -162,9 +207,9 @@ final class SkinsRestorerTextureSource implements TextureSource {
         return Optional.empty();
       }
       TextureProfile texture = profile.orElseThrow();
-      TextureBlob skinBlob = blob(TextureKind.SKIN, texture.skin());
+      TextureBlob cachedSkin = blob(TextureKind.SKIN, texture.skin());
       EnumMap<TextureKind, TextureBlob> blobs = new EnumMap<>(TextureKind.class);
-      blobs.put(TextureKind.SKIN, skinBlob);
+      blobs.put(TextureKind.SKIN, cachedSkin);
       String capeHash = null;
       if (texture.cape() != null) {
         try {
@@ -178,7 +223,7 @@ final class SkinsRestorerTextureSource implements TextureSource {
       PlayerTexture manifest = new PlayerTexture(
           player.uuid().toString(),
           player.name(),
-          skinBlob.sha256(),
+          cachedSkin.sha256(),
           capeHash,
           texture.model(),
           "skinsrestorer",

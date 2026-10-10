@@ -492,8 +492,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             MaintenanceModule.Config.defaultConfig(),
             new MaintenanceStateService(new JdbcRuntimeSettingRepository(defaultDataSource)));
         this.moduleManager.register(maintenanceModule);
-        VelocityWebsiteSync websiteSync = new VelocityWebsiteSync(
-            this, backendBridge, maintenanceModule, userRepository, accountIdentities);
+        VelocityWebsiteSync websiteSync = new VelocityWebsiteSync(this, backendBridge, maintenanceModule);
         this.lifecycle.own("website synchronization", websiteSync::close);
         this.moduleManager.register(new ChatModule(this, messageBridge, ChatModule.Config.defaultConfig()));
         this.moduleManager.register(new RedirectModule(

@@ -40,6 +40,65 @@ final class WebsiteSkinRepositoryTest {
   }
 
   @Test
+  void prefersUuidProfileEndpointForLoginLookup() throws Exception {
+    AtomicInteger uuidRequests = new AtomicInteger();
+    AtomicInteger nameRequests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    server.createContext("/" + uuid + ".json", exchange -> {
+      uuidRequests.incrementAndGet();
+      byte[] body = ("{\"id\":\"" + uuid.toString().replace("-", "")
+          + "\",\"textures\":{\"SKIN\":{\"url\":\"https://textures.minecraft.net/texture/skin\"}}}")
+          .getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(200, body.length);
+      try (OutputStream output = exchange.getResponseBody()) { output.write(body); }
+    });
+    server.createContext("/player.json", exchange -> {
+      nameRequests.incrementAndGet();
+      exchange.sendResponseHeaders(404, -1);
+      exchange.close();
+    });
+    server.start();
+    try {
+      WebsiteSkinRepository repository = new WebsiteSkinRepository(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          Logger.getLogger(WebsiteSkinRepositoryTest.class.getName()));
+      assertTrue(repository.findProfile(uuid, "player").isPresent());
+      assertEquals(1, uuidRequests.get());
+      assertEquals(0, nameRequests.get());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void doesNotNegativeCacheUuidProfileMisses() throws Exception {
+    AtomicInteger requests = new AtomicInteger();
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/" + uuid + ".json", exchange -> {
+      int count = requests.incrementAndGet();
+      byte[] body = count == 1 ? new byte[0] : ("{\"id\":\"" + uuid.toString().replace("-", "")
+          + "\",\"textures\":{\"SKIN\":{\"url\":\"https://textures.minecraft.net/texture/skin\"}}}")
+          .getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(count == 1 ? 404 : 200, count == 1 ? -1 : body.length);
+      if (count > 1) try (OutputStream output = exchange.getResponseBody()) { output.write(body); }
+      else exchange.close();
+    });
+    server.start();
+    try {
+      WebsiteSkinRepository repository = new WebsiteSkinRepository(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          Logger.getLogger(WebsiteSkinRepositoryTest.class.getName()));
+      assertTrue(repository.findProfile(uuid, "player").isEmpty());
+      assertTrue(repository.findProfile(uuid, "player").isPresent());
+      assertEquals(2, requests.get());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void doesNotReuseSkinDtoForAnotherUuidWithTheSameName() throws Exception {
     AtomicInteger requests = new AtomicInteger();
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

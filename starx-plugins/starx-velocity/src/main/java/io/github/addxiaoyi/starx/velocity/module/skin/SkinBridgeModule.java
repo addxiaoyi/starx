@@ -47,10 +47,16 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.kyori.adventure.text.Component;
 
@@ -59,6 +65,8 @@ implements VelocityModule {
     private static final Logger LOGGER = Logger.getLogger(SkinBridgeModule.class.getName());
     private static final long REFRESH_DEDUPLICATION_MS = 5000L;
     private static final int MAX_RECENT_REFRESHES = 4096;
+  private static final int SKIN_LOOKUP_THREADS = 1;
+  private static final int SKIN_LOOKUP_QUEUE_SIZE = 32;
     private final StarxVelocityPlugin plugin;
     private final ProxyServer proxy;
     private final EventBus eventBus;
@@ -75,6 +83,15 @@ implements VelocityModule {
     private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
     private final ConcurrentMap<UUID, Long> recentSkinRefreshes = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, String> appliedSkinProviders = new ConcurrentHashMap<>();
+  private final java.util.Set<UUID> websiteLookups = ConcurrentHashMap.newKeySet();
+  private final ThreadPoolExecutor skinLookupExecutor = new ThreadPoolExecutor(
+      SKIN_LOOKUP_THREADS,
+      SKIN_LOOKUP_THREADS,
+      0L,
+      TimeUnit.MILLISECONDS,
+      new ArrayBlockingQueue<>(SKIN_LOOKUP_QUEUE_SIZE),
+      skinLookupThreadFactory(),
+      new ThreadPoolExecutor.AbortPolicy());
     private Listener listener;
     private CommandMeta skinCommandMeta;
 
@@ -204,6 +221,8 @@ implements VelocityModule {
             this.backendBridge.onSkinResponse(message -> { });
             this.backendBridge.onBackendReady((player, server) -> { });
         }
+        this.skinLookupExecutor.shutdownNow();
+        this.websiteLookups.clear();
         this.skinService = null;
         this.writableSkinRepository = null;
         this.websiteRepository = null;
@@ -236,28 +255,19 @@ implements VelocityModule {
         if (this.skinService == null) {
             return;
         }
-        if (this.websiteRepository != null && this.applyWebsiteSkin(uuid, playerName)) {
-            return;
-        }
-        if (this.backendBridge != null
-            && !this.skinsRestorerAvailable
-            && !this.isWebsiteSkinAvailable()
-            && this.backendBridge.requestSkin(uuid, playerName).accepted()) {
-            return;
-        }
+        if (this.backendBridge != null && !this.skinsRestorerAvailable
+            && !this.isWebsiteSkinAvailable()) return;
         this.skinService.refreshSkin(uuid, playerName);
     }
 
     private void refreshSkin(Player player, RegisteredServer connectedServer) {
-        if (this.skinService == null) {
-            return;
-        }
-        if (this.websiteRepository != null
-            && this.applyWebsiteSkin(player.getUniqueId(), player.getUsername())) {
+        if (this.skinService == null || !player.isActive()) return;
+        if (this.websiteRepository != null) {
+            refreshWebsiteSkinAsync(player);
             return;
         }
         if (hasExistingTexture(player.getGameProfileProperties())) {
-            this.appliedSkinProviders.putIfAbsent(player.getUniqueId(), "登录档案皮肤");
+            this.appliedSkinProviders.putIfAbsent(player.getUniqueId(), "client-login");
             return;
         }
         if (this.backendBridge != null
@@ -266,16 +276,44 @@ implements VelocityModule {
             VelocityBackendBridge.DispatchResult dispatch = connectedServer == null
                 ? this.backendBridge.requestSkin(player)
                 : this.backendBridge.requestSkin(player, connectedServer);
-            if (dispatch.accepted()) {
-                return;
-            }
-            LOGGER.warning("Backend skin request unavailable for " + player.getUsername()
-                + ": " + dispatch);
-            if (this.applyCachedBackendSkin(player)) {
-                return;
-            }
+            if (dispatch.accepted() || this.applyCachedBackendSkin(player)) return;
         }
         this.skinService.refreshSkin(player.getUniqueId(), player.getUsername());
+    }
+
+    private void refreshWebsiteSkinAsync(Player player) {
+        UUID uuid = player.getUniqueId();
+        String name = player.getUsername();
+        WebsiteSkinRepository repository = this.websiteRepository;
+        if (repository == null || !this.websiteLookups.add(uuid)) return;
+        try {
+            this.skinLookupExecutor.execute(() -> {
+                try {
+                    Optional<WebsiteSkinProfile> profile = repository.findProfile(uuid, name);
+                    if (profile.isEmpty() || !profile.get().belongsTo(uuid, name)) return;
+                    this.proxy.getScheduler().buildTask(this.plugin, () -> {
+                        Player current = this.proxy.getPlayer(uuid).orElse(null);
+                        if (current == null || current != player || !current.isActive()) return;
+                        this.deliverSkin(uuid, name, profile.get(), "website", "website-skin");
+                    }).schedule();
+                } finally {
+                    this.websiteLookups.remove(uuid);
+                }
+            });
+        } catch (RejectedExecutionException error) {
+            this.websiteLookups.remove(uuid);
+            LOGGER.fine("Website skin lookup queue is full uuid=" + uuid);
+        }
+    }
+
+    private static ThreadFactory skinLookupThreadFactory() {
+        java.util.concurrent.atomic.AtomicInteger sequence = new java.util.concurrent.atomic.AtomicInteger();
+        return task -> {
+            Thread thread = new Thread(task, "starx-skin-profile-" + sequence.incrementAndGet());
+            thread.setDaemon(true);
+            thread.setPriority(Thread.NORM_PRIORITY - 1);
+            return thread;
+        };
     }
 
     private void applyBackendSkin(io.github.addxiaoyi.starx.api.bridge.BridgeMessage message) {
@@ -598,12 +636,11 @@ implements VelocityModule {
 
         @Subscribe
         public void onServerConnected(ServerConnectedEvent event) {
+            if (SkinBridgeModule.this.websiteRepository != null) return;
             if (!shouldRefreshAfterConnect(
                 SkinBridgeModule.this.backendBridge != null,
                 SkinBridgeModule.this.skinsRestorerAvailable,
-                SkinBridgeModule.this.isWebsiteSkinAvailable())) {
-                return;
-            }
+                false)) return;
             SkinBridgeModule.this.refreshSkinAsync(event.getPlayer(), event.getServer());
         }
     }

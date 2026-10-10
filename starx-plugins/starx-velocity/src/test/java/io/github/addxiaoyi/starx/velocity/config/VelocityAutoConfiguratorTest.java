@@ -62,7 +62,7 @@ class VelocityAutoConfiguratorTest {
     assertTrue(result.changed());
     assertEquals(96, String.valueOf(root.get("api-key")).length());
     assertEquals("proxy-node-a", nested(root, "website-sync", "node-id"));
-    assertEquals(true, nested(root, "website-sync", "textures", "enabled"));
+    assertEquals(false, nested(root, "website-sync", "textures", "enabled"));
     assertEquals(true, nested(root, "modules", "starx.integrations.luckperms", "enabled"));
     assertEquals(false, nested(root, "modules", "starx.integrations.floodgate", "enabled"));
     assertEquals(false, nested(root, "modules", "starx.integrations.tab", "enabled"));

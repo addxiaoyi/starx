@@ -32,7 +32,7 @@ final class VelocityWebsiteSyncConfigParser {
             integer(heartbeat, "connect-timeout-ms", 3_000),
             integer(heartbeat, "request-timeout-ms", 8_000)),
         new WebsiteSyncConfig.Textures(
-            bool(textures, "enabled", true),
+            false,
             string(textures, "source", "skinsrestorer"),
             integer(textures, "manifest-interval-seconds", 300),
             integer(textures, "batch-size", 500)),

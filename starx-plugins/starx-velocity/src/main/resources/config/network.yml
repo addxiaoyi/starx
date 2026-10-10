@@ -86,7 +86,7 @@ website-sync:
     request-timeout-ms: 8000
   textures:
     # 是否同步皮肤资源清单；需要对应皮肤插件时才保持 true。
-    enabled: true
+    enabled: false
     # 皮肤来源，例如 skinsrestorer；自动配置可能根据已安装插件调整。
     source: "skinsrestorer"
     # 资源清单同步间隔和每批数量。

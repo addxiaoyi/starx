@@ -103,6 +103,48 @@ class SkinsRestorerTextureSourceTest {
   }
 
   @Test
+  void cachesRecordsAndUsesInjectedLocalSkinLookup() throws Exception {
+    URI skinUri = URI.create("https://textures.minecraft.net/texture/cached-skin");
+    SkinDto skin = new SkinDto(
+        PLAYER_ID, "Addxiaoyi", "skin-cached",
+        property(skinUri, null, "classic", 1_722_000_000_000L), "signature", null);
+    java.util.concurrent.atomic.AtomicInteger lookups = new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger downloads = new java.util.concurrent.atomic.AtomicInteger();
+    SkinRepository repository = new SkinRepository() {
+      @Override
+      public Optional<SkinDto> findByPlayer(UUID uuid, String name) {
+        throw new AssertionError("test lookup callback should be used");
+      }
+
+      @Override public void setSkinId(UUID uuid, String skinId) { }
+      @Override public void setSkinData(UUID uuid, String value, String signature) { }
+      @Override public void clearSkin(UUID uuid) { }
+    };
+    byte[] skinPng = png(64, 64);
+    SkinsRestorerTextureSource source = new SkinsRestorerTextureSource(
+        () -> List.of(new SkinsRestorerTextureSource.PlayerRef(PLAYER_ID, "Addxiaoyi")),
+        repository,
+        (uuid, name) -> {
+          assertEquals(PLAYER_ID, uuid);
+          assertEquals("Addxiaoyi", name);
+          lookups.incrementAndGet();
+          return Optional.of(skin);
+        },
+        uri -> {
+          downloads.incrementAndGet();
+          return skinPng;
+        },
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        ignored -> { });
+
+    source.snapshot();
+    source.snapshot();
+
+    assertEquals(1, lookups.get());
+    assertEquals(1, downloads.get());
+  }
+
+  @Test
   void rejectsMalformedPropertiesWithoutFailingTheSnapshot() {
     SkinRepository repository = repository(new SkinDto(
         PLAYER_ID, "Addxiaoyi", "skin-3", "not-base64", null, null));
@@ -130,6 +172,7 @@ class SkinsRestorerTextureSourceTest {
     return new SkinsRestorerTextureSource(
         () -> List.of(new SkinsRestorerTextureSource.PlayerRef(PLAYER_ID, "Addxiaoyi")),
         repository,
+        (uuid, name) -> repository.findByPlayer(uuid, name),
         fetcher,
         Clock.fixed(NOW, ZoneOffset.UTC),
         ignored -> { });

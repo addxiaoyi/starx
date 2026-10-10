@@ -176,13 +176,15 @@ implements VelocityModule {
     void processQueues() {
         int maxRelease = this.releaseRate();
         if (maxRelease <= 0) return;
-        this.queueService.processQueues(this::connect, maxRelease);
+        Map<String, Integer> queueSnapshot = this.queueService.snapshot();
+        this.queueService.processQueues(
+            (player, serverName) -> this.connect(player, serverName, queueSnapshot), maxRelease);
     }
 
-    private CompletableFuture<Boolean> connect(Player player, String serverName) {
+    private CompletableFuture<Boolean> connect(
+        Player player, String serverName, Map<String, Integer> queueSnapshot) {
         ProxyServer proxy = this.plugin.proxy();
-        Optional<String> selected = this.targetPolicy.resolve(
-            serverName, this.queueService.snapshot());
+        Optional<String> selected = this.targetPolicy.resolve(serverName, queueSnapshot);
         if (selected.isEmpty()) return CompletableFuture.completedFuture(false);
 
         String selectedName = selected.get();
@@ -303,3 +305,4 @@ implements VelocityModule {
         }
     }
 }
+

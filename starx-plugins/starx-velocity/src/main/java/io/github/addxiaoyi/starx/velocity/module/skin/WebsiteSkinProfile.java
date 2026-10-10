@@ -130,9 +130,11 @@ final class WebsiteSkinProfile {
   }
 
   boolean belongsTo(UUID uuid, String playerName) {
-    if (uuid == null || playerName == null || playerName.isBlank()
-        || id == null || id.isBlank() || name == null || name.isBlank()) {
+    if (uuid == null || playerName == null || playerName.isBlank()) {
       return false;
+    }
+    if (id == null || id.isBlank()) {
+      return true;
     }
     try {
       String compactId = id.replace("-", "");
@@ -141,7 +143,8 @@ final class WebsiteSkinProfile {
       }
       UUID profileUuid = UUID.fromString(compactId.replaceFirst(
           "^(.{8})(.{4})(.{4})(.{4})(.{12})$", "$1-$2-$3-$4-$5"));
-      return uuid.equals(profileUuid) && name.equalsIgnoreCase(playerName.trim());
+      return uuid.equals(profileUuid)
+          && (name == null || name.isBlank() || name.equalsIgnoreCase(playerName.trim()));
     } catch (IllegalArgumentException ignored) {
       return false;
     }

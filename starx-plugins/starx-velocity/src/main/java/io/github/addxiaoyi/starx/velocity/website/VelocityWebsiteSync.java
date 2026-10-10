@@ -2,10 +2,7 @@ package io.github.addxiaoyi.starx.velocity.website;
 
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
 import io.github.addxiaoyi.starx.api.dto.UserDto;
-import io.github.addxiaoyi.starx.common.database.JdbcUserRepository;
-import io.github.addxiaoyi.starx.common.identity.AccountIdentityResolver;
 import io.github.addxiaoyi.starx.common.platform.NodeHealthStateMachine;
-import io.github.addxiaoyi.starx.common.skin.SkinsRestorerSkinRepository;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendNode;
 import io.github.addxiaoyi.starx.velocity.bridge.BackendNodeRegistry;
@@ -29,11 +26,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
 public final class VelocityWebsiteSync implements AutoCloseable {
   static final Duration CHILD_OFFLINE_AFTER = Duration.ofSeconds(90);
@@ -47,9 +42,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
   public VelocityWebsiteSync(
       StarxVelocityPlugin plugin,
       VelocityBackendBridge bridge,
-      MaintenanceModule maintenance,
-      JdbcUserRepository userRepository,
-      AccountIdentityResolver accountIdentities
+      MaintenanceModule maintenance
   ) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
@@ -65,11 +58,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
         this.httpClient,
         new YamlWebsiteCredentialStore(plugin.dataDirectory().resolve("config.yml")),
         this::currentSnapshot,
-        textureSource(
-            plugin,
-            config,
-            Objects.requireNonNull(userRepository, "userRepository"),
-            Objects.requireNonNull(accountIdentities, "accountIdentities")),
+        TextureSource.empty(),
         List.of(
             NodeCapabilities.NETWORK_STATUS,
             NodeCapabilities.PUBLIC_PLAYER_COUNT,
@@ -78,53 +67,6 @@ public final class VelocityWebsiteSync implements AutoCloseable {
             NodeCapabilities.SKIN_REFRESH,
             NodeCapabilities.CAPE_REFRESH),
         plugin.logger()::info);
-  }
-
-  private static TextureSource textureSource(
-      StarxVelocityPlugin plugin,
-      WebsiteSyncConfig config,
-      JdbcUserRepository userRepository,
-      AccountIdentityResolver accountIdentities
-  ) {
-    if (!config.textures().enabled()) {
-      return TextureSource.empty();
-    }
-    if (!"skinsrestorer".equals(config.textures().source())) {
-      throw new IllegalArgumentException(
-          "Unsupported Velocity website texture source: " + config.textures().source());
-    }
-    Consumer<String> logger = plugin.logger()::info;
-    SkinsRestorerSkinRepository skinRepository = new SkinsRestorerSkinRepository();
-    // 中国大陆等受限网络下 Mojang API 不可达，纹理同步只读 SkinsRestorer 本地缓存，
-    // 避免 JDK HttpClient 线程卡死在 SSL 握手并无限堆积。
-    skinRepository.setAllowMojangApi(false);
-    return new SkinsRestorerTextureSource(
-        () -> SkinsRestorerTextureSource.mergePlayers(
-            historicalPlayers(userRepository, accountIdentities::knownMinecraftUuids, logger),
-            plugin.proxy().getAllPlayers().stream()
-                .map(player -> new SkinsRestorerTextureSource.PlayerRef(
-                    player.getUniqueId(), player.getUsername()))
-                .toList()),
-        skinRepository,
-        config.heartbeat(),
-        logger);
-  }
-
-  static List<SkinsRestorerTextureSource.PlayerRef> historicalPlayers(
-      JdbcUserRepository userRepository,
-      Function<UUID, Set<UUID>> knownMinecraftUuids,
-      Consumer<String> logger
-  ) {
-    try {
-      return userRepository.findAll().stream()
-          .flatMap(user -> knownMinecraftUuids.apply(user.uuid()).stream()
-              .map(uuid -> new SkinsRestorerTextureSource.PlayerRef(uuid, user.username())))
-          .toList();
-    } catch (RuntimeException error) {
-      logger.accept("StarX website texture history lookup failed; using online players only: "
-          + error.getClass().getSimpleName());
-      return List.of();
-    }
   }
 
   public void start() {

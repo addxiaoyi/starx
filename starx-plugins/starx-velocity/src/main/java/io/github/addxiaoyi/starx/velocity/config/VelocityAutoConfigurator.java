@@ -104,12 +104,13 @@ public final class VelocityAutoConfigurator {
           raknet);
     }
 
-    if (bool(auto, "manage-texture-source", true)) {
+    if (bool(auto, "manage-texture-source", true)
+        && Boolean.TRUE.equals(nestedValue(root, "website-sync", "textures", "enabled"))) {
       manageBoolean(
           editor, changed,
           List.of("website-sync", "textures", "enabled"),
           "website-sync.textures.enabled",
-          pluginIds.contains("skinsrestorer"));
+          false);
     }
 
     String selectedTarget = null;
@@ -316,6 +317,15 @@ public final class VelocityAutoConfigurator {
   }
 
   public record Result(boolean changed, List<String> changedPaths, Path reportFile) {
+  }
+
+  private static Object nestedValue(Map<String, Object> source, String... path) {
+    Object current = source;
+    for (String key : path) {
+      if (!(current instanceof Map<?, ?> map)) return null;
+      current = map.get(key);
+    }
+    return current;
   }
 
 }
