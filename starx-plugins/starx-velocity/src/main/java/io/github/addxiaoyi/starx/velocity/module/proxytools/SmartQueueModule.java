@@ -179,6 +179,10 @@ implements VelocityModule {
         this.queueService.processQueues(this::connect, maxRelease);
     }
 
+    private CompletableFuture<Boolean> connect(Player player, String serverName) {
+        return this.connect(player, serverName, this.queueService.snapshot());
+    }
+
     private CompletableFuture<Boolean> connect(
         Player player, String serverName, Map<String, Integer> queueSnapshot) {
         ProxyServer proxy = this.plugin.proxy();
