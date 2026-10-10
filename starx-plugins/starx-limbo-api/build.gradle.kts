@@ -25,7 +25,7 @@ dependencies {
     compileOnlyApi("net.kyori:adventure-nbt:4.26.1")
     compileOnly("org.checkerframework:checker-qual:3.49.5")
 
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testCompileOnly(velocityBuild606Compile)
     testRuntimeOnly(velocityBuild606Runtime)

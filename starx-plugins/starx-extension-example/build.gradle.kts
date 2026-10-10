@@ -26,7 +26,7 @@ dependencies {
 
     testImplementation(project(":starx-plugins:starx-api"))
     testImplementation(project(":starx-plugins:starx-extension-runtime"))
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly(velocityBuild606Runtime)
     testRuntimeOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
