@@ -1,0 +1,75 @@
+name: Deploy StarX to six servers (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, starx-deploy]
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        include:
+          - name: velocity
+            path: /data/minecraft/vc/plugins/starx-universal.jar
+          - name: lobby
+            path: /data/minecraft/lobby/plugins/starx-universal.jar
+          - name: le
+            path: /data/minecraft/le/plugins/starx-universal.jar
+          - name: pvp
+            path: /data/minecraft/pvp/pvp/plugins/starx-universal.jar
+          - name: thepit
+            path: /data/minecraft/thepit/plugins/starx-universal.jar
+          - name: chasergamer
+            path: /data/minecraft/ChaserGamer#4/plugins/starx-universal.jar
+    steps:
+      - name: Download and verify release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          rm -rf .release
+          mkdir .release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "starx-universal-*.jar" --pattern SHA256SUMS --dir .release
+          (cd .release && sha256sum -c SHA256SUMS)
+          jar=(.release/starx-universal-*.jar)
+          test "${#jar[@]}" -eq 1
+          echo "JAR=${jar[0]}" >> "$GITHUB_ENV"
+      - name: Backup, verify, and atomically install ${{ matrix.name }}
+        env:
+          SUDO_PASS: ${{ secrets.STARX_DEPLOY_SUDO_PASSWORD }}
+          TARGET: ${{ matrix.path }}
+        run: |
+          set -euo pipefail
+          test -n "$SUDO_PASS"
+          expected="$(sha256sum "$JAR" | cut -d' ' -f1)"
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          root_script=$(cat <<EOF
+          set -euo pipefail
+          target='$TARGET'
+          jar='$GITHUB_WORKSPACE/$JAR'
+          expected='$expected'
+          test -f "\$target"
+          test "\$(sha256sum "\$jar" | cut -d' ' -f1)" = "\$expected"
+          cp -a -- "\$target" "\${target}.bak.v1.1.1-\${stamp}"
+          install -m 644 "\$jar" "\${target}.new"
+          test "\$(sha256sum "\${target}.new" | cut -d' ' -f1)" = "\$expected"
+          mv -f -- "\${target}.new" "\$target"
+          test "\$(sha256sum "\$target" | cut -d' ' -f1)" = "\$expected"
+          echo "\$target"
+          sha256sum "\$target"
+          EOF
+          )
+          printf '%s
+' "$SUDO_PASS" | sudo -S -p '' bash -c "$root_script"
