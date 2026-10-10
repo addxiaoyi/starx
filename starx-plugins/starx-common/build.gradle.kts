@@ -24,7 +24,7 @@ dependencies {
 
     // Runtime dependencies that were bundled
     compileOnly("com.google.code.gson:gson:2.10.1")
-    compileOnly("org.yaml:snakeyaml:2.2")
+    compileOnly("org.yaml:snakeyaml:2.6")
     // HikariCP 和 JDBC 驱动 - 需要被 shadow 到最终 JAR
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.xerial:sqlite-jdbc:3.45.1.0")
