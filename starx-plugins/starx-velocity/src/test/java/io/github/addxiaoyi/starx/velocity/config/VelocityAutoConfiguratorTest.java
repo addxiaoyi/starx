@@ -105,7 +105,7 @@ class VelocityAutoConfiguratorTest {
     assertFalse(result.changed());
     assertEquals("", root.get("api-key"));
     assertEquals("proxy-manual", nested(root, "website-sync", "node-id"));
-    assertEquals(true, nested(root, "website-sync", "textures", "enabled"));
+    assertEquals(false, nested(root, "website-sync", "textures", "enabled"));
     assertEquals(true, nested(root, "modules", "starx.integrations.luckperms", "enabled"));
     assertEquals("custom", nested(root, "uworld", "auth", "target-server"));
   }
