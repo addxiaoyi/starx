@@ -22,14 +22,14 @@ val extensionVersion = project.version.toString()
 dependencies {
     compileOnly(project(":starx-plugins:starx-api"))
     compileOnly(velocityBuild606Compile)
-    compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:26.2.build.87-stable")
 
     testImplementation(project(":starx-plugins:starx-api"))
     testImplementation(project(":starx-plugins:starx-extension-runtime"))
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly(velocityBuild606Runtime)
-    testRuntimeOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    testRuntimeOnly("io.papermc.paper:paper-api:26.2.build.87-stable")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
