@@ -87,14 +87,16 @@ jobs:
       - name: Backup, verify, and atomically install ${{ matrix.name }}
         env:
           HOST: ${{ secrets.STARX_DEPLOY_HOST }}
+          PORT: ${{ secrets.STARX_DEPLOY_PORT }}
           USER: ${{ secrets.STARX_DEPLOY_USER }}
           SUDO_PASS: ${{ secrets.STARX_DEPLOY_SUDO_PASSWORD }}
           TARGET: ${{ matrix.path }}
         run: |
           set -euo pipefail
           [[ "$TARGET" == /data/minecraft/*/plugins/starx-universal.jar || "$TARGET" == /data/minecraft/*/*/plugins/starx-universal.jar ]] || { echo "Unsafe target" >&2; exit 1; }
-          ssh=(ssh -i ~/.ssh/starx_deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes "$USER@$HOST")
-          scp=(scp -i ~/.ssh/starx_deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "Invalid deploy SSH port" >&2; exit 1; }
+          ssh=(ssh -i ~/.ssh/starx_deploy_key -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$USER@$HOST")
+          scp=(scp -i ~/.ssh/starx_deploy_key -P "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes)
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           backup="${TARGET}.bak.${stamp}"
           "${scp[@]}" "$JAR" "$USER@$HOST:/tmp/starx-universal-${{ matrix.name }}-${stamp}.jar"
