@@ -8,14 +8,18 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 
 final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   private static final String PROVIDER_CLASS = "net.skinsrestorer.api.SkinsRestorerProvider";
 
+  private final Object api;
   private final Object playerStorage;
   private final Object skinStorage;
   private final Logger logger;
   private final AtomicBoolean failureLogged = new AtomicBoolean();
+  private final AtomicBoolean applyFailureLogged = new AtomicBoolean();
   // 中国大陆等受限网络下应设为 false：仅读 SkinsRestorer 本地缓存，不触发 Mojang API。
   private volatile boolean allowMojangApi = true;
 
@@ -29,15 +33,15 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
       Object api = provider.getMethod("get").invoke(null);
       return new SkinsRestorerBackendSkinResolver(api, logger);
     } catch (ClassNotFoundException ignored) {
-      return new SkinsRestorerBackendSkinResolver(null, null, logger);
+      return new SkinsRestorerBackendSkinResolver(null, null, null, logger);
     } catch (ReflectiveOperationException error) {
       logger.log(Level.WARNING, "SkinsRestorer API was found but could not be initialized", error);
-      return new SkinsRestorerBackendSkinResolver(null, null, logger);
+      return new SkinsRestorerBackendSkinResolver(null, null, null, logger);
     } catch (LinkageError error) {
       logger.log(Level.WARNING,
           "SkinsRestorer API is incompatible with this server; skin bridge will use its fallback",
           error);
-      return new SkinsRestorerBackendSkinResolver(null, null, logger);
+      return new SkinsRestorerBackendSkinResolver(null, null, null, logger);
     }
   }
 
@@ -46,10 +50,11 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   }
 
   SkinsRestorerBackendSkinResolver(Object api, Logger logger) {
-    this(read(api, "getPlayerStorage", logger), read(api, "getSkinStorage", null), logger);
+    this(api, read(api, "getPlayerStorage", logger), read(api, "getSkinStorage", null), logger);
   }
 
-  private SkinsRestorerBackendSkinResolver(Object playerStorage, Object skinStorage, Logger logger) {
+  private SkinsRestorerBackendSkinResolver(Object api, Object playerStorage, Object skinStorage, Logger logger) {
+    this.api = api;
     this.playerStorage = playerStorage;
     this.skinStorage = skinStorage;
     this.logger = logger;
@@ -105,6 +110,7 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
       String skinId = skinIdForWrite(existing, uuid);
       writeSkinData(this.skinStorage, skinId, value, signature == null ? "" : signature);
       setSkinIdentifier(this.playerStorage, uuid, skinId);
+      applyOnlineSkin(uuid, value, signature == null ? "" : signature);
       return true;
     } catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError error) {
       if (this.failureLogged.compareAndSet(false, true)) {
@@ -112,6 +118,24 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
             "SkinsRestorer profile update failed; backend skin was not persisted", error);
       }
       return false;
+    }
+  }
+
+  private void applyOnlineSkin(UUID uuid, String value, String signature) {
+    Player player = Bukkit.getPlayer(uuid);
+    if (player == null || this.api == null) {
+      return;
+    }
+    try {
+      Object applier = invoke(this.api, "getSkinApplier", Player.class);
+      Object property = skinPropertyFor(
+          Class.forName("net.skinsrestorer.api.property.SkinProperty"), value, signature);
+      invoke(applier, "applySkin", player, property);
+    } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+      if (this.applyFailureLogged.compareAndSet(false, true) && this.logger != null) {
+        this.logger.log(Level.WARNING,
+            "SkinsRestorer stored the skin but could not apply it to the online player", error);
+      }
     }
   }
 
