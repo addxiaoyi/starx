@@ -134,7 +134,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: release-evidence-${{ steps.version.outputs.version }}
+          name: release-evidence-${{ github.ref_name }}
           if-no-files-found: error
           retention-days: 7
           path: |
@@ -168,31 +168,14 @@ jobs:
 
     steps:
       - name: Download and verify release artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/download-artifact@v4
+        with:
+          name: release-evidence-${{ github.ref_name }}
+          path: .release
+
+      - name: Verify release artifact checksum
         run: |
           set -euo pipefail
-          rm -rf .release
-          mkdir -p .release
-          export RELEASE_REPO="$GITHUB_REPOSITORY" RELEASE_TAG="$GITHUB_REF_NAME"
-          curl --fail --silent --show-error --retry 3 \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$RELEASE_REPO/releases/tags/$RELEASE_TAG" > .release/release.json
-          python3 - <<'PY'
-          import json, os, pathlib, urllib.request
-          root = pathlib.Path('.release')
-          payload = json.loads((root / 'release.json').read_text())
-          assets = {asset['name']: asset['browser_download_url'] for asset in payload['assets']}
-          jar_names = [name for name in assets if name.startswith('starx-universal-') and name.endswith('.jar')]
-          if len(jar_names) != 1 or 'SHA256SUMS' not in assets:
-              raise SystemExit('release assets are incomplete')
-          for name in jar_names + ['SHA256SUMS']:
-              request = urllib.request.Request(assets[name], headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}', 'Accept': 'application/octet-stream'})
-              with urllib.request.urlopen(request, timeout=120) as response, (root / name).open('wb') as output:
-                  while chunk := response.read(1024 * 1024):
-                      output.write(chunk)
-          PY
           (cd .release && sha256sum -c SHA256SUMS)
           jar=(.release/starx-universal-*.jar)
           test "${#jar[@]}" -eq 1
