@@ -2,6 +2,14 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.1.3] - 2026-10-11
+
+### Deployment
+
+- Release verification now deploys directly on the production self-hosted runner after the GitHub Release is published.
+- Six instances are updated serially with SHA-256 verification, backups, sudo, and atomic replacement.
+- No instance restart is performed automatically.
+
 ## [1.1.2] - 2026-10-11
 
 ### Skin Synchronization
