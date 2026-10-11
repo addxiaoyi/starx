@@ -1,6 +1,6 @@
 name: Deploy StarX to six servers (manual)
 
-on: workflow_dispatch
+'on': workflow_dispatch
 
 permissions:
   contents: read
