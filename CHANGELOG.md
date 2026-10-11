@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.9] - 2026-10-11
+
+### Skin bridge
+
+- Move `/sxskin apply <catalog-id>` website requests off the Velocity event thread.
+- Coalesce refreshes without dropping a command-triggered refresh that races the login lookup.
+- Prefer the UUID skin-profile endpoint for apply refreshes and keep the proxy responsive while the website is slow.
+
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
 ## [1.1.8] - 2026-10-11

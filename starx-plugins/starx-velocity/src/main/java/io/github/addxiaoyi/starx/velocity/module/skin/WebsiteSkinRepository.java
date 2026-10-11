@@ -101,8 +101,12 @@ implements SkinRepository {
     }
 
     Optional<WebsiteSkinProfile> findProfile(UUID uuid, String name) {
+        return findProfile(uuid, name, false);
+    }
+
+    Optional<WebsiteSkinProfile> findProfile(UUID uuid, String name, boolean forceRefresh) {
         String cacheKey = uuid == null ? null : uuid.toString();
-        return findProfileInternal(uuid, name, cacheKey, false);
+        return findProfileInternal(uuid, name, cacheKey, forceRefresh);
     }
 
     Optional<WebsiteSkinProfile> findProfile(String name) {

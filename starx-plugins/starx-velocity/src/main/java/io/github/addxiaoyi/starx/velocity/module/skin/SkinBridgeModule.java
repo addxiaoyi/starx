@@ -83,15 +83,17 @@ implements VelocityModule {
     private final Function<UUID, Set<UUID>> knownMinecraftUuidsResolver;
     private final ConcurrentMap<UUID, Long> recentSkinRefreshes = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, String> appliedSkinProviders = new ConcurrentHashMap<>();
-  private final java.util.Set<UUID> websiteLookups = ConcurrentHashMap.newKeySet();
-  private final ThreadPoolExecutor skinLookupExecutor = new ThreadPoolExecutor(
-      SKIN_LOOKUP_THREADS,
-      SKIN_LOOKUP_THREADS,
-      0L,
-      TimeUnit.MILLISECONDS,
-      new ArrayBlockingQueue<>(SKIN_LOOKUP_QUEUE_SIZE),
-      skinLookupThreadFactory(),
-      new ThreadPoolExecutor.AbortPolicy());
+    private final Set<UUID> websiteLookups = ConcurrentHashMap.newKeySet();
+    private final Set<UUID> pendingWebsiteRefreshes = ConcurrentHashMap.newKeySet();
+    private final Set<UUID> catalogApplications = ConcurrentHashMap.newKeySet();
+    private final ThreadPoolExecutor skinLookupExecutor = new ThreadPoolExecutor(
+        SKIN_LOOKUP_THREADS,
+        SKIN_LOOKUP_THREADS,
+        0L,
+        TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(SKIN_LOOKUP_QUEUE_SIZE),
+        skinLookupThreadFactory(),
+        new ThreadPoolExecutor.AbortPolicy());
     private Listener listener;
     private CommandMeta skinCommandMeta;
 
@@ -223,6 +225,8 @@ implements VelocityModule {
         }
         this.skinLookupExecutor.shutdownNow();
         this.websiteLookups.clear();
+        this.pendingWebsiteRefreshes.clear();
+        this.catalogApplications.clear();
         this.skinService = null;
         this.writableSkinRepository = null;
         this.websiteRepository = null;
@@ -289,7 +293,12 @@ implements VelocityModule {
         UUID uuid = player.getUniqueId();
         String name = player.getUsername();
         WebsiteSkinRepository repository = this.websiteRepository;
-        if (repository == null || !this.websiteLookups.add(uuid)) return;
+        if (repository == null) return;
+        if (!this.websiteLookups.add(uuid)) {
+            // A command-triggered refresh must not be lost behind the login lookup.
+            if (invalidateCache) this.pendingWebsiteRefreshes.add(uuid);
+            return;
+        }
         if (invalidateCache) repository.invalidate(uuid);
         try {
             this.skinLookupExecutor.execute(() -> {
@@ -303,6 +312,13 @@ implements VelocityModule {
                     }).schedule();
                 } finally {
                     this.websiteLookups.remove(uuid);
+                    if (this.pendingWebsiteRefreshes.remove(uuid)) {
+                        Player current = this.proxy.getPlayer(uuid).orElse(null);
+                        if (current != null && current.isActive()) {
+                            repository.invalidate(uuid);
+                            this.refreshWebsiteSkinAsync(current, false);
+                        }
+                    }
                 }
             });
         } catch (RejectedExecutionException error) {
@@ -403,7 +419,8 @@ implements VelocityModule {
     }
 
     private boolean applyWebsiteSkin(UUID uuid, String playerName, boolean forceRefresh) {
-        Optional<WebsiteSkinProfile> profile = this.websiteRepository.findProfile(playerName, forceRefresh);
+        Optional<WebsiteSkinProfile> profile = this.websiteRepository.findProfile(
+            uuid, playerName, forceRefresh);
         if (profile.isEmpty()) {
             LOGGER.fine("Website skin profile not found for " + playerName);
             return false;
@@ -488,36 +505,52 @@ implements VelocityModule {
 
     private void applyCatalogSkin(Player player, String catalogId) {
         if (!this.canApplyCatalogSkin()) {
-            player.sendMessage(Component.text("网站皮肤同步尚未完成节点授权，暂时无法在游戏内应用皮肤。"));
+            player.sendMessage(Component.text("Website skin sync is not configured on this node."));
             return;
         }
         if (!catalogId.matches("[A-Za-z0-9._-]{1,96}")) {
-            player.sendMessage(Component.text("皮肤编号格式无效。"));
+            player.sendMessage(Component.text("Invalid skin catalog id."));
             return;
         }
-        player.sendMessage(Component.text("正在应用网站皮肤……"));
-        this.plugin.proxy().getScheduler().buildTask(this.plugin, () -> {
-            try {
-                this.websiteCommandClient.applyCatalogSkin(
-                    this.websiteSyncConfig.nodeToken(),
-                    catalogId,
-                    player.getUniqueId(),
-                    player.getUsername());
-                boolean refreshed = this.refreshSkinFromWebsite(
-                    player.getUniqueId(), player.getUsername());
-                if (refreshed) {
-                    player.sendMessage(Component.text("皮肤已应用并同步到当前服务器。"));
-                } else {
-                    player.sendMessage(Component.text("皮肤已保存；同步将在下次进服时重试。"));
+        UUID uuid = player.getUniqueId();
+        String username = player.getUsername();
+        if (!this.catalogApplications.add(uuid)) {
+            player.sendMessage(Component.text("A skin apply request is already running."));
+            return;
+        }
+        player.sendMessage(Component.text("Skin apply accepted; syncing in the background."));
+        try {
+            this.skinLookupExecutor.execute(() -> {
+                try {
+                    this.websiteCommandClient.applyCatalogSkin(
+                        this.websiteSyncConfig.nodeToken(), catalogId, uuid, username);
+                    this.refreshWebsiteSkinAsync(player, true);
+                    this.sendSkinMessage(player,
+                        "Website accepted the skin. The current session will refresh without blocking the proxy.");
+                } catch (WebsiteSyncApiException error) {
+                    LOGGER.warning("Website catalog skin apply failed for " + username
+                        + ": " + error.errorCode());
+                    this.sendSkinMessage(player, "Website rejected the skin: " + error.errorCode());
+                } catch (RuntimeException error) {
+                    LOGGER.warning("Website catalog skin apply failed for " + username
+                        + ": " + error.getClass().getSimpleName());
+                    this.sendSkinMessage(player, "Skin apply failed; please try again later.");
+                } finally {
+                    this.catalogApplications.remove(uuid);
                 }
-            } catch (WebsiteSyncApiException error) {
-                LOGGER.warning("Website catalog skin apply failed for " + player.getUsername()
-                    + ": " + error.errorCode());
-                player.sendMessage(Component.text("网站未接受该皮肤：" + error.errorCode()));
-            } catch (RuntimeException error) {
-                LOGGER.warning("Website catalog skin apply failed for " + player.getUsername()
-                    + ": " + error.getClass().getSimpleName());
-                player.sendMessage(Component.text("皮肤应用失败，请稍后重试。"));
+            });
+        } catch (RejectedExecutionException error) {
+            this.catalogApplications.remove(uuid);
+            player.sendMessage(Component.text("Skin sync is busy; please try again in a moment."));
+            LOGGER.fine("Skin apply queue is full uuid=" + uuid);
+        }
+    }
+
+    private void sendSkinMessage(Player player, String message) {
+        this.proxy.getScheduler().buildTask(this.plugin, () -> {
+            Player current = this.proxy.getPlayer(player.getUniqueId()).orElse(null);
+            if (current != null && current.isActive()) {
+                current.sendMessage(Component.text(message));
             }
         }).schedule();
     }
