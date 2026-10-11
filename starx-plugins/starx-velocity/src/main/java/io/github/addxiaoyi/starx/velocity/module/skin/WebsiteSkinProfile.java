@@ -97,14 +97,9 @@ final class WebsiteSkinProfile {
   }
 
   boolean hasDeliverableTextures() {
-    if (!textures.containsKey("SKIN")) {
-      // A cape-only selection can be merged into the player's existing skin.
-      return textures.containsKey("CAPE");
-    }
-    if (!hasSignedSkin()) {
-      return false;
-    }
-    return !textures.containsKey("CAPE") || signedValueContainsCape();
+    // The bridge carries one signed textures property. A URL-only cape cannot
+    // be persisted safely without overwriting the player's signed skin.
+    return hasSignedSkin() && (!textures.containsKey("CAPE") || signedValueContainsCape());
   }
 
   private boolean signedValueContainsCape() {
