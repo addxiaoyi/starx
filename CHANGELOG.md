@@ -2,6 +2,13 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.1.7] - 2026-10-11
+
+### Deployment
+
+- Release deployment artifact lookup now uses the tag name directly, matching the evidence artifact created in the same Release job.
+- The self-hosted six-server deployment no longer depends on an empty job-output expression.
+
 ## [1.1.6] - 2026-10-11
 
 ### Deployment
