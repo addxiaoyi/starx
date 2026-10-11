@@ -110,8 +110,7 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
       String skinId = skinIdForWrite(existing, uuid);
       writeSkinData(this.skinStorage, skinId, value, signature == null ? "" : signature);
       setSkinIdentifier(this.playerStorage, uuid, skinId);
-      applyOnlineSkin(uuid, value, signature == null ? "" : signature);
-      return true;
+      return applyOnlineSkin(uuid, value, signature == null ? "" : signature);
     } catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError error) {
       if (this.failureLogged.compareAndSet(false, true)) {
         this.logger.log(Level.WARNING,
@@ -121,21 +120,26 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
     }
   }
 
-  private void applyOnlineSkin(UUID uuid, String value, String signature) {
+  private boolean applyOnlineSkin(UUID uuid, String value, String signature) {
     Player player = Bukkit.getPlayer(uuid);
-    if (player == null || this.api == null) {
-      return;
+    if (player == null) {
+      return true;
+    }
+    if (this.api == null) {
+      return false;
     }
     try {
       Object applier = invoke(this.api, "getSkinApplier", Player.class);
       Object property = skinPropertyFor(
           Class.forName("net.skinsrestorer.api.property.SkinProperty"), value, signature);
       invoke(applier, "applySkin", player, property);
+      return true;
     } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
       if (this.applyFailureLogged.compareAndSet(false, true) && this.logger != null) {
         this.logger.log(Level.WARNING,
             "SkinsRestorer stored the skin but could not apply it to the online player", error);
       }
+      return false;
     }
   }
 
