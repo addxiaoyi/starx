@@ -96,6 +96,33 @@ final class WebsiteSkinProfile {
         && skin.signature != null && !skin.signature.isBlank();
   }
 
+  boolean hasDeliverableTextures() {
+    if (!textures.containsKey("SKIN")) {
+      // A cape-only selection can be merged into the player's existing skin.
+      return textures.containsKey("CAPE");
+    }
+    if (!hasSignedSkin()) {
+      return false;
+    }
+    return !textures.containsKey("CAPE") || signedValueContainsCape();
+  }
+
+  private boolean signedValueContainsCape() {
+    TextureInfo skin = textures.get("SKIN");
+    try {
+      JsonElement root = JsonParser.parseString(
+          new String(Base64.getDecoder().decode(skin.value), StandardCharsets.UTF_8));
+      JsonElement textureRoot = root.isJsonObject() ? root.getAsJsonObject().get("textures") : null;
+      JsonElement cape = textureRoot != null && textureRoot.isJsonObject()
+          ? textureRoot.getAsJsonObject().get("CAPE") : null;
+      return cape != null && cape.isJsonObject()
+          && cape.getAsJsonObject().has("url")
+          && !cape.getAsJsonObject().get("url").getAsString().isBlank();
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
   GameProfile.Property textureProperty(UUID uuid, String playerName) {
     return new GameProfile.Property("textures", textureValue(uuid, playerName), textureSignature());
   }

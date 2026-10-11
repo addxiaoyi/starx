@@ -444,8 +444,8 @@ implements VelocityModule {
         String provider,
         String providerLabel
     ) {
-        if ("website".equals(provider) && !profile.hasSignedSkin()) {
-            LOGGER.warning("Website skin profile has no signed texture for " + playerName);
+        if ("website".equals(provider) && !profile.hasDeliverableTextures()) {
+            LOGGER.warning("Website skin profile has no deliverable signed textures for " + playerName);
             return false;
         }
         String value = profile.textureValue(uuid, playerName);
@@ -581,6 +581,28 @@ implements VelocityModule {
         }).schedule();
     }
 
+    private boolean resendCachedSkin(Player player, RegisteredServer server) {
+        if (this.backendBridge == null || player == null || server == null) return false;
+        Optional<GameProfile.Property> texture = player.getGameProfileProperties().stream()
+            .filter(property -> "textures".equals(property.getName()))
+            .filter(property -> property.getValue() != null && !property.getValue().isBlank())
+            .findFirst();
+        if (texture.isEmpty()) return false;
+        try {
+            return this.backendBridge.sendSkinUpdate(
+                player,
+                server,
+                player.getUsername(),
+                texture.get().getValue(),
+                texture.get().getSignature()).values().stream()
+                .anyMatch(VelocityBackendBridge.DispatchResult::accepted);
+        } catch (RuntimeException error) {
+            LOGGER.fine("Cached skin resend failed for " + player.getUsername()
+                + ": " + error.getClass().getSimpleName());
+            return false;
+        }
+    }
+
     private void refreshSkinAsync(Player player, RegisteredServer connectedServer) {
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
@@ -682,12 +704,14 @@ implements VelocityModule {
 
         @Subscribe
         public void onServerConnected(ServerConnectedEvent event) {
-            if (SkinBridgeModule.this.websiteRepository != null) return;
+            Player player = event.getPlayer();
+            RegisteredServer server = event.getServer();
+            if (SkinBridgeModule.this.resendCachedSkin(player, server)) return;
             if (!shouldRefreshAfterConnect(
                 SkinBridgeModule.this.backendBridge != null,
                 SkinBridgeModule.this.skinsRestorerAvailable,
-                false)) return;
-            SkinBridgeModule.this.refreshSkinAsync(event.getPlayer(), event.getServer());
+                SkinBridgeModule.this.websiteRepository != null)) return;
+            SkinBridgeModule.this.refreshSkinAsync(player, server);
         }
     }
 

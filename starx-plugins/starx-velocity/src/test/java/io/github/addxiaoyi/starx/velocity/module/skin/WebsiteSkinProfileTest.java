@@ -138,6 +138,43 @@ final class WebsiteSkinProfileTest {
   }
 
   @Test
+  void rejectsSeparateUnsignedCapeWhenSkinPropertyIsSigned() {
+    String signedValue = Base64.getEncoder().encodeToString("""
+        { "textures": { "SKIN": { "url": "https://textures.minecraft.net/texture/skin" } } }
+        """.getBytes(StandardCharsets.UTF_8));
+    String body = """
+        { "textures": {
+          "SKIN": { "url": "https://star-web.top/uploads/skin.png", "value": "%s", "signature": "sig" },
+          "CAPE": { "url": "https://star-web.top/uploads/cape.png" }
+        } }
+        """.formatted(signedValue);
+    WebsiteSkinProfile profile = WebsiteSkinProfile.parse(body, GSON,
+        TextureUrlPolicy.forWebsite("https://star-web.top/api/public/skin-profile")).orElseThrow();
+
+    assertFalse(profile.hasDeliverableTextures());
+  }
+
+  @Test
+  void allowsSignedSkinWhenTheSignedPropertyContainsTheCape() {
+    String signedValue = Base64.getEncoder().encodeToString("""
+        { "textures": {
+          "SKIN": { "url": "https://textures.minecraft.net/texture/skin" },
+          "CAPE": { "url": "https://textures.minecraft.net/texture/cape" }
+        } }
+        """.getBytes(StandardCharsets.UTF_8));
+    String body = """
+        { "textures": {
+          "SKIN": { "url": "https://star-web.top/uploads/skin.png", "value": "%s", "signature": "sig" },
+          "CAPE": { "url": "https://star-web.top/uploads/cape.png" }
+        } }
+        """.formatted(signedValue);
+    WebsiteSkinProfile profile = WebsiteSkinProfile.parse(body, GSON,
+        TextureUrlPolicy.forWebsite("https://star-web.top/api/public/skin-profile")).orElseThrow();
+
+    assertTrue(profile.hasDeliverableTextures());
+  }
+
+  @Test
   void rejectsWebsiteTexturesOutsideTheConfiguredHosts() {
     assertTrue(WebsiteSkinProfile.parse("""
         { "textures": { "SKIN": { "url": "https://169.254.169.254/latest/meta-data" } } }

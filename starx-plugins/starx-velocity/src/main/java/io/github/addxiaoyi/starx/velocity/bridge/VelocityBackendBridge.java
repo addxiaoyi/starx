@@ -292,14 +292,25 @@ public final class VelocityBackendBridge implements VelocityModule {
       String signature
   ) {
     Objects.requireNonNull(player, "player");
+    Optional<ServerConnection> current = player.getCurrentServer();
+    return current.isEmpty()
+        ? Map.of()
+        : sendSkinUpdate(player, current.get().getServer(), playerName, value, signature);
+  }
+
+  /** Sends a cached skin to a just-connected backend without another website lookup. */
+  public Map<String, DispatchResult> sendSkinUpdate(
+      Player player,
+      RegisteredServer server,
+      String playerName,
+      String value,
+      String signature
+  ) {
+    Objects.requireNonNull(player, "player");
+    Objects.requireNonNull(server, "server");
     if (playerName == null || playerName.isBlank() || value == null || value.isBlank()) {
       throw new IllegalArgumentException("Skin update name and value must not be blank");
     }
-    Optional<ServerConnection> current = player.getCurrentServer();
-    if (current.isEmpty()) {
-      return Map.of();
-    }
-    RegisteredServer server = current.get().getServer();
     String serverName = server.getServerInfo().getName();
     DispatchResult dispatch = dispatchSkinUpdate(
         server,
