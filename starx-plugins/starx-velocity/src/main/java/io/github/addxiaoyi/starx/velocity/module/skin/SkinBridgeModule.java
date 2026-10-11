@@ -285,19 +285,22 @@ implements VelocityModule {
         this.skinService.refreshSkin(player.getUniqueId(), player.getUsername());
     }
 
-    private void refreshWebsiteSkinAsync(Player player) {
-        refreshWebsiteSkinAsync(player, false);
+    private boolean refreshWebsiteSkinAsync(Player player) {
+        return refreshWebsiteSkinAsync(player, false);
     }
 
-    private void refreshWebsiteSkinAsync(Player player, boolean invalidateCache) {
+    private boolean refreshWebsiteSkinAsync(Player player, boolean invalidateCache) {
         UUID uuid = player.getUniqueId();
         String name = player.getUsername();
         WebsiteSkinRepository repository = this.websiteRepository;
-        if (repository == null) return;
+        if (repository == null) return false;
         if (!this.websiteLookups.add(uuid)) {
             // A command-triggered refresh must not be lost behind the login lookup.
-            if (invalidateCache) this.pendingWebsiteRefreshes.add(uuid);
-            return;
+            if (invalidateCache) {
+                this.pendingWebsiteRefreshes.add(uuid);
+                return true;
+            }
+            return false;
         }
         if (invalidateCache) repository.invalidate(uuid);
         try {
@@ -321,9 +324,11 @@ implements VelocityModule {
                     }
                 }
             });
+            return true;
         } catch (RejectedExecutionException error) {
             this.websiteLookups.remove(uuid);
             LOGGER.fine("Website skin lookup queue is full uuid=" + uuid);
+            return false;
         }
     }
 
@@ -410,8 +415,7 @@ implements VelocityModule {
         if (player == null || !player.isActive()) return false;
         String name = playerName == null || playerName.isBlank() ? player.getUsername() : playerName.trim();
         this.websiteRepository.invalidate(uuid);
-        refreshWebsiteSkinAsync(player, true);
-        return true;
+        return refreshWebsiteSkinAsync(player, true);
     }
 
     private boolean applyWebsiteSkin(UUID uuid, String playerName) {
@@ -528,9 +532,10 @@ implements VelocityModule {
                 try {
                     this.websiteCommandClient.applyCatalogSkin(
                         this.websiteSyncConfig.nodeToken(), catalogId, uuid, username);
-                    this.refreshWebsiteSkinAsync(player, true);
-                    this.sendSkinMessage(player,
-                        "\u7f51\u7ad9\u5df2\u63a5\u53d7\u9009\u62e9\uff1b\u7b49\u5f85\u7b7e\u540d\u7eb9\u7406\u751f\u6210\u548c\u5f53\u524d\u4f1a\u8bdd\u5237\u65b0\u3002");
+                    boolean queued = this.refreshWebsiteSkinAsync(player, true);
+                    this.sendSkinMessage(player, queued
+                        ? "\u7f51\u7ad9\u5df2\u63a5\u53d7\u9009\u62e9\uff1b\u7b49\u5f85\u7b7e\u540d\u7eb9\u7406\u751f\u6210\u548c\u5f53\u524d\u4f1a\u8bdd\u5237\u65b0\u3002"
+                        : "\u7f51\u7ad9\u5df2\u4fdd\u5b58\u9009\u62e9\uff0c\u4f46\u5f53\u524d\u5237\u65b0\u961f\u5217\u5df2\u6ee1\uff0c\u8bf7\u4e0d\u8981\u91cd\u590d\u6267\u884c\u3002");
                 } catch (WebsiteSyncApiException error) {
                     LOGGER.warning("Website catalog skin apply failed for " + username
                         + ": " + error.errorCode());
