@@ -1,12 +1,6 @@
 name: Deploy StarX to six servers (manual)
 
-on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag to deploy
-        required: true
-        type: string
+on: workflow_dispatch
 
 permissions:
   contents: read
@@ -36,9 +30,9 @@ jobs:
       - name: Download and verify release artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
           rm -rf .release
           mkdir .release
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "starx-universal-*.jar" --pattern SHA256SUMS --dir .release
