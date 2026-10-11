@@ -2,6 +2,13 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.1.4] - 2026-10-11
+
+### Deployment
+
+- Self-hosted release deployment downloads verified assets through the GitHub API without requiring the `gh` CLI.
+- Release verification and serial six-server installation now share one tested path.
+
 ## [1.1.3] - 2026-10-11
 
 ### Deployment
