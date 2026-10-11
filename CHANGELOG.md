@@ -2,6 +2,14 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.1.2] - 2026-10-11
+
+### Skin Synchronization
+
+- Website-supplied signed texture properties are now preserved and written to SkinsRestorer with their signature.
+- Unsigned trusted texture URLs still remain usable as a compatibility fallback.
+- The UUID refresh path and cache invalidation remain target-only; no periodic scan was added.
+
 ## [1.1.1] - 2026-10-10
 
 ### Skin Synchronization

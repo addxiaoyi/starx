@@ -72,6 +72,10 @@ final class WebsiteSkinProfile {
   }
 
   String textureValue(UUID uuid, String playerName) {
+    TextureInfo signedSkin = textures.get("SKIN");
+    if (signedSkin != null && signedSkin.value != null && !signedSkin.value.isBlank()) {
+      return signedSkin.value;
+    }
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("timestamp", System.currentTimeMillis());
     payload.put("profileId", profileId(uuid));
@@ -81,14 +85,33 @@ final class WebsiteSkinProfile {
     return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
   }
 
+  String textureSignature() {
+    TextureInfo skin = textures.get("SKIN");
+    return skin == null || skin.signature == null ? "" : skin.signature;
+  }
+
+  boolean hasSignedSkin() {
+    TextureInfo skin = textures.get("SKIN");
+    return skin != null && skin.value != null && !skin.value.isBlank()
+        && skin.signature != null && !skin.signature.isBlank();
+  }
+
   GameProfile.Property textureProperty(UUID uuid, String playerName) {
-    return new GameProfile.Property("textures", textureValue(uuid, playerName), "");
+    return new GameProfile.Property("textures", textureValue(uuid, playerName), textureSignature());
   }
 
   List<GameProfile.Property> merge(
       UUID uuid,
       String playerName,
       List<GameProfile.Property> current) {
+    if (hasSignedSkin()) {
+      List<GameProfile.Property> merged = new ArrayList<>();
+      for (GameProfile.Property property : current) {
+        if (!property.getName().equals("textures")) merged.add(property);
+      }
+      merged.add(textureProperty(uuid, playerName));
+      return List.copyOf(merged);
+    }
     JsonObject textures = currentTextures(current);
     for (Map.Entry<String, TextureInfo> entry : this.textures.entrySet()) {
       textures.add(entry.getKey(), this.gson.toJsonTree(entry.getValue()));
@@ -178,6 +201,8 @@ final class WebsiteSkinProfile {
 
   private static final class TextureInfo {
     String url;
+    String value;
+    String signature;
     Map<String, String> metadata;
   }
 }

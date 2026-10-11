@@ -424,11 +424,12 @@ implements VelocityModule {
         String providerLabel
     ) {
         String value = profile.textureValue(uuid, playerName);
+        String signature = profile.textureSignature();
         boolean locallyPersisted = false;
         SkinRepository writable = this.writableSkinRepository;
         if (writable != null) {
             try {
-                locallyPersisted = writable.trySetSkinData(uuid, value, "");
+                locallyPersisted = writable.trySetSkinData(uuid, value, signature);
                 if (!locallyPersisted) {
                     LOGGER.warning("Skin repository is unavailable for " + playerName);
                 }
@@ -441,7 +442,7 @@ implements VelocityModule {
         if (this.backendBridge != null) {
             try {
                 backendTargets = this.backendBridge.broadcastSkinUpdate(
-                    uuid, playerName, value, "").size();
+                    uuid, playerName, value, signature).size();
             } catch (RuntimeException error) {
                 LOGGER.warning("Skin could not be broadcast for " + playerName
                     + ": " + error.getClass().getSimpleName());

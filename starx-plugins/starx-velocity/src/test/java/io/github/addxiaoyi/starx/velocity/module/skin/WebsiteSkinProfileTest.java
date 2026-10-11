@@ -18,6 +18,24 @@ final class WebsiteSkinProfileTest {
   private static final Gson GSON = new Gson();
 
   @Test
+  void preservesSignedTexturePropertyFromWebsite() {
+    UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
+    WebsiteSkinProfile profile = WebsiteSkinProfile.parse("""
+        { "id": "4f06bce032d74d4dbb179f7e92ae8701", "name": "Alex",
+          "textures": { "SKIN": {
+            "url": "https://star-web.top/uploads/skin/alex.png",
+            "value": "signed-texture-value", "signature": "signed-texture-signature"
+          } } }
+        """, GSON, TextureUrlPolicy.forWebsite("https://star-web.top/api/public/skin-profile"))
+        .orElseThrow();
+
+    GameProfile.Property property = profile.textureProperty(uuid, "Alex");
+    assertEquals("signed-texture-value", property.getValue());
+    assertEquals("signed-texture-signature", property.getSignature());
+    assertTrue(profile.hasSignedSkin());
+  }
+
+  @Test
   void createsMinecraftTexturePropertyWithSkinCapeAndSlimModel() {
     UUID uuid = UUID.fromString("4f06bce0-32d7-4d4d-bb17-9f7e92ae8701");
     String body = """
