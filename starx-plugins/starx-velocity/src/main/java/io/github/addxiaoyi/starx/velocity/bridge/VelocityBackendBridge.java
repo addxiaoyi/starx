@@ -284,6 +284,35 @@ public final class VelocityBackendBridge implements VelocityModule {
     return this.commandMailbox;
   }
 
+  /** Sends a skin update only to the backend currently carrying the player. */
+  public Map<String, DispatchResult> sendSkinUpdate(
+      Player player,
+      String playerName,
+      String value,
+      String signature
+  ) {
+    Objects.requireNonNull(player, "player");
+    if (playerName == null || playerName.isBlank() || value == null || value.isBlank()) {
+      throw new IllegalArgumentException("Skin update name and value must not be blank");
+    }
+    Optional<ServerConnection> current = player.getCurrentServer();
+    if (current.isEmpty()) {
+      return Map.of();
+    }
+    RegisteredServer server = current.get().getServer();
+    String serverName = server.getServerInfo().getName();
+    DispatchResult dispatch = dispatchSkinUpdate(
+        server,
+        this.channel,
+        UUID.randomUUID().toString(),
+        player.getUniqueId(),
+        playerName,
+        value,
+        signature,
+        this.commandMailbox);
+    return Map.of(serverName, dispatch);
+  }
+
   public Map<String, DispatchResult> broadcastSkinUpdate(
       UUID playerUuid,
       String playerName,

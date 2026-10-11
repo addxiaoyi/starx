@@ -455,17 +455,17 @@ implements VelocityModule {
                     + ": " + error.getClass().getSimpleName());
             }
         }
+        Optional<Player> online = this.proxy.getPlayer(uuid);
         int backendTargets = 0;
-        if (this.backendBridge != null) {
+        if (this.backendBridge != null && online.isPresent()) {
             try {
-                backendTargets = this.backendBridge.broadcastSkinUpdate(
-                    uuid, playerName, value, signature).size();
+                backendTargets = this.backendBridge.sendSkinUpdate(
+                    online.get(), playerName, value, signature).size();
             } catch (RuntimeException error) {
                 LOGGER.warning("Skin could not be broadcast for " + playerName
                     + ": " + error.getClass().getSimpleName());
             }
         }
-        Optional<Player> online = this.proxy.getPlayer(uuid);
         boolean appliedToOnlinePlayer = online.isPresent();
         if (appliedToOnlinePlayer) {
             Player player = online.get();

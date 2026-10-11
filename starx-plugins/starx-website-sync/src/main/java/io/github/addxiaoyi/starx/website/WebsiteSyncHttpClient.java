@@ -222,6 +222,7 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
     }
     HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint(path))
         .timeout(this.requestTimeout)
+        .header("User-Agent", "StarX-SkinBridge/1")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString(
