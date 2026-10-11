@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     timeout-minutes: 35
 
     steps:
@@ -134,7 +136,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: release-evidence-${{ github.ref_name }}
+          name: release-evidence-${{ steps.version.outputs.version }}
           if-no-files-found: error
           retention-days: 7
           path: |
@@ -170,7 +172,7 @@ jobs:
       - name: Download and verify release artifact
         uses: actions/download-artifact@v4
         with:
-          name: release-evidence-${{ github.ref_name }}
+          name: release-evidence-${{ steps.version.outputs.version }}
           path: .release
 
       - name: Verify release artifact checksum

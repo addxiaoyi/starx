@@ -2,6 +2,13 @@
 
 本文件记录 StarX 正式版本的用户可见变更。公共扩展 API 使用独立版本号，当前为 1.0.0。
 
+## [1.1.6] - 2026-10-11
+
+### Deployment
+
+- The Release job exposes the version as a job output so the self-hosted deploy consumes the exact same release evidence artifact.
+- The six-server deploy is now bound to the successful Release job and does not infer an artifact name from workflow-run ref context.
+
 ## [1.1.5] - 2026-10-11
 
 ### Deployment
