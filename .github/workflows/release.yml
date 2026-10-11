@@ -136,7 +136,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: release-evidence-${{ steps.version.outputs.version }}
+          name: release-evidence-${{ github.ref_name }}
           if-no-files-found: error
           retention-days: 7
           path: |
@@ -172,7 +172,7 @@ jobs:
       - name: Download and verify release artifact
         uses: actions/download-artifact@v4
         with:
-          name: release-evidence-${{ steps.version.outputs.version }}
+          name: release-evidence-${{ github.ref_name }}
           path: .release
 
       - name: Verify release artifact checksum
