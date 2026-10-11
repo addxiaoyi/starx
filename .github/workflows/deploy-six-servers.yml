@@ -1,6 +1,6 @@
 name: Deploy StarX to six servers
 
-on:
+'on':
   workflow_run:
     workflows: [Release]
     types: [completed]

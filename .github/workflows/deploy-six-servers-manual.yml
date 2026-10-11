@@ -1,6 +1,6 @@
 name: Deploy StarX to six servers (manual)
 
-on:
+'on':
   workflow_dispatch:
     inputs:
       tag:
