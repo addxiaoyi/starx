@@ -440,6 +440,10 @@ implements VelocityModule {
         String provider,
         String providerLabel
     ) {
+        if ("website".equals(provider) && !profile.hasSignedSkin()) {
+            LOGGER.warning("Website skin profile has no signed texture for " + playerName);
+            return false;
+        }
         String value = profile.textureValue(uuid, playerName);
         String signature = profile.textureSignature();
         boolean locallyPersisted = false;
@@ -526,7 +530,7 @@ implements VelocityModule {
                         this.websiteSyncConfig.nodeToken(), catalogId, uuid, username);
                     this.refreshWebsiteSkinAsync(player, true);
                     this.sendSkinMessage(player,
-                        "网站已接受皮肤，当前会话将在后台刷新。");
+                        "\u7f51\u7ad9\u5df2\u63a5\u53d7\u9009\u62e9\uff1b\u7b49\u5f85\u7b7e\u540d\u7eb9\u7406\u751f\u6210\u548c\u5f53\u524d\u4f1a\u8bdd\u5237\u65b0\u3002");
                 } catch (WebsiteSyncApiException error) {
                     LOGGER.warning("Website catalog skin apply failed for " + username
                         + ": " + error.errorCode());
