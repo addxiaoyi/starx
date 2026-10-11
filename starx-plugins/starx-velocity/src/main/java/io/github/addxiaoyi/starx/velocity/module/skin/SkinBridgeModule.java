@@ -505,20 +505,20 @@ implements VelocityModule {
 
     private void applyCatalogSkin(Player player, String catalogId) {
         if (!this.canApplyCatalogSkin()) {
-            player.sendMessage(Component.text("Website skin sync is not configured on this node."));
+            player.sendMessage(Component.text("网站皮肤同步未配置，暂时无法应用。"));
             return;
         }
         if (!catalogId.matches("[A-Za-z0-9._-]{1,96}")) {
-            player.sendMessage(Component.text("Invalid skin catalog id."));
+            player.sendMessage(Component.text("皮肤目录编号无效。"));
             return;
         }
         UUID uuid = player.getUniqueId();
         String username = player.getUsername();
         if (!this.catalogApplications.add(uuid)) {
-            player.sendMessage(Component.text("A skin apply request is already running."));
+            player.sendMessage(Component.text("皮肤应用请求正在处理中，请稍候。"));
             return;
         }
-        player.sendMessage(Component.text("Skin apply accepted; syncing in the background."));
+        player.sendMessage(Component.text("皮肤应用请求已提交，正在后台同步，不会阻塞代理。"));
         try {
             this.skinLookupExecutor.execute(() -> {
                 try {
@@ -526,22 +526,22 @@ implements VelocityModule {
                         this.websiteSyncConfig.nodeToken(), catalogId, uuid, username);
                     this.refreshWebsiteSkinAsync(player, true);
                     this.sendSkinMessage(player,
-                        "Website accepted the skin. The current session will refresh without blocking the proxy.");
+                        "网站已接受皮肤，当前会话将在后台刷新。");
                 } catch (WebsiteSyncApiException error) {
                     LOGGER.warning("Website catalog skin apply failed for " + username
                         + ": " + error.errorCode());
-                    this.sendSkinMessage(player, "Website rejected the skin: " + error.errorCode());
+                    this.sendSkinMessage(player, "网站拒绝了皮肤：" + error.errorCode());
                 } catch (RuntimeException error) {
                     LOGGER.warning("Website catalog skin apply failed for " + username
                         + ": " + error.getClass().getSimpleName());
-                    this.sendSkinMessage(player, "Skin apply failed; please try again later.");
+                    this.sendSkinMessage(player, "皮肤应用失败，请稍后重试。");
                 } finally {
                     this.catalogApplications.remove(uuid);
                 }
             });
         } catch (RejectedExecutionException error) {
             this.catalogApplications.remove(uuid);
-            player.sendMessage(Component.text("Skin sync is busy; please try again in a moment."));
+            player.sendMessage(Component.text("皮肤同步队列繁忙，请稍后再试。"));
             LOGGER.fine("Skin apply queue is full uuid=" + uuid);
         }
     }
