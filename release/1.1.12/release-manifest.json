@@ -1,0 +1,24 @@
+{
+  "releaseVersion": "1.1.12",
+  "apiVersion": "1.0.0",
+  "builtAtUtc": "2026-10-12T12:45:18.5941270Z",
+  "java": "25",
+  "platforms": [
+    "Velocity",
+    "Paper",
+    "Folia"
+  ],
+  "primaryAsset": "starx-universal-1.1.12.jar",
+  "artifacts": [
+    {
+      "name": "starx-universal-1.1.12.jar",
+      "bytes": 20002563,
+      "sha256": "2fe585073df8b04060c3e302f7012982031077343759c8fbd9a29cf3e8633145"
+    },
+    {
+      "name": "starx-velocity-1.1.12.jar",
+      "bytes": 19038389,
+      "sha256": "b453a72c70cc0ec10a291681f24f844dc4c4c0498eb5fe78a0796a96fafe06ae"
+    }
+  ]
+}

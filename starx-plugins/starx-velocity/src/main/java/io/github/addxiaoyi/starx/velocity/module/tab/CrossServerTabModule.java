@@ -10,6 +10,7 @@ import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import io.github.addxiaoyi.starx.velocity.module.playerlist.PlayerLatencyTracker;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -110,10 +111,16 @@ public final class CrossServerTabModule implements VelocityModule {
           .toList();
       this.sentEntries.keySet().retainAll(players.stream().map(Player::getUniqueId).collect(Collectors.toSet()));
       Map<UUID, EntryState> roster = new LinkedHashMap<>();
-      players.forEach(player -> player.getCurrentServer().ifPresent(connection -> roster.put(
-              player.getUniqueId(),
-              new EntryState(displayServerName(connection.getServer().getServerInfo().getName()),
-                  player.getUsername(), tabLatency(player), player.getGameProfile()))));
+      players.forEach(player -> player.getCurrentServer().ifPresent(connection -> {
+        String backendName = connection.getServer().getServerInfo().getName();
+        roster.put(player.getUniqueId(), new EntryState(
+            backendName,
+            displayServerName(backendName),
+            player.getUsername(),
+            tabLatency(player),
+            player.getGameProfile(),
+            false));
+      }));
       players.stream().filter(Player::isActive).forEach(viewer -> reconcileViewer(viewer, roster));
     } finally {
       this.lifecycleLock.unlock();
@@ -125,19 +132,17 @@ public final class CrossServerTabModule implements VelocityModule {
     Map<UUID, EntryState> previous = this.sentEntries.computeIfAbsent(
         viewerId, ignored -> new ConcurrentHashMap<>());
     TabList tabList = viewer.getTabList();
+    Map<UUID, EntryState> desired = groupedEntries(roster, viewerId);
 
     previous.keySet().removeIf(targetId -> {
-      if (targetId.equals(viewerId) || roster.containsKey(targetId)) {
+      if (desired.containsKey(targetId)) {
         return false;
       }
       tabList.removeEntry(targetId);
       return true;
     });
 
-    roster.forEach((targetId, state) -> {
-      if (targetId.equals(viewerId)) {
-        return;
-      }
+    desired.forEach((targetId, state) -> {
       EntryState old = previous.get(targetId);
       if (old != null && old.sameDisplay(state)) {
         if (tabList.getEntry(targetId).isEmpty()) {
@@ -161,6 +166,31 @@ public final class CrossServerTabModule implements VelocityModule {
     });
   }
 
+  private static Map<UUID, EntryState> groupedEntries(Map<UUID, EntryState> roster, UUID viewerId) {
+    Map<String, List<Map.Entry<UUID, EntryState>>> groups = roster.entrySet().stream()
+        .collect(java.util.stream.Collectors.groupingBy(
+            entry -> entry.getValue().backendName(), LinkedHashMap::new,
+            Collectors.toList()));
+    List<Map.Entry<String, List<Map.Entry<UUID, EntryState>>>> ordered = groups.entrySet().stream()
+        .sorted(Comparator.comparing(entry -> entry.getValue().getFirst().getValue().serverName(),
+            String.CASE_INSENSITIVE_ORDER))
+        .toList();
+    Map<UUID, EntryState> desired = new LinkedHashMap<>();
+    for (Map.Entry<String, List<Map.Entry<UUID, EntryState>>> group : ordered) {
+      EntryState first = group.getValue().getFirst().getValue();
+      UUID headerId = UUID.nameUUIDFromBytes(
+          ("starx:tab:server:" + group.getKey()).getBytes(StandardCharsets.UTF_8));
+      desired.put(headerId, EntryState.header(
+          group.getKey(), first.serverName(), headerId));
+      group.getValue().stream()
+          .sorted(Comparator.comparing(entry -> entry.getValue().username(),
+              String.CASE_INSENSITIVE_ORDER))
+          .filter(entry -> !entry.getKey().equals(viewerId))
+          .forEach(entry -> desired.put(entry.getKey(), entry.getValue()));
+    }
+    return desired;
+  }
+
   private boolean addEntry(TabList tabList, UUID targetId, EntryState state) {
     var existing = tabList.getEntry(targetId);
     if (existing.isPresent()) {
@@ -180,6 +210,10 @@ public final class CrossServerTabModule implements VelocityModule {
     }
     TabList tabList = viewer.getTabList();
     entries.forEach((targetId, state) -> {
+      if (state.serverHeader()) {
+        tabList.removeEntry(targetId);
+        return;
+      }
       Player target = this.plugin.proxy().getPlayer(targetId).orElse(null);
       if (target != null && sameBackend(viewer, target)) {
         tabList.getEntry(targetId).ifPresent(entry ->
@@ -222,8 +256,10 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private static Component displayName(EntryState state) {
-    return Component.text("[" + state.serverName() + "] ", NamedTextColor.AQUA)
-        .append(Component.text(state.username(), NamedTextColor.WHITE));
+    if (state.serverHeader()) {
+      return Component.text("[" + state.serverName() + "]", NamedTextColor.AQUA);
+    }
+    return Component.text(state.username(), NamedTextColor.WHITE);
   }
 
   private String displayServerName(String serverName) {
@@ -255,12 +291,26 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private record EntryState(
+      String backendName,
       String serverName,
       String username,
       int latency,
-      com.velocitypowered.api.util.GameProfile gameProfile) {
+      com.velocitypowered.api.util.GameProfile gameProfile,
+      boolean serverHeader) {
+    private static EntryState header(String backendName, String serverName, UUID headerId) {
+      return new EntryState(
+          backendName,
+          serverName,
+          "",
+          -1,
+          new com.velocitypowered.api.util.GameProfile(headerId, "StarX", List.of()),
+          true);
+    }
+
     private boolean sameDisplay(EntryState other) {
-      return this.serverName.equals(other.serverName) && this.username.equals(other.username);
+      return this.serverHeader == other.serverHeader
+          && this.serverName.equals(other.serverName)
+          && this.username.equals(other.username);
     }
 
     private boolean shouldUpdateLatency(EntryState other) {

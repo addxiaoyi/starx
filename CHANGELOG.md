@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.12] - 2026-10-12
+
+### Grouped TAB layout
+
+- Cross-server TAB now shows one server header per occupied backend and lists players below it.
+- Empty backends are not rendered as headers or player rows.
+- Routing and backend registration remain unchanged; this is presentation-only.
+
+
 ## [1.1.11] - 2026-10-12
 
 ### TAB server visibility
