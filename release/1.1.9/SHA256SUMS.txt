@@ -1,0 +1,2 @@
+b5fef219c23d2e9a2b7a3195d7ffeacef2b7e284abd0a3034f6368126642aea6  starx-universal-1.1.9.jar
+867286c7d32ad9f59ecde4d56f0fb7442e179c33189912c89a5b7bd486603f76  starx-velocity-1.1.9.jar
