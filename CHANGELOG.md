@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.13] - 2026-10-12
+
+### TAB ordering and backend metadata
+
+- The viewer's current backend is always the first TAB group.
+- Occupied backend headers now show `players/max online` when cached ping capacity is available.
+- Capacity probes are cached for 30 seconds and bounded to occupied backends, avoiding per-player polling.
+
+
 ## [1.1.12] - 2026-10-12
 
 ### Grouped TAB layout

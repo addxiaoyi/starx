@@ -5,6 +5,8 @@ import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.proxy.Player;
+import com.velocitypowered.api.proxy.server.RegisteredServer;
+import com.velocitypowered.api.proxy.server.ServerPing;
 import com.velocitypowered.api.proxy.player.TabList;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
@@ -18,7 +20,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -29,11 +34,14 @@ public final class CrossServerTabModule implements VelocityModule {
   private static final Duration RECONCILE_INTERVAL = Duration.ofSeconds(1);
   private static final Duration EVENT_DELAY = Duration.ofMillis(250);
   private static final int LATENCY_CHANGE_THRESHOLD_MS = 5;
+  private static final long SERVER_META_TTL_NANOS = Duration.ofSeconds(30).toNanos();
+  private static final long SERVER_PING_TIMEOUT_SECONDS = 2L;
 
   private final StarxVelocityPlugin plugin;
   private final PlayerLatencyTracker latencyTracker;
   private final ServerNameMappings serverNames;
   private final Map<UUID, Map<UUID, EntryState>> sentEntries = new ConcurrentHashMap<>();
+  private final Map<String, ServerMetadata> serverMetadata = new ConcurrentHashMap<>();
   private final ReentrantLock lifecycleLock = new ReentrantLock();
   private boolean reconcileQueued;
   private long generation;
@@ -92,6 +100,7 @@ public final class CrossServerTabModule implements VelocityModule {
       this.plugin.proxy().getEventManager().unregisterListener(this.plugin, this.listener);
       this.plugin.proxy().getAllPlayers().forEach(this::removeManagedEntries);
       this.sentEntries.clear();
+      this.serverMetadata.clear();
     } finally {
       this.lifecycleLock.unlock();
     }
@@ -132,7 +141,10 @@ public final class CrossServerTabModule implements VelocityModule {
     Map<UUID, EntryState> previous = this.sentEntries.computeIfAbsent(
         viewerId, ignored -> new ConcurrentHashMap<>());
     TabList tabList = viewer.getTabList();
-    Map<UUID, EntryState> desired = groupedEntries(roster, viewerId);
+    String viewerBackend = viewer.getCurrentServer()
+        .map(connection -> connection.getServer().getServerInfo().getName())
+        .orElse(null);
+    Map<UUID, EntryState> desired = groupedEntries(roster, viewerId, viewerBackend);
 
     previous.keySet().removeIf(targetId -> {
       if (desired.containsKey(targetId)) {
@@ -166,22 +178,30 @@ public final class CrossServerTabModule implements VelocityModule {
     });
   }
 
-  private static Map<UUID, EntryState> groupedEntries(Map<UUID, EntryState> roster, UUID viewerId) {
+  private Map<UUID, EntryState> groupedEntries(
+      Map<UUID, EntryState> roster,
+      UUID viewerId,
+      String viewerBackend) {
     Map<String, List<Map.Entry<UUID, EntryState>>> groups = roster.entrySet().stream()
         .collect(java.util.stream.Collectors.groupingBy(
             entry -> entry.getValue().backendName(), LinkedHashMap::new,
             Collectors.toList()));
     List<Map.Entry<String, List<Map.Entry<UUID, EntryState>>>> ordered = groups.entrySet().stream()
-        .sorted(Comparator.comparing(entry -> entry.getValue().getFirst().getValue().serverName(),
-            String.CASE_INSENSITIVE_ORDER))
+        .sorted(Comparator
+            .comparing((Map.Entry<String, List<Map.Entry<UUID, EntryState>>> entry) ->
+                !entry.getKey().equals(viewerBackend))
+            .thenComparing(entry -> entry.getValue().getFirst().getValue().serverName(),
+                String.CASE_INSENSITIVE_ORDER))
         .toList();
     Map<UUID, EntryState> desired = new LinkedHashMap<>();
     for (Map.Entry<String, List<Map.Entry<UUID, EntryState>>> group : ordered) {
       EntryState first = group.getValue().getFirst().getValue();
+      int players = group.getValue().size();
+      String header = serverHeaderLabel(group.getKey(), first.serverName(), players);
       UUID headerId = UUID.nameUUIDFromBytes(
           ("starx:tab:server:" + group.getKey()).getBytes(StandardCharsets.UTF_8));
       desired.put(headerId, EntryState.header(
-          group.getKey(), first.serverName(), headerId));
+          group.getKey(), header, headerId));
       group.getValue().stream()
           .sorted(Comparator.comparing(entry -> entry.getValue().username(),
               String.CASE_INSENSITIVE_ORDER))
@@ -189,6 +209,57 @@ public final class CrossServerTabModule implements VelocityModule {
           .forEach(entry -> desired.put(entry.getKey(), entry.getValue()));
     }
     return desired;
+  }
+
+  private String serverHeaderLabel(String backendName, String displayName, int players) {
+    ServerMetadata metadata = this.serverMetadata.computeIfAbsent(
+        backendName, ignored -> new ServerMetadata());
+    refreshServerMetadataIfDue(backendName, metadata);
+    int maxPlayers = metadata.maxPlayers;
+    String capacity = maxPlayers > 0 ? players + "/" + maxPlayers : Integer.toString(players);
+    String status = metadata.online ? "在线" : "未知";
+    return displayName + " " + capacity + " " + status;
+  }
+
+  private void refreshServerMetadataIfDue(String backendName, ServerMetadata metadata) {
+    long now = System.nanoTime();
+    if (now - metadata.refreshedAtNanos < SERVER_META_TTL_NANOS
+        || !metadata.inFlight.compareAndSet(false, true)) {
+      return;
+    }
+    RegisteredServer server = this.plugin.proxy().getServer(backendName).orElse(null);
+    if (server == null) {
+      metadata.inFlight.set(false);
+      metadata.refreshedAtNanos = now;
+      return;
+    }
+    CompletableFuture<ServerPing> ping;
+    try {
+      ping = server.ping();
+    } catch (RuntimeException error) {
+      metadata.online = false;
+      metadata.refreshedAtNanos = now;
+      metadata.inFlight.set(false);
+      return;
+    }
+    ping.orTimeout(SERVER_PING_TIMEOUT_SECONDS, TimeUnit.SECONDS).whenComplete((result, error) -> {
+      if (error == null && result != null) {
+        metadata.online = true;
+        metadata.maxPlayers = result.getPlayers().map(ServerPing.Players::getMax).orElse(-1);
+      } else {
+        metadata.online = false;
+      }
+      metadata.refreshedAtNanos = System.nanoTime();
+      metadata.inFlight.set(false);
+      scheduleReconcile(Duration.ZERO);
+    });
+  }
+
+  private static final class ServerMetadata {
+    private final AtomicBoolean inFlight = new AtomicBoolean();
+    private volatile long refreshedAtNanos;
+    private volatile int maxPlayers = -1;
+    private volatile boolean online = true;
   }
 
   private boolean addEntry(TabList tabList, UUID targetId, EntryState state) {
