@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.10] - 2026-10-12
+
+### Skin delivery closure
+
+- Website skin profiles can sign official capes together with the skin through MineSkin cape identifiers.
+- SkinsRestorer URL-only fallback applies website skins through its own MineSkin integration when the website has no signed property.
+- URL-only fallback remains event-driven and only runs for the joining or explicitly refreshed player; no periodic scan was added.
+
+
 ## [1.1.9] - 2026-10-11
 
 ### Skin bridge
