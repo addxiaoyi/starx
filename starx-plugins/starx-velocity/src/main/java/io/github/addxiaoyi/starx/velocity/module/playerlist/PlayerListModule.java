@@ -341,29 +341,36 @@ public final class PlayerListModule implements VelocityModule {
 
   private NetworkSnapshot refreshNetworkSnapshot() {
     Map<String, Integer> serverCounts = new LinkedHashMap<>();
-    List<OnlineServer> online = new ArrayList<>();
     this.plugin.proxy().getAllServers().forEach(server -> {
       String name = server.getServerInfo().getName();
-      int players = server.getPlayersConnected().size();
-      serverCounts.put(name, players);
-      online.add(new OnlineServer(this.config.serverAlias(name), players));
+      serverCounts.put(name, server.getPlayersConnected().size());
     });
-    online.sort(Comparator.comparing(OnlineServer::name));
-    StringBuilder labels = new StringBuilder();
-    for (int index = 0; index < online.size(); index++) {
-      OnlineServer server = online.get(index);
-      if (!labels.isEmpty()) {
-        labels.append(index % 4 == 0 ? "\\n" : " <dark_gray>|</dark_gray> ");
-      }
-      labels.append(server.name()).append(' ').append(server.players());
-    }
     NetworkSnapshot snapshot = new NetworkSnapshot(
         this.plugin.proxy().getPlayerCount(),
         this.plugin.proxy().getConfiguration().getShowMaxPlayers(),
         serverCounts,
-        labels.isEmpty() ? "暂无已注册子服" : labels.toString());
+        occupiedServerLabels(serverCounts, this.config::serverAlias));
     this.networkSnapshot = snapshot;
     return snapshot;
+  }
+
+  static String occupiedServerLabels(
+      Map<String, Integer> serverCounts,
+      Function<String, String> alias) {
+    List<OnlineServer> occupied = serverCounts.entrySet().stream()
+        .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
+        .map(entry -> new OnlineServer(alias.apply(entry.getKey()), entry.getValue()))
+        .sorted(Comparator.comparing(OnlineServer::name))
+        .toList();
+    StringBuilder labels = new StringBuilder();
+    for (int index = 0; index < occupied.size(); index++) {
+      OnlineServer server = occupied.get(index);
+      if (!labels.isEmpty()) {
+        labels.append(index % 4 == 0 ? "\n" : " <dark_gray>|</dark_gray> ");
+      }
+      labels.append(server.name()).append(' ').append(server.players());
+    }
+    return labels.isEmpty() ? "暂无在线子服" : labels.toString();
   }
 
   private void samplePlayerLatency() {

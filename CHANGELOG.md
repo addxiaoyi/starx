@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.11] - 2026-10-12
+
+### TAB server visibility
+
+- TAB server labels now include only backend servers with at least one connected player.
+- Empty registered backends remain available for routing but no longer create noise in `%starx_servers%`.
+
+
 ## [1.1.10] - 2026-10-12
 
 ### Skin delivery closure
