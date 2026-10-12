@@ -25,6 +25,7 @@ implements SkinRepository {
     private static final ConcurrentMap<Class<?>, Method[]> ALL_METHODS_CACHE = new ConcurrentHashMap<>();
     
     private final boolean available;
+    private final Object api;
     private final Object playerStorage;
     private final Object skinStorage;
     private final Logger logger;
@@ -67,6 +68,7 @@ implements SkinRepository {
             this.logger.log(Level.WARNING, "SkinsRestorer API is incompatible with this server, skin bridge will degrade gracefully.", e);
         }
         this.available = ok;
+        this.api = api;
         this.playerStorage = playerStorageTmp;
         this.skinStorage = skinStorageTmp;
     }
@@ -179,6 +181,37 @@ implements SkinRepository {
         }
         catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
             this.logFailure("Failed to set skin data for " + String.valueOf(uuid), e);
+            return false;
+        }
+    }
+
+    /**
+     * Resolves a URL through SkinsRestorer/MineSkin and applies it immediately.
+     * This is the URL-only fallback for websites that cannot sign textures themselves.
+     */
+    public boolean tryApplySkinUrl(UUID uuid, Object player, String skinUrl) {
+        if (!this.available || this.api == null || this.playerStorage == null
+            || this.skinStorage == null || uuid == null || player == null
+            || skinUrl == null || skinUrl.isBlank()) {
+            return false;
+        }
+        try {
+            Optional<?> result = SkinsRestorerSkinRepository.invokeOptional(
+                this.skinStorage, "findOrCreateSkinData", skinUrl.trim());
+            if (result.isEmpty()) {
+                return false;
+            }
+            String skinId = SkinsRestorerSkinRepository.identifierOf(
+                SkinsRestorerSkinRepository.invoke(result.get(), "getIdentifier"));
+            SkinsRestorerSkinRepository.setSkinIdentifier(this.playerStorage, uuid, skinId);
+            Class<?> playerType = Class.forName(
+                "com.velocitypowered.api.proxy.Player", false, player.getClass().getClassLoader());
+            Object applier = SkinsRestorerSkinRepository.invoke(this.api, "getSkinApplier", playerType);
+            SkinsRestorerSkinRepository.invoke(applier, "applySkin", player);
+            return true;
+        }
+        catch (ReflectiveOperationException | ClassCastException | IllegalStateException | LinkageError e) {
+            this.logFailure("Failed to resolve and apply URL skin for " + String.valueOf(uuid), e);
             return false;
         }
     }

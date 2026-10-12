@@ -445,6 +445,19 @@ implements VelocityModule {
         String providerLabel
     ) {
         if ("website".equals(provider) && !profile.hasDeliverableTextures()) {
+            Player online = this.proxy.getPlayer(uuid).orElse(null);
+            if (!profile.hasCape() && online != null
+                && profile.textureUrl() != null
+                && this.writableSkinRepository instanceof SkinsRestorerSkinRepository skinsRestorer
+                && skinsRestorer.tryApplySkinUrl(uuid, online, profile.textureUrl())) {
+                this.appliedSkinProviders.put(uuid, "website-skinsrestorer-url");
+                this.eventBus.publish("skin:applied", java.util.Map.of(
+                    "uuid", uuid.toString(), "provider", "website-skinsrestorer-url"));
+                this.eventBus.publish("skin:updated", java.util.Map.of(
+                    "uuid", uuid.toString(), "provider", "website-skinsrestorer-url",
+                    "localPersisted", "true", "backendTargets", "0"));
+                return true;
+            }
             LOGGER.warning("Website skin profile has no deliverable signed textures for " + playerName);
             return false;
         }

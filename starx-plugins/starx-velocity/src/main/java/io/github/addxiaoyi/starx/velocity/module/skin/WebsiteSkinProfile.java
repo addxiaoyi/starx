@@ -96,6 +96,10 @@ final class WebsiteSkinProfile {
         && skin.signature != null && !skin.signature.isBlank();
   }
 
+  boolean hasCape() {
+    return textures.containsKey("CAPE");
+  }
+
   boolean hasDeliverableTextures() {
     // The bridge carries one signed textures property. A URL-only cape cannot
     // be persisted safely without overwriting the player's signed skin.
