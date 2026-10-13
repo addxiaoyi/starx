@@ -147,8 +147,7 @@ public final class PlayerListModule implements VelocityModule {
     Set<String> referenced = this.rendererVariables();
     this.needsBindingData = referencesAny(referenced, BINDING_VARIABLES);
     this.needsSessionData = referencesAny(referenced, SESSION_VARIABLES);
-    this.needsLatencyData = referenced.contains("starx_ping")
-        || referenced.contains("starx_ping_raw");
+    this.needsLatencyData = needsLatencyData(referenced);
     this.needsUserData = referencesAny(referenced, USER_VARIABLES)
         || this.needsBindingData || this.needsSessionData;
   }
@@ -169,12 +168,9 @@ public final class PlayerListModule implements VelocityModule {
         .buildTask(this.plugin, this::refreshAll)
         .repeat(Duration.ofSeconds(this.config.refreshSeconds()))
         .schedule();
-    if (this.needsLatencyData) {
-      this.latencyTask = this.plugin.proxy().getScheduler()
-          .buildTask(this.plugin, this::samplePlayerLatencyAndRefresh)
-          .repeat(Duration.ofMillis(250))
-          .schedule();
-    }
+    this.latencyTask = LatencySamplingTask.schedule(
+        this.plugin.proxy().getScheduler(), this.plugin, this.needsLatencyData,
+        this::samplePlayerLatencyAndRefresh);
     this.refreshAll();
     this.plugin.logger().info("内置玩家列表已启用，无需 TAB 或 PlaceholderAPI");
   }
@@ -350,6 +346,10 @@ public final class PlayerListModule implements VelocityModule {
 
   private static boolean referencesAny(Set<String> referenced, Set<String> candidates) {
     return referenced.stream().anyMatch(candidates::contains);
+  }
+
+  static boolean needsLatencyData(Set<String> referenced) {
+    return referenced.contains("starx_ping") || referenced.contains("starx_ping_raw");
   }
 
   private NetworkSnapshot refreshNetworkSnapshot() {

@@ -5,8 +5,6 @@ import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.proxy.Player;
-import com.velocitypowered.api.proxy.server.RegisteredServer;
-import com.velocitypowered.api.proxy.server.ServerPing;
 import com.velocitypowered.api.proxy.player.TabList;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
@@ -21,9 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import net.kyori.adventure.text.Component;
@@ -35,8 +31,6 @@ public final class CrossServerTabModule implements VelocityModule {
   private static final Duration RECONCILE_INTERVAL = Duration.ofSeconds(5);
   private static final Duration EVENT_DELAY = Duration.ofMillis(250);
   private static final int LATENCY_CHANGE_THRESHOLD_MS = 5;
-  private static final long SERVER_META_TTL_NANOS = Duration.ofSeconds(30).toNanos();
-  private static final long SERVER_PING_TIMEOUT_SECONDS = 2L;
 
   private final StarxVelocityPlugin plugin;
   private final PlayerLatencyTracker latencyTracker;
@@ -45,7 +39,8 @@ public final class CrossServerTabModule implements VelocityModule {
   private final RuntimeWindowCounter reconcileCounter = new RuntimeWindowCounter();
   private final RuntimeWindowCounter playerScanCounter = new RuntimeWindowCounter();
   private final RuntimeWindowCounter tabWriteCounter = new RuntimeWindowCounter();
-  private final Map<String, ServerMetadata> serverMetadata = new ConcurrentHashMap<>();
+  private final ServerMetadataCache serverMetadata =
+      new ServerMetadataCache(Duration.ofSeconds(30), Duration.ofSeconds(2));
   private final ReentrantLock lifecycleLock = new ReentrantLock();
   private boolean reconcileQueued;
   private long generation;
@@ -220,54 +215,16 @@ public final class CrossServerTabModule implements VelocityModule {
   }
 
   private String serverHeaderLabel(String backendName, String displayName, int players) {
-    ServerMetadata metadata = this.serverMetadata.computeIfAbsent(
-        backendName, ignored -> new ServerMetadata());
-    refreshServerMetadataIfDue(backendName, metadata);
-    int maxPlayers = metadata.maxPlayers;
+    this.serverMetadata.refreshIfDue(backendName, () -> this.plugin.proxy().getServer(backendName)
+        .map(server -> server.ping())
+        .orElseGet(() -> java.util.concurrent.CompletableFuture.failedFuture(
+            new IllegalStateException("Server is not registered: " + backendName))),
+        () -> scheduleReconcile(Duration.ZERO));
+    ServerMetadataCache.Snapshot metadata = this.serverMetadata.snapshot(backendName);
+    int maxPlayers = metadata.maxPlayers();
     String capacity = maxPlayers > 0 ? players + "/" + maxPlayers : Integer.toString(players);
-    String status = metadata.online ? "在线" : "未知";
+    String status = !metadata.known() ? "未知" : metadata.online() ? "在线" : "离线";
     return displayName + " " + capacity + " " + status;
-  }
-
-  private void refreshServerMetadataIfDue(String backendName, ServerMetadata metadata) {
-    long now = System.nanoTime();
-    if (now - metadata.refreshedAtNanos < SERVER_META_TTL_NANOS
-        || !metadata.inFlight.compareAndSet(false, true)) {
-      return;
-    }
-    RegisteredServer server = this.plugin.proxy().getServer(backendName).orElse(null);
-    if (server == null) {
-      metadata.inFlight.set(false);
-      metadata.refreshedAtNanos = now;
-      return;
-    }
-    CompletableFuture<ServerPing> ping;
-    try {
-      ping = server.ping();
-    } catch (RuntimeException error) {
-      metadata.online = false;
-      metadata.refreshedAtNanos = now;
-      metadata.inFlight.set(false);
-      return;
-    }
-    ping.orTimeout(SERVER_PING_TIMEOUT_SECONDS, TimeUnit.SECONDS).whenComplete((result, error) -> {
-      if (error == null && result != null) {
-        metadata.online = true;
-        metadata.maxPlayers = result.getPlayers().map(ServerPing.Players::getMax).orElse(-1);
-      } else {
-        metadata.online = false;
-      }
-      metadata.refreshedAtNanos = System.nanoTime();
-      metadata.inFlight.set(false);
-      scheduleReconcile(Duration.ZERO);
-    });
-  }
-
-  private static final class ServerMetadata {
-    private final AtomicBoolean inFlight = new AtomicBoolean();
-    private volatile long refreshedAtNanos;
-    private volatile int maxPlayers = -1;
-    private volatile boolean online = true;
   }
 
   private boolean addEntry(TabList tabList, UUID targetId, EntryState state) {

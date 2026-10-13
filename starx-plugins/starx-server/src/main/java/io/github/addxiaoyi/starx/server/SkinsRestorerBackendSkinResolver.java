@@ -121,6 +121,9 @@ final class SkinsRestorerBackendSkinResolver implements BackendSkinResolver {
   }
 
   private boolean applyOnlineSkin(UUID uuid, String value, String signature) {
+    if (Bukkit.getServer() == null) {
+      return true;
+    }
     Player player = Bukkit.getPlayer(uuid);
     if (player == null) {
       return true;

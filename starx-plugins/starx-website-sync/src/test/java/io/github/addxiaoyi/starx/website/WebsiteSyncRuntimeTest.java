@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -144,6 +145,52 @@ class WebsiteSyncRuntimeTest {
       await(() -> runtime.snapshot().state() == WebsiteSyncRuntime.State.ACTIVE);
     } finally {
       client.releaseHeartbeat.countDown();
+      runtime.close();
+    }
+  }
+
+  @Test
+  void workerThreadsTimeOutAndOnlyOneShotHeartbeatRemainsScheduled() throws Exception {
+    FakeClient client = new FakeClient();
+    WebsiteSyncRuntime runtime = runtime(
+        config(SecretValue.empty(), SecretValue.of("stx_node_test"), false),
+        client,
+        ignored -> { });
+    try {
+      runtime.start();
+      await(() -> runtime.snapshot().state() == WebsiteSyncRuntime.State.ACTIVE);
+      await(() -> runtime.workerThreadCount() == 0);
+
+      assertEquals(1, runtime.scheduledTaskCount(),
+          "textures disabled should leave only the one-shot heartbeat task");
+    } finally {
+      runtime.close();
+    }
+  }
+
+  @Test
+  void repeatedTextureSchedulingKeepsOnlyOnePendingTextureTask() throws Exception {
+    WebsiteSyncRuntime runtime = runtime(
+        config(SecretValue.empty(), SecretValue.of("stx_node_test"), true),
+        new FakeClient(),
+        ignored -> { });
+    try {
+      runtime.start();
+      await(() -> runtime.snapshot().state() == WebsiteSyncRuntime.State.ACTIVE);
+      await(() -> runtime.workerThreadCount() == 0);
+      var schedule = WebsiteSyncRuntime.class.getDeclaredMethod(
+          "scheduleTextureTick", java.time.Duration.class);
+      schedule.setAccessible(true);
+      schedule.invoke(runtime, Duration.ofMinutes(1));
+      var pendingTexture = WebsiteSyncRuntime.class.getDeclaredField("textureFuture");
+      pendingTexture.setAccessible(true);
+      var previous = (java.util.concurrent.ScheduledFuture<?>) pendingTexture.get(runtime);
+      schedule.invoke(runtime, Duration.ofMinutes(1));
+      var current = (java.util.concurrent.ScheduledFuture<?>) pendingTexture.get(runtime);
+
+      assertTrue(previous.isCancelled(), "replacing a texture timer must cancel its predecessor");
+      assertTrue(current != previous, "one current texture timer should replace the old timer");
+    } finally {
       runtime.close();
     }
   }

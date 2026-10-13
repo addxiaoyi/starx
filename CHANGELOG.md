@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.15] - 2026-10-13
+
+### CPU and runtime resource control
+
+- Cache CrossServer TAB backend ping capacity and online state for 30 seconds, coalesce concurrent probes, and reconcile when metadata changes.
+- Do not create the 250ms player latency task unless a player-list template references a ping variable.
+- Schedule website heartbeats and texture synchronization once per due time; cancel replaced timers and stop texture scheduling when disabled.
+- Reclaim idle website HTTP worker threads after one second.
+- Add regression tests for cache expiry, state transitions, concurrent probes, latency task gating, and idle worker reclamation.
+
 ## [1.1.14] - 2026-10-13
 
 ### CPU and runtime resource control

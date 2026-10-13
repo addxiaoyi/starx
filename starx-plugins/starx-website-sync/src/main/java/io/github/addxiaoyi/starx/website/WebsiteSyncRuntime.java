@@ -15,7 +15,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -55,13 +55,15 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   private final List<String> capabilities;
   private final Consumer<String> logger;
   private final Clock clock;
-  private final ScheduledExecutorService scheduler;
+  private final ScheduledThreadPoolExecutor scheduler;
   private final ThreadPoolExecutor workers;
   private final AtomicReference<SecretValue> nodeToken;
   private final AtomicReference<State> state;
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean heartbeatInFlight = new AtomicBoolean();
   private final AtomicBoolean texturesInFlight = new AtomicBoolean();
+  private final Object heartbeatScheduleLock = new Object();
+  private final Object textureScheduleLock = new Object();
   private final ExponentialBackoff heartbeatBackoff;
   private final ExponentialBackoff textureBackoff;
   private final Set<String> rejectedTextureHashes = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -72,6 +74,8 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   private volatile String lastErrorCode = "";
   private volatile NodeSnapshot latestSnapshot;
   private volatile Map<String, String> lastTextureManifest = Map.of();
+  private ScheduledFuture<?> heartbeatFuture;
+  private ScheduledFuture<?> textureFuture;
 
   public WebsiteSyncRuntime(
       WebsiteSyncConfig config,
@@ -111,10 +115,13 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         Duration.ofSeconds(Math.max(5, config.heartbeat().intervalSeconds())), MAX_BACKOFF);
     this.textureBackoff = new ExponentialBackoff(Duration.ofSeconds(15), MAX_BACKOFF);
     this.scheduler = new ScheduledThreadPoolExecutor(1, daemonFactory("starx-website-schedule"));
+    this.scheduler.setKeepAliveTime(1, TimeUnit.SECONDS);
+    this.scheduler.allowCoreThreadTimeOut(true);
+    this.scheduler.setRemoveOnCancelPolicy(true);
     this.workers = new ThreadPoolExecutor(
         4,
         8,
-        60,
+        1,
         TimeUnit.SECONDS,
         new java.util.concurrent.LinkedBlockingQueue<>(64),
         daemonFactory("starx-website-http"),
@@ -130,12 +137,12 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     this.nextHeartbeatMillis = now;
     this.nextTextureMillis = now;
     scheduleHeartbeat(Duration.ZERO);
-    scheduleTextureTick(Duration.ofSeconds(2));
   }
 
   public void forceHeartbeat() {
     if (this.state.get() != State.AUTH_FAILED && this.state.get() != State.STOPPED) {
       this.nextHeartbeatMillis = 0;
+      if (this.started.get()) scheduleHeartbeat(Duration.ZERO);
     }
   }
 
@@ -149,22 +156,47 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         this.rejectedTextureHashes.size());
   }
 
+  int workerThreadCount() {
+    return this.workers.getPoolSize();
+  }
+
+  int scheduledTaskCount() {
+    return this.scheduler.getQueue().size();
+  }
+
   private void heartbeatTick() {
-    if (!mayRun(this.nextHeartbeatMillis) || !this.heartbeatInFlight.compareAndSet(false, true)) {
+    if (!mayRun(this.nextHeartbeatMillis)) {
+      scheduleHeartbeat(nextHeartbeatDelay());
       return;
     }
-    submit(() -> {
+    if (!this.heartbeatInFlight.compareAndSet(false, true)) {
+      return;
+    }
+    boolean accepted = submit(() -> {
       try {
         publishHeartbeat();
       } finally {
         this.heartbeatInFlight.set(false);
+        scheduleHeartbeat(nextHeartbeatDelay());
       }
     }, this.heartbeatInFlight);
+    if (!accepted) {
+      this.nextHeartbeatMillis = this.clock.millis() + 1_000L;
+      scheduleHeartbeat(Duration.ofSeconds(1));
+    }
   }
 
   private void scheduleHeartbeat(Duration delay) {
+    if (!this.started.get() || this.state.get() == State.STOPPED
+        || this.state.get() == State.AUTH_FAILED || this.nextHeartbeatMillis == Long.MAX_VALUE) {
+      return;
+    }
     try {
-      this.scheduler.schedule(this::runHeartbeatSchedule, delay.toMillis(), TimeUnit.MILLISECONDS);
+      synchronized (this.heartbeatScheduleLock) {
+        if (this.heartbeatFuture != null) this.heartbeatFuture.cancel(false);
+        this.heartbeatFuture = this.scheduler.schedule(
+            this::runHeartbeatSchedule, Math.max(0, delay.toMillis()), TimeUnit.MILLISECONDS);
+      }
     } catch (RejectedExecutionException error) {
       if (this.state.get() != State.STOPPED) {
         this.logger.accept(
@@ -174,6 +206,9 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   }
 
   private void runHeartbeatSchedule() {
+    synchronized (this.heartbeatScheduleLock) {
+      this.heartbeatFuture = null;
+    }
     try {
       heartbeatTick();
     } catch (RuntimeException error) {
@@ -182,11 +217,14 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
       this.logger.accept(
           "StarX website heartbeat scheduler recovered after runtime failure: node="
               + this.config.nodeId() + " error=" + error.getClass().getSimpleName());
-    } finally {
-      if (this.state.get() != State.STOPPED) {
-        scheduleHeartbeat(Duration.ofSeconds(1));
-      }
+      scheduleHeartbeat(nextHeartbeatDelay());
     }
+  }
+
+  private Duration nextHeartbeatDelay() {
+    long due = this.nextHeartbeatMillis;
+    if (due == Long.MAX_VALUE) return Duration.ZERO;
+    return Duration.ofMillis(Math.max(0, due - this.clock.millis()));
   }
 
   private void publishHeartbeat() {
@@ -222,6 +260,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
       this.lastErrorCode = "";
       this.heartbeatBackoff.reset();
       this.nextHeartbeatMillis = this.clock.millis() + this.config.heartbeat().interval().toMillis();
+      if (this.config.textures().enabled()) scheduleTextureTick(nextTextureDelay());
       if (recovered) {
         this.logger.accept("StarX website synchronization recovered: node=" + this.config.nodeId());
       }
@@ -237,10 +276,14 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   }
 
   private void scheduleTextureTick(Duration delay) {
-    if (this.state.get() == State.STOPPED || !this.config.enabled()) return;
+    if (this.state.get() != State.ACTIVE || !this.config.textures().enabled()
+        || this.texturesInFlight.get()) return;
     try {
-      this.scheduler.schedule(this::runTextureSchedule,
-          Math.max(1L, delay.toMillis()), TimeUnit.MILLISECONDS);
+      synchronized (this.textureScheduleLock) {
+        if (this.textureFuture != null) this.textureFuture.cancel(false);
+        this.textureFuture = this.scheduler.schedule(this::runTextureSchedule,
+            Math.max(1L, delay.toMillis()), TimeUnit.MILLISECONDS);
+      }
     } catch (RejectedExecutionException error) {
       if (this.state.get() != State.STOPPED) {
         this.logger.accept("StarX website texture scheduler rejected node=" + this.config.nodeId());
@@ -249,16 +292,20 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   }
 
   private void runTextureSchedule() {
+    synchronized (this.textureScheduleLock) {
+      this.textureFuture = null;
+    }
+    if (this.state.get() != State.ACTIVE || !this.config.textures().enabled()) return;
+    if (!mayRun(this.nextTextureMillis)) {
+      scheduleTextureTick(nextTextureDelay());
+      return;
+    }
     try {
       textureTick();
     } catch (RuntimeException error) {
       handleFailure("texture_scheduler_failed", this.textureBackoff.next(), false);
       this.logger.accept("StarX website texture scheduler recovered: node="
           + this.config.nodeId() + " error=" + error.getClass().getSimpleName());
-    } finally {
-      if (this.state.get() != State.STOPPED) {
-        scheduleTextureTick(nextTextureDelay());
-      }
     }
   }
 
@@ -277,13 +324,18 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         || !this.texturesInFlight.compareAndSet(false, true)) {
       return;
     }
-    submit(() -> {
+    boolean accepted = submit(() -> {
       try {
         synchronizeTextures();
       } finally {
         this.texturesInFlight.set(false);
+        scheduleTextureTick(nextTextureDelay());
       }
     }, this.texturesInFlight);
+    if (!accepted) {
+      this.nextTextureMillis = this.clock.millis() + Duration.ofSeconds(15).toMillis();
+      scheduleTextureTick(nextTextureDelay());
+    }
   }
 
   private void synchronizeTextures() {
@@ -429,12 +481,14 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         && this.clock.millis() >= dueMillis;
   }
 
-  private void submit(Runnable task, AtomicBoolean guard) {
+  private boolean submit(Runnable task, AtomicBoolean guard) {
     try {
       this.workers.execute(task);
+      return true;
     } catch (RejectedExecutionException error) {
       guard.set(false);
       this.lastErrorCode = "queue_full";
+      return false;
     }
   }
 
