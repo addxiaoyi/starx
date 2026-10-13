@@ -15,6 +15,7 @@ import io.github.addxiaoyi.starx.common.session.PlayerSessionSummary;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
+import io.github.addxiaoyi.starx.velocity.metrics.RuntimeWindowCounter;
 import io.github.addxiaoyi.starx.velocity.module.auth.AuthModule;
 import io.github.addxiaoyi.starx.velocity.variable.PlayerIdentityMetrics;
 import io.github.addxiaoyi.starx.velocity.variable.StarxPlayerContextFactory;
@@ -75,6 +76,7 @@ public final class PlayerListModule implements VelocityModule {
   private final Map<UUID, DisplayedLatency> displayedLatency = new ConcurrentHashMap<>();
   private volatile NetworkSnapshot networkSnapshot;
   private volatile long lastLatencySampleNanos;
+  private final RuntimeWindowCounter playerScanCounter = new RuntimeWindowCounter();
 
   public PlayerListModule(
       StarxVelocityPlugin plugin,
@@ -167,10 +169,12 @@ public final class PlayerListModule implements VelocityModule {
         .buildTask(this.plugin, this::refreshAll)
         .repeat(Duration.ofSeconds(this.config.refreshSeconds()))
         .schedule();
-    this.latencyTask = this.plugin.proxy().getScheduler()
-        .buildTask(this.plugin, this::samplePlayerLatencyAndRefresh)
-        .repeat(Duration.ofMillis(250))
-        .schedule();
+    if (this.needsLatencyData) {
+      this.latencyTask = this.plugin.proxy().getScheduler()
+          .buildTask(this.plugin, this::samplePlayerLatencyAndRefresh)
+          .repeat(Duration.ofMillis(250))
+          .schedule();
+    }
     this.refreshAll();
     this.plugin.logger().info("内置玩家列表已启用，无需 TAB 或 PlaceholderAPI");
   }
@@ -200,9 +204,11 @@ public final class PlayerListModule implements VelocityModule {
   }
 
   private void refreshAll() {
-    samplePlayerLatency();
+    List<Player> players = List.copyOf(this.plugin.proxy().getAllPlayers());
+    this.playerScanCounter.add(players.size());
+    if (this.needsLatencyData) samplePlayerLatency(players);
     NetworkSnapshot snapshot = this.refreshNetworkSnapshot();
-    this.plugin.proxy().getAllPlayers().forEach(player -> this.refreshSafely(player, snapshot));
+    players.forEach(player -> this.refreshSafely(player, snapshot));
   }
 
   private void refreshSafely(Player player) {
@@ -314,6 +320,13 @@ public final class PlayerListModule implements VelocityModule {
     return loaded;
   }
 
+  public Map<String, Object> runtimeMetrics() {
+    return Map.of(
+        "latencySamplingEnabled", this.needsLatencyData,
+        "playerScansPerMinute", this.playerScanCounter.perMinute(),
+        "playerScansTotal", this.playerScanCounter.total());
+  }
+
   private NetworkSnapshot currentNetworkSnapshot() {
     NetworkSnapshot current = this.networkSnapshot;
     return current == null ? this.refreshNetworkSnapshot() : current;
@@ -373,28 +386,30 @@ public final class PlayerListModule implements VelocityModule {
     return labels.isEmpty() ? "暂无在线子服" : labels.toString();
   }
 
-  private void samplePlayerLatency() {
+  private void samplePlayerLatency(List<Player> players) {
     long now = System.nanoTime();
     if (now - this.lastLatencySampleNanos < Duration.ofMillis(250).toNanos()) return;
     this.lastLatencySampleNanos = now;
-    Set<UUID> onlinePlayers = this.plugin.proxy().getAllPlayers().stream()
+    this.playerScanCounter.add(players.size());
+    Set<UUID> onlinePlayers = players.stream()
         .map(Player::getUniqueId)
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
     this.latencyTracker.retain(onlinePlayers);
-    this.plugin.proxy().getAllPlayers().forEach(player ->
-        this.latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing));
+    players.forEach(player -> this.latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing));
   }
 
   private void samplePlayerLatencyAndRefresh() {
     long now = System.nanoTime();
     if (now - this.lastLatencySampleNanos < Duration.ofMillis(250).toNanos()) return;
     this.lastLatencySampleNanos = now;
-    Set<UUID> onlinePlayers = this.plugin.proxy().getAllPlayers().stream()
+    List<Player> players = List.copyOf(this.plugin.proxy().getAllPlayers());
+    this.playerScanCounter.add(players.size());
+    Set<UUID> onlinePlayers = players.stream()
         .map(Player::getUniqueId)
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
     this.latencyTracker.retain(onlinePlayers);
     NetworkSnapshot snapshot = this.currentNetworkSnapshot();
-    this.plugin.proxy().getAllPlayers().forEach(player -> {
+    players.forEach(player -> {
       UUID playerId = player.getUniqueId();
       PlayerLatencyTracker.Snapshot latency = this.latencyTracker.sampleIfDue(playerId, player::getPing);
       DisplayedLatency previous = this.displayedLatency.get(playerId);

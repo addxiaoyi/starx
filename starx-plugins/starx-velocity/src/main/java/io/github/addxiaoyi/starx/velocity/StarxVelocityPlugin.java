@@ -477,7 +477,8 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         this.moduleManager.register(playerList);
         this.moduleManager.register(new TabIntegrationModule(this, playerList, variables));
         this.moduleManager.register(new TabListModule(this));
-        this.moduleManager.register(new CrossServerTabModule(this, playerLatency));
+        CrossServerTabModule crossServerTab = new CrossServerTabModule(this, playerLatency);
+        this.moduleManager.register(crossServerTab);
         MigrationModule migrationModule = new MigrationModule(this, this.eventBus, MigrationModule.Config.defaultConfig(), userRepository, uniAuthClient);
         this.moduleManager.register(migrationModule);
         this.moduleManager.register(new MigrationCommands(this, userRepository, migrationModule, uniAuthClient));
@@ -565,6 +566,16 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             metrics.put("queue", queueModule.runtimeSnapshot());
             metrics.put("smartQueue", smartQueueModule.runtimeSnapshot());
             metrics.put("playerNetwork", playerList.networkMetrics());
+            metrics.put("playerListRuntime", playerList.runtimeMetrics());
+            metrics.put("crossServerTabRuntime", crossServerTab.runtimeMetrics());
+            var websiteMetrics = websiteSync.metrics();
+            metrics.put("websiteSyncRuntime", Map.of(
+                "state", websiteSync.status().state().name(),
+                "requestsPerMinute", websiteMetrics.requestsPerMinute(),
+                "requestsTotal", websiteMetrics.requestsSent(),
+                "heartbeatsSent", websiteMetrics.heartbeatsSent(),
+                "manifestsSent", websiteMetrics.manifestsSent(),
+                "texturesUploaded", websiteMetrics.texturesUploaded()));
             metrics.put("networkAutomation", this.networkAutomationService == null
                 ? Map.of("status", "not_started")
                 : this.networkAutomationService.snapshot());

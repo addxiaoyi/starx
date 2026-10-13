@@ -110,7 +110,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     this.heartbeatBackoff = new ExponentialBackoff(
         Duration.ofSeconds(Math.max(5, config.heartbeat().intervalSeconds())), MAX_BACKOFF);
     this.textureBackoff = new ExponentialBackoff(Duration.ofSeconds(15), MAX_BACKOFF);
-    this.scheduler = new ScheduledThreadPoolExecutor(2, daemonFactory("starx-website-schedule"));
+    this.scheduler = new ScheduledThreadPoolExecutor(1, daemonFactory("starx-website-schedule"));
     this.workers = new ThreadPoolExecutor(
         4,
         8,
@@ -119,6 +119,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         new java.util.concurrent.LinkedBlockingQueue<>(64),
         daemonFactory("starx-website-http"),
         new ThreadPoolExecutor.AbortPolicy());
+    this.workers.allowCoreThreadTimeOut(true);
   }
 
   public void start() {
@@ -129,7 +130,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     this.nextHeartbeatMillis = now;
     this.nextTextureMillis = now;
     scheduleHeartbeat(Duration.ZERO);
-    this.scheduler.scheduleWithFixedDelay(this::textureTick, 2, 2, TimeUnit.SECONDS);
+    scheduleTextureTick(Duration.ofSeconds(2));
   }
 
   public void forceHeartbeat() {
@@ -233,6 +234,40 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
       logHeartbeatFailure("snapshot_failed", error);
       handleFailure("snapshot_failed", this.heartbeatBackoff.next(), true);
     }
+  }
+
+  private void scheduleTextureTick(Duration delay) {
+    if (this.state.get() == State.STOPPED || !this.config.enabled()) return;
+    try {
+      this.scheduler.schedule(this::runTextureSchedule,
+          Math.max(1L, delay.toMillis()), TimeUnit.MILLISECONDS);
+    } catch (RejectedExecutionException error) {
+      if (this.state.get() != State.STOPPED) {
+        this.logger.accept("StarX website texture scheduler rejected node=" + this.config.nodeId());
+      }
+    }
+  }
+
+  private void runTextureSchedule() {
+    try {
+      textureTick();
+    } catch (RuntimeException error) {
+      handleFailure("texture_scheduler_failed", this.textureBackoff.next(), false);
+      this.logger.accept("StarX website texture scheduler recovered: node="
+          + this.config.nodeId() + " error=" + error.getClass().getSimpleName());
+    } finally {
+      if (this.state.get() != State.STOPPED) {
+        scheduleTextureTick(nextTextureDelay());
+      }
+    }
+  }
+
+  private Duration nextTextureDelay() {
+    if (!this.config.textures().enabled() || this.state.get() != State.ACTIVE) {
+      return Duration.ofSeconds(5);
+    }
+    long remaining = this.nextTextureMillis - this.clock.millis();
+    return Duration.ofMillis(Math.max(1_000L, remaining));
   }
 
   private void textureTick() {

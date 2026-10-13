@@ -261,6 +261,7 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
       logger.accept("StarX website sync: concurrent request limit reached, rejecting request");
       throw new WebsiteSyncApiException(0, "concurrent_limit", "Too many concurrent requests");
     }
+    this.metrics.recordRequest();
     long startMillis = System.currentTimeMillis();
     try {
       CompletableFuture<T> future = asyncOperation.get();

@@ -11,6 +11,7 @@ import com.velocitypowered.api.proxy.player.TabList;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
+import io.github.addxiaoyi.starx.velocity.metrics.RuntimeWindowCounter;
 import io.github.addxiaoyi.starx.velocity.module.playerlist.PlayerLatencyTracker;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -31,7 +32,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 /** Keeps the proxy-wide player roster visible in every backend TAB list. */
 public final class CrossServerTabModule implements VelocityModule {
 
-  private static final Duration RECONCILE_INTERVAL = Duration.ofSeconds(1);
+  private static final Duration RECONCILE_INTERVAL = Duration.ofSeconds(5);
   private static final Duration EVENT_DELAY = Duration.ofMillis(250);
   private static final int LATENCY_CHANGE_THRESHOLD_MS = 5;
   private static final long SERVER_META_TTL_NANOS = Duration.ofSeconds(30).toNanos();
@@ -41,6 +42,9 @@ public final class CrossServerTabModule implements VelocityModule {
   private final PlayerLatencyTracker latencyTracker;
   private final ServerNameMappings serverNames;
   private final Map<UUID, Map<UUID, EntryState>> sentEntries = new ConcurrentHashMap<>();
+  private final RuntimeWindowCounter reconcileCounter = new RuntimeWindowCounter();
+  private final RuntimeWindowCounter playerScanCounter = new RuntimeWindowCounter();
+  private final RuntimeWindowCounter tabWriteCounter = new RuntimeWindowCounter();
   private final Map<String, ServerMetadata> serverMetadata = new ConcurrentHashMap<>();
   private final ReentrantLock lifecycleLock = new ReentrantLock();
   private boolean reconcileQueued;
@@ -110,6 +114,7 @@ public final class CrossServerTabModule implements VelocityModule {
     if (!this.lifecycleLock.tryLock()) return;
     try {
       if (!this.enabled || epoch != this.generation) return;
+      this.reconcileCounter.increment();
       if (this.serverNames.reloadIfChanged()) {
         this.plugin.logger().info("已热加载 cross-server-tab.yml（" + this.serverNames.size() + " 个映射）");
       }
@@ -118,6 +123,7 @@ public final class CrossServerTabModule implements VelocityModule {
           .sorted(Comparator.comparing(Player::getUsername, String.CASE_INSENSITIVE_ORDER)
               .thenComparing(Player::getUniqueId))
           .toList();
+      this.playerScanCounter.add(players.size());
       this.sentEntries.keySet().retainAll(players.stream().map(Player::getUniqueId).collect(Collectors.toSet()));
       Map<UUID, EntryState> roster = new LinkedHashMap<>();
       players.forEach(player -> player.getCurrentServer().ifPresent(connection -> {
@@ -150,7 +156,9 @@ public final class CrossServerTabModule implements VelocityModule {
       if (desired.containsKey(targetId)) {
         return false;
       }
-      tabList.removeEntry(targetId);
+      if (tabList.removeEntry(targetId).isPresent()) {
+        this.tabWriteCounter.increment();
+      }
       return true;
     });
 
@@ -264,13 +272,21 @@ public final class CrossServerTabModule implements VelocityModule {
 
   private boolean addEntry(TabList tabList, UUID targetId, EntryState state) {
     var existing = tabList.getEntry(targetId);
+    Component display = displayName(state);
     if (existing.isPresent()) {
-      existing.get().setDisplayName(displayName(state));
-      existing.get().setLatency(state.latency());
+      var entry = existing.get();
+      if (!entry.getDisplayNameComponent().map(display::equals).orElse(false)) {
+        entry.setDisplayName(display);
+        this.tabWriteCounter.increment();
+      }
+      if (entry.getLatency() != state.latency()) {
+        entry.setLatency(state.latency());
+        this.tabWriteCounter.increment();
+      }
       return true;
     }
-    tabList.addEntry(tabList.buildEntry(
-        state.gameProfile(), displayName(state), state.latency(), 0));
+    tabList.addEntry(tabList.buildEntry(state.gameProfile(), display, state.latency(), 0));
+    this.tabWriteCounter.increment();
     return true;
   }
 
@@ -282,7 +298,9 @@ public final class CrossServerTabModule implements VelocityModule {
     TabList tabList = viewer.getTabList();
     entries.forEach((targetId, state) -> {
       if (state.serverHeader()) {
-        tabList.removeEntry(targetId);
+        if (tabList.removeEntry(targetId).isPresent()) {
+          this.tabWriteCounter.increment();
+        }
         return;
       }
       Player target = this.plugin.proxy().getPlayer(targetId).orElse(null);
@@ -291,7 +309,9 @@ public final class CrossServerTabModule implements VelocityModule {
             entry.setDisplayName(Component.text(state.username(), NamedTextColor.WHITE)));
         return;
       }
-      tabList.removeEntry(targetId);
+      if (tabList.removeEntry(targetId).isPresent()) {
+        this.tabWriteCounter.increment();
+      }
     });
   }
 
@@ -339,6 +359,17 @@ public final class CrossServerTabModule implements VelocityModule {
 
   private int tabLatency(Player player) {
     return this.latencyTracker.sampleIfDue(player.getUniqueId(), player::getPing).smoothedPing();
+  }
+
+  public Map<String, Object> runtimeMetrics() {
+    return Map.of(
+        "reconcilePerMinute", this.reconcileCounter.perMinute(),
+        "reconcileTotal", this.reconcileCounter.total(),
+        "playerScansPerMinute", this.playerScanCounter.perMinute(),
+        "playerScansTotal", this.playerScanCounter.total(),
+        "tabWritesPerMinute", this.tabWriteCounter.perMinute(),
+        "tabWritesTotal", this.tabWriteCounter.total(),
+        "reconcileIntervalSeconds", RECONCILE_INTERVAL.toSeconds());
   }
 
   private final class Listener {

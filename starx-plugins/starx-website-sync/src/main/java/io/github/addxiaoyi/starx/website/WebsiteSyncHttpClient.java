@@ -220,6 +220,9 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
       throw new WebsiteSyncApiException(503, "circuit_open",
           "Website sync circuit breaker is open; request rejected");
     }
+    if (this.metricsEnabled) {
+      this.metrics.recordRequest();
+    }
     HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint(path))
         .timeout(this.requestTimeout)
         .header("User-Agent", "StarX-SkinBridge/1")

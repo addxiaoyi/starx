@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.14] - 2026-10-13
+
+### CPU and runtime resource control
+
+- The 250ms latency sampler is not started when the configured player-list templates do not reference ping variables.
+- Cross-server TAB reconciliation is event-driven with a 5-second fallback instead of a 1-second loop.
+- TAB writes are counted and skipped when display name and latency are unchanged.
+- Website texture synchronization uses one-shot scheduling instead of a permanently waking 2-second timer.
+- Website sync workers can release idle core threads, and runtime counters expose scans, reconciles, TAB writes, and HTTP requests per minute.
+
+
 ## [1.1.13] - 2026-10-12
 
 ### TAB ordering and backend metadata

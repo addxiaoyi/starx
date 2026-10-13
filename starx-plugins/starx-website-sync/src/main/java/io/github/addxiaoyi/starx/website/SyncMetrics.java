@@ -9,6 +9,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * 全部为无锁原子计数，开销极低。
  */
 public final class SyncMetrics {
+  private final AtomicLong requestsSent = new AtomicLong();
+  private final AtomicLong requestWindowStart = new AtomicLong(currentMinute());
+  private final AtomicLong requestsInWindow = new AtomicLong();
   private final AtomicLong heartbeatsSent = new AtomicLong();
   private final AtomicLong heartbeatsFailed = new AtomicLong();
   private final AtomicLong manifestsSent = new AtomicLong();
@@ -23,6 +26,21 @@ public final class SyncMetrics {
   private volatile long lastHeartbeatLatencyMillis = -1;
   private volatile long lastManifestLatencyMillis = -1;
   private volatile long startedAtMillis = System.currentTimeMillis();
+
+  public void recordRequest() {
+    rotateRequestWindow();
+    this.requestsSent.incrementAndGet();
+    this.requestsInWindow.incrementAndGet();
+  }
+
+  public long requestsSent() {
+    return this.requestsSent.get();
+  }
+
+  public long requestsPerMinute() {
+    rotateRequestWindow();
+    return this.requestsInWindow.get();
+  }
 
   public void recordHeartbeatSuccess(long latencyMillis) {
     this.heartbeatsSent.incrementAndGet();
@@ -75,6 +93,8 @@ public final class SyncMetrics {
     long misses = this.cacheMisses.get();
     long total = hits + misses;
     return new Snapshot(
+        this.requestsSent.get(),
+        this.requestsPerMinute(),
         this.heartbeatsSent.get(),
         this.heartbeatsFailed.get(),
         this.manifestsSent.get(),
@@ -92,6 +112,8 @@ public final class SyncMetrics {
 
   /** 指标的只读快照，供状态接口输出。 */
   public record Snapshot(
+      long requestsSent,
+      long requestsPerMinute,
       long heartbeatsSent,
       long heartbeatsFailed,
       long manifestsSent,
@@ -108,7 +130,8 @@ public final class SyncMetrics {
   ) {
     @Override
     public String toString() {
-      return "hb=" + heartbeatsSent + "/" + heartbeatsFailed
+      return "req=" + requestsSent + "(" + requestsPerMinute + "/min) "
+          + "hb=" + heartbeatsSent + "/" + heartbeatsFailed
           + " mf=" + manifestsSent + "/" + manifestsFailed
           + " tx=" + texturesUploaded + "/" + texturesUploadFailed
           + " cache=" + String.format("%.1f%%", cacheHitRate * 100)
@@ -117,4 +140,17 @@ public final class SyncMetrics {
           + " uptime=" + (uptimeMillis / 1000) + "s";
     }
   }
+  private void rotateRequestWindow() {
+    long minute = currentMinute();
+    long previous = this.requestWindowStart.get();
+    if (previous == minute || !this.requestWindowStart.compareAndSet(previous, minute)) {
+      return;
+    }
+    this.requestsInWindow.set(0);
+  }
+
+  private static long currentMinute() {
+    return System.currentTimeMillis() / 60_000L;
+  }
+
 }
