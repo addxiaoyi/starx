@@ -177,6 +177,12 @@ jobs:
             path: /data/minecraft/ChaserGamer#4/plugins/starx-universal.jar
 
     steps:
+      - name: Prepare clean release staging directory
+        run: |
+          set -euo pipefail
+          rm -rf -- .release
+          mkdir -p .release
+
       - name: Download and verify release artifact
         if: github.event_name == 'push'
         uses: actions/download-artifact@v4
@@ -192,7 +198,6 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          mkdir -p .release
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --pattern 'starx-universal-*.jar' \
             --pattern SHA256SUMS \
