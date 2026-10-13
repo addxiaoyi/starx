@@ -4,12 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag to deploy
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -148,6 +155,7 @@ jobs:
   deploy-six-servers:
     name: Deploy to ${{ matrix.name }}
     needs: release
+    if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
     runs-on: [self-hosted, linux, x64, starx-deploy]
     timeout-minutes: 20
     strategy:
@@ -170,32 +178,54 @@ jobs:
 
     steps:
       - name: Download and verify release artifact
+        if: github.event_name == 'push'
         uses: actions/download-artifact@v4
         with:
           name: release-evidence-${{ github.ref_name }}
           path: .release
 
+      - name: Download published release assets for manual deployment
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          mkdir -p .release
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'starx-universal-*.jar' \
+            --pattern SHA256SUMS \
+            --pattern release-manifest.json \
+            --dir .release
+
       - name: Verify release artifact checksum
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           (cd .release && sha256sum -c SHA256SUMS)
-          jar=(.release/starx-universal-*.jar)
-          test "${#jar[@]}" -eq 1
-          echo "JAR=${jar[0]}" >> "$GITHUB_ENV"
+          version="${RELEASE_TAG#v}"
+          jar=".release/starx-universal-$version.jar"
+          test -s "$jar"
+          grep -Fq "\"version\": \"$version\"" .release/release-manifest.json
 
       - name: Backup, atomically install, and verify ${{ matrix.name }}
         env:
           SUDO_PASS: ${{ secrets.STARX_DEPLOY_SUDO_PASSWORD }}
           TARGET: ${{ matrix.path }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           test -n "$SUDO_PASS"
-          expected="$(sha256sum "$JAR" | cut -d' ' -f1)"
+          version="${RELEASE_TAG#v}"
+          jar=".release/starx-universal-$version.jar"
+          expected="$(sha256sum "$jar" | cut -d' ' -f1)"
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           root_script=$(cat <<EOF
           set -euo pipefail
           target='$TARGET'
-          jar='$GITHUB_WORKSPACE/$JAR'
+          jar='$GITHUB_WORKSPACE/$jar'
           expected='$expected'
           test -f "\$target"
           test "\$(sha256sum "\$jar" | cut -d' ' -f1)" = "\$expected"
