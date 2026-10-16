@@ -5,9 +5,9 @@ package io.github.addxiaoyi.starx.velocity.module.skin;
 
 import io.github.addxiaoyi.starx.api.dto.SkinDto;
 import io.github.addxiaoyi.starx.api.repository.SkinRepository;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 import com.google.gson.Gson;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -27,7 +27,7 @@ implements SkinRepository {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(3);
     private final String skinProfileBaseUrl;
     private final Logger logger;
-    private final HttpClient httpClient;
+    private final ControlledHttpClientProvider httpClient;
     private final Gson gson;
     private final TextureUrlPolicy textureUrlPolicy;
     private final java.util.LinkedHashMap<PlayerSkinKey, SkinDto> cache =
@@ -40,7 +40,7 @@ implements SkinRepository {
     public WebsiteSkinRepository(String skinProfileBaseUrl, Logger logger) {
         this.skinProfileBaseUrl = skinProfileBaseUrl.endsWith("/") ? skinProfileBaseUrl.substring(0, skinProfileBaseUrl.length() - 1) : skinProfileBaseUrl;
         this.logger = logger;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
+        this.httpClient = ControlledHttpClientProvider.getInstance();
         this.gson = new Gson();
         this.textureUrlPolicy = TextureUrlPolicy.forWebsite(this.skinProfileBaseUrl);
         this.fallbackCache = new ProfileFallbackCache(Duration.ofHours(24));

@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 
 public final class NapCatWebSocketClient {
     private static final int MAX_EVENT_CHARS = 64 * 1024;
@@ -31,6 +32,7 @@ public final class NapCatWebSocketClient {
     private final String httpUrl;
     private final MessageHandler messageHandler;
     private final HttpClient httpClient;
+    private final ControlledHttpClientProvider controlledHttp;
     private final ScheduledExecutorService scheduler;
     private final Gson gson;
     private final AtomicBoolean running;
@@ -42,6 +44,7 @@ public final class NapCatWebSocketClient {
         this.httpUrl = httpUrl != null && !httpUrl.isBlank() ? httpUrl : NapCatWebSocketClient.httpUrlFromWs(wsUrl);
         this.messageHandler = Objects.requireNonNull(messageHandler, "messageHandler");
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10L)).build();
+        this.controlledHttp = ControlledHttpClientProvider.getInstance();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "napcat-ws");
             t.setDaemon(true);
@@ -82,7 +85,7 @@ public final class NapCatWebSocketClient {
     private void sendApiCall(String action, Map<String, Object> params) {
         String json = this.gson.toJson(params);
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(this.httpUrl + "/" + action)).header("Content-Type", "application/json").timeout(Duration.ofSeconds(5L)).POST(HttpRequest.BodyPublishers.ofString(json)).build();
-        this.httpClient.sendAsync(request, apiResponseHandler()).exceptionally(t -> {
+        this.controlledHttp.sendAsync(request, apiResponseHandler()).exceptionally(t -> {
             log.warn("NapCat HTTP API call failed: {} - {}", (Object)action, (Object)t.getMessage());
             return null;
         });

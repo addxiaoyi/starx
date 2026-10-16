@@ -1,10 +1,10 @@
 package io.github.addxiaoyi.starx.velocity.network;
 
 import io.github.addxiaoyi.starx.velocity.config.NetworkAutomationConfig;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -80,13 +80,10 @@ public final class PublicAddressDetector {
   }
 
   private static final class JkdProbe implements Probe {
-    private final HttpClient client;
+    private final ControlledHttpClientProvider client;
 
     private JkdProbe(int timeoutMs) {
-      this.client = HttpClient.newBuilder()
-          .connectTimeout(Duration.ofMillis(timeoutMs))
-          .followRedirects(HttpClient.Redirect.NEVER)
-          .build();
+      this.client = ControlledHttpClientProvider.getInstance();
     }
 
     @Override

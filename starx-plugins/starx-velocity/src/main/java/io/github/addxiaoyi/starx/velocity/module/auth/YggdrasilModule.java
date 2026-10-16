@@ -9,8 +9,8 @@ import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.common.auth.PremiumResolver;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -31,7 +31,7 @@ implements VelocityModule {
     private final StarxVelocityPlugin plugin;
     private final EventBus eventBus;
     private final Config config;
-    private final HttpClient httpClient;
+    private final ControlledHttpClientProvider httpClient;
     private final PremiumResolver premiumResolver;
     private final Logger logger;
 
@@ -43,9 +43,7 @@ implements VelocityModule {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.config = Objects.requireNonNull(config, "config");
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofMillis(config.timeout()))
-            .build();
+        this.httpClient = ControlledHttpClientProvider.getInstance();
         this.premiumResolver = premiumResolver != null ? premiumResolver : new PremiumResolver();
         this.logger = plugin.logger();
     }
