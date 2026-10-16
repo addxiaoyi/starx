@@ -10,7 +10,7 @@ import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -54,13 +54,13 @@ public final class ControlledHttpClientProvider {
     this.concurrentRequests = new Semaphore(maxConcurrent);
     this.connectTimeout = Objects.requireNonNull(connectTimeout, "connectTimeout");
     this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
-    int workerLimit = Math.max(4, maxConcurrent);
+    int workerLimit = Math.max(8, maxConcurrent * 2);
     this.executor = new ThreadPoolExecutor(
         workerLimit,
         workerLimit,
         30,
         TimeUnit.SECONDS,
-        new SynchronousQueue<>(),
+        new ArrayBlockingQueue<>(64),
         daemonThreadFactory(),
         new ThreadPoolExecutor.AbortPolicy());
     this.executor.allowCoreThreadTimeOut(true);

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.20] - 2026-10-16
+
+### Long-run HTTP soak correction
+
+- Separate four-request concurrency from eight internal HTTP workers required by JDK TLS scheduling.
+- Replace rejection-prone synchronous worker handoff with a bounded queue of 64 tasks.
+- Verified 400000 local requests with zero failures and worker recovery to zero after idle expiry.
+
 ## [1.1.19] - 2026-10-16
 
 ### Hard network worker bound

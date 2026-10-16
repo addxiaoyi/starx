@@ -2,7 +2,7 @@ package io.github.addxiaoyi.starx.common.security;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
-import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class BoundedHttpClientFactory {
   private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
-      4, 4, 30, TimeUnit.SECONDS, new SynchronousQueue<>(), threadFactory(),
+      8, 8, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(64), threadFactory(),
       new ThreadPoolExecutor.AbortPolicy());
 
   static {
