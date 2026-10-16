@@ -53,9 +53,10 @@ public final class ControlledHttpClientProvider {
     this.concurrentRequests = new Semaphore(maxConcurrent);
     this.connectTimeout = Objects.requireNonNull(connectTimeout, "connectTimeout");
     this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
+    int workerLimit = Math.max(4, maxConcurrent);
     this.executor = new ThreadPoolExecutor(
-        Math.max(2, maxConcurrent),
-        Math.max(2, maxConcurrent),
+        workerLimit,
+        workerLimit,
         30,
         TimeUnit.SECONDS,
         new SynchronousQueue<>(),

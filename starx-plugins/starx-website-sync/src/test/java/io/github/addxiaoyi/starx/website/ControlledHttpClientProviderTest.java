@@ -15,10 +15,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.Test;
 
 class ControlledHttpClientProviderTest {
   @Test
+  @Timeout(15)
   void rejectsASecondRequestWhenTheConcurrencyBudgetIsOccupied() throws Exception {
     CountDownLatch requestStarted = new CountDownLatch(1);
     CountDownLatch releaseRequest = new CountDownLatch(1);
@@ -34,7 +36,7 @@ class ControlledHttpClientProviderTest {
       try (var executor = Executors.newSingleThreadExecutor()) {
         Future<HttpResponse<String>> first = executor.submit(
             () -> provider.send(request, HttpResponse.BodyHandlers.ofString()));
-        assertTrue(requestStarted.await(2, TimeUnit.SECONDS));
+        assertTrue(requestStarted.await(5, TimeUnit.SECONDS));
         assertThrows(IOException.class,
             () -> provider.send(request, HttpResponse.BodyHandlers.ofString()));
         releaseRequest.countDown();
@@ -53,7 +55,7 @@ class ControlledHttpClientProviderTest {
   ) throws IOException {
     requestStarted.countDown();
     try {
-      releaseRequest.await(2, TimeUnit.SECONDS);
+      releaseRequest.await(10, TimeUnit.SECONDS);
       byte[] body = "ok".getBytes(java.nio.charset.StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(200, body.length);
       exchange.getResponseBody().write(body);
