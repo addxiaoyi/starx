@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -92,6 +93,10 @@ public final class VelocityWebsiteSync implements AutoCloseable {
    */
   public CircuitBreaker.State circuitState() {
     return this.httpClient.getCircuitState();
+  }
+
+  public Map<String, Object> transportMetrics() {
+    return this.httpClient.transportMetrics();
   }
 
   public WebsiteSyncRuntime.Snapshot status() {

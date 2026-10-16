@@ -8,9 +8,9 @@ import io.github.addxiaoyi.starx.common.auth.YggdrasilAuthenticator;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -33,15 +33,13 @@ public class VelocityYggdrasilAuthenticator implements YggdrasilAuthenticator {
 
     private final StarxVelocityPlugin plugin;
     private final YggdrasilModule.Config config;
-    private final HttpClient httpClient;
+    private final ControlledHttpClientProvider httpClient;
     private final java.util.Map<String, String> authServers;
 
     public VelocityYggdrasilAuthenticator(StarxVelocityPlugin plugin, YggdrasilModule.Config config) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.config = Objects.requireNonNull(config, "config");
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofMillis(config.timeout()))
-            .build();
+        this.httpClient = ControlledHttpClientProvider.getInstance();
         this.authServers = new java.util.HashMap<>(config.servers());
     }
 
