@@ -26,6 +26,7 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
   private final URI siteUrl;
   private final Duration requestTimeout;
   private final HttpClient http;
+  private final ControlledHttpClientProvider controlledHttp;
   private final Gson gson;
   private final SyncMetrics metrics;
   private final CircuitBreaker circuitBreaker;
@@ -36,15 +37,15 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
     this(
         config.siteUrl(),
         config.heartbeat().requestTimeout(),
-        HttpClient.newBuilder()
-            .connectTimeout(config.heartbeat().connectTimeout())
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build(),
+        null,
+        ControlledHttpClientProvider.getInstance(),
         new Gson(),
         new SyncMetrics(),
-        new CircuitBreaker(10, java.time.Duration.ofSeconds(60)),
-        false,
-        false);
+        new CircuitBreaker(
+            config.circuitBreaker().failureThreshold(),
+            java.time.Duration.ofSeconds(config.circuitBreaker().openTimeoutSeconds())),
+        true,
+        config.circuitBreaker().enabled());
   }
 
   /**
@@ -55,10 +56,8 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
     this(
         config.siteUrl(),
         config.heartbeat().requestTimeout(),
-        HttpClient.newBuilder()
-            .connectTimeout(config.heartbeat().connectTimeout())
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build(),
+        null,
+        ControlledHttpClientProvider.getInstance(),
         new Gson(),
         Objects.requireNonNull(metrics, "metrics"),
         Objects.requireNonNull(circuitBreaker, "circuitBreaker"),
@@ -76,9 +75,28 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
       boolean metricsEnabled,
       boolean circuitBreakerEnabled
   ) {
+    this(siteUrl, requestTimeout, http, null, gson, metrics, circuitBreaker,
+        metricsEnabled, circuitBreakerEnabled);
+  }
+
+  private WebsiteSyncHttpClient(
+      URI siteUrl,
+      Duration requestTimeout,
+      HttpClient http,
+      ControlledHttpClientProvider controlledHttp,
+      Gson gson,
+      SyncMetrics metrics,
+      CircuitBreaker circuitBreaker,
+      boolean metricsEnabled,
+      boolean circuitBreakerEnabled
+  ) {
     this.siteUrl = Objects.requireNonNull(siteUrl, "siteUrl");
     this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
-    this.http = Objects.requireNonNull(http, "http");
+    if (http == null && controlledHttp == null) {
+      throw new IllegalArgumentException("An HTTP client or controlled provider is required");
+    }
+    this.http = http;
+    this.controlledHttp = controlledHttp;
     this.gson = Objects.requireNonNull(gson, "gson");
     this.metrics = Objects.requireNonNull(metrics, "metrics");
     this.circuitBreaker = Objects.requireNonNull(circuitBreaker, "circuitBreaker");
@@ -236,8 +254,12 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
     HttpResponse<String> response;
     long startMillis = System.currentTimeMillis();
     try {
-      response = this.http.send(
-          builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      HttpRequest request = builder.build();
+      response = this.controlledHttp != null
+          ? this.controlledHttp.send(
+              request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+          : this.http.send(
+              request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       recordFailure();
@@ -331,12 +353,14 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
     return value.reveal();
   }
 
-  private static JsonObject parseObject(String body, int statusCode)
+  private JsonObject parseObject(String body, int statusCode)
       throws WebsiteSyncApiException {
     if (body == null || body.isBlank()) {
       if (statusCode >= 200 && statusCode < 300) {
+        recordFailure();
         return new JsonObject();
       }
+      recordFailure();
       throw new WebsiteSyncApiException(statusCode, "invalid_response", "empty response body");
     }
     try {
@@ -346,23 +370,26 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
       }
       return parsed.getAsJsonObject();
     } catch (JsonParseException error) {
+      recordFailure();
       throw new WebsiteSyncApiException(statusCode, "invalid_response", "invalid JSON response");
     }
   }
 
-  private static JsonObject requireObject(JsonObject object, String key)
+  private JsonObject requireObject(JsonObject object, String key)
       throws WebsiteSyncApiException {
     JsonElement value = object.get(key);
     if (value == null || !value.isJsonObject()) {
+      recordFailure();
       throw new WebsiteSyncApiException(200, "invalid_response", "missing " + key);
     }
     return value.getAsJsonObject();
   }
 
-  private static String requireString(JsonObject object, String key)
+  private String requireString(JsonObject object, String key)
       throws WebsiteSyncApiException {
     String value = optionalString(object, key, "");
     if (value.isBlank()) {
+      recordFailure();
       throw new WebsiteSyncApiException(200, "invalid_response", "missing " + key);
     }
     return value;
@@ -404,5 +431,17 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
    */
   public SyncMetrics.Snapshot getMetrics() {
     return this.metrics.snapshot();
+  }
+
+  public Map<String, Object> transportMetrics() {
+    ControlledHttpClientProvider provider = this.controlledHttp;
+    if (provider == null) {
+      return Map.of("shared", false);
+    }
+    return Map.of(
+        "shared", true,
+        "maxConcurrent", provider.maxConcurrent(),
+        "activeRequests", provider.activeRequests(),
+        "workerThreads", provider.workerThreads());
   }
 }

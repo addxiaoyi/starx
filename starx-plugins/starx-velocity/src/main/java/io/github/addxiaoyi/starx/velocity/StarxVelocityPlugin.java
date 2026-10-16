@@ -575,7 +575,8 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
                 "requestsTotal", websiteMetrics.requestsSent(),
                 "heartbeatsSent", websiteMetrics.heartbeatsSent(),
                 "manifestsSent", websiteMetrics.manifestsSent(),
-                "texturesUploaded", websiteMetrics.texturesUploaded()));
+                "texturesUploaded", websiteMetrics.texturesUploaded(),
+                "transport", websiteSync.transportMetrics()));
             metrics.put("networkAutomation", this.networkAutomationService == null
                 ? Map.of("status", "not_started")
                 : this.networkAutomationService.snapshot());

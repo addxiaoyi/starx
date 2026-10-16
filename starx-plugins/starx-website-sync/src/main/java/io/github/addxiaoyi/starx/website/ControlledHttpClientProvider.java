@@ -9,6 +9,12 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 /**
@@ -26,25 +32,85 @@ public final class ControlledHttpClientProvider {
   
   private final HttpClient sharedClient;
   private final Semaphore concurrentRequests;
+  private final int maxConcurrent;
   private final Duration connectTimeout;
   private final Duration requestTimeout;
+  private final ThreadPoolExecutor executor;
   
   public static ControlledHttpClientProvider getInstance() {
     return INSTANCE;
   }
   
   private ControlledHttpClientProvider() {
-    this(8, Duration.ofSeconds(3), Duration.ofSeconds(5));
+    this(4, Duration.ofSeconds(3), Duration.ofSeconds(5));
   }
   
   public ControlledHttpClientProvider(int maxConcurrent, Duration connectTimeout, Duration requestTimeout) {
+    if (maxConcurrent < 1) {
+      throw new IllegalArgumentException("maxConcurrent must be positive");
+    }
+    this.maxConcurrent = maxConcurrent;
     this.concurrentRequests = new Semaphore(maxConcurrent);
     this.connectTimeout = Objects.requireNonNull(connectTimeout, "connectTimeout");
     this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
+    this.executor = new ThreadPoolExecutor(
+        Math.max(2, maxConcurrent),
+        Math.max(2, maxConcurrent),
+        30,
+        TimeUnit.SECONDS,
+        new SynchronousQueue<>(),
+        daemonThreadFactory(),
+        new ThreadPoolExecutor.AbortPolicy());
+    this.executor.allowCoreThreadTimeOut(true);
     this.sharedClient = HttpClient.newBuilder()
         .connectTimeout(this.connectTimeout)
         .followRedirects(HttpClient.Redirect.NEVER)
+        .executor(this.executor)
         .build();
+  }
+
+  private static ThreadFactory daemonThreadFactory() {
+    AtomicInteger sequence = new AtomicInteger();
+    return task -> {
+      Thread thread = new Thread(task, "starx-website-http-" + sequence.incrementAndGet());
+      thread.setDaemon(true);
+      return thread;
+    };
+  }
+
+  public <T> HttpResponse<T> send(
+      HttpRequest request,
+      HttpResponse.BodyHandler<T> bodyHandler
+  ) throws IOException, InterruptedException {
+    Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(bodyHandler, "bodyHandler");
+    if (!this.concurrentRequests.tryAcquire()) {
+      throw new IOException("HTTP concurrency limit reached: " + request.uri());
+    }
+    try {
+      return this.sharedClient.send(request, bodyHandler);
+    } finally {
+      this.concurrentRequests.release();
+    }
+  }
+
+  public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+      HttpRequest request,
+      HttpResponse.BodyHandler<T> bodyHandler
+  ) {
+    Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(bodyHandler, "bodyHandler");
+    if (!this.concurrentRequests.tryAcquire()) {
+      return CompletableFuture.failedFuture(
+          new IOException("HTTP concurrency limit reached: " + request.uri()));
+    }
+    try {
+      return this.sharedClient.sendAsync(request, bodyHandler)
+          .whenComplete((ignored, error) -> this.concurrentRequests.release());
+    } catch (RuntimeException error) {
+      this.concurrentRequests.release();
+      return CompletableFuture.failedFuture(error);
+    }
   }
   
   /**
@@ -117,13 +183,25 @@ public final class ControlledHttpClientProvider {
   public int availablePermits() {
     return this.concurrentRequests.availablePermits();
   }
+
+  public int maxConcurrent() {
+    return this.maxConcurrent;
+  }
+
+  public int activeRequests() {
+    return this.maxConcurrent - this.concurrentRequests.availablePermits();
+  }
+
+  public int workerThreads() {
+    return this.executor.getPoolSize();
+  }
   
   /**
    * 重置信号量（在熔断器需要时调用）。
    */
   public void resetConcurrency() {
     this.concurrentRequests.drainPermits();
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < this.maxConcurrent; i++) {
       this.concurrentRequests.release();
     }
   }

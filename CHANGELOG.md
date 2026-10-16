@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.16] - 2026-10-16
+
+### Plugin-wide network resource control
+
+- Share a bounded HTTP executor across website sync, skin profiles, texture downloads, public-address probes, Yggdrasil, webhook email, and NapCat HTTP API calls.
+- Limit shared network concurrency to four requests and recycle idle HTTP workers after 30 seconds.
+- Enforce a single HALF_OPEN circuit-breaker probe and count malformed website responses as failures.
+- Expose active HTTP request and worker counts through website-sync runtime metrics.
+
 ## [1.1.15] - 2026-10-13
 
 ### CPU and runtime resource control

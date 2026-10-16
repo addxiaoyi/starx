@@ -73,6 +73,18 @@ class AuditRegressionTest {
   }
 
   @Test
+  void circuitBreakerAllowsOnlyOneHalfOpenProbe() {
+    CircuitBreaker breaker = new CircuitBreaker(1, Duration.ZERO);
+    breaker.recordFailure();
+
+    assertTrue(breaker.allowRequest());
+    assertFalse(breaker.allowRequest());
+
+    breaker.recordSuccess();
+    assertTrue(breaker.allowRequest());
+  }
+
+  @Test
   void cacheStoresAndRetrievesValues() {
     LruTtlCache<String, String> cache = new LruTtlCache<>(4, 60_000);
     long now = 1_000L;

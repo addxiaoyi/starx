@@ -4,8 +4,8 @@ import com.google.gson.Gson;
 import io.github.addxiaoyi.starx.common.auth.EmailSender;
 import io.github.addxiaoyi.starx.common.crypto.HmacRequestSigner;
 import io.github.addxiaoyi.starx.velocity.config.StarxConfig;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -14,8 +14,7 @@ import java.util.Objects;
 
 final class WebhookEmailSender implements EmailSender {
   private static final Gson JSON = new Gson();
-  private final HttpClient http = HttpClient.newBuilder()
-      .connectTimeout(Duration.ofSeconds(5)).build();
+  private final ControlledHttpClientProvider http = ControlledHttpClientProvider.getInstance();
   private final URI endpoint;
   private final String secret;
 
