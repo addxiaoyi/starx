@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.18] - 2026-10-16
+
+### Complete shared HTTP client coverage
+
+- Route the default Webhook transport, NapCat WebSocket handshake, and legacy async website client through the bounded shared HTTP provider.
+- Preserve explicit custom `HttpClient` constructors for tests and integrations.
+
 ## [1.1.17] - 2026-10-16
 
 ### Bounded HTTP worker correction

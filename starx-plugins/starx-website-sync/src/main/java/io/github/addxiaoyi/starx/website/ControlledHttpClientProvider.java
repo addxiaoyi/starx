@@ -6,6 +6,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
@@ -195,6 +196,10 @@ public final class ControlledHttpClientProvider {
 
   public int workerThreads() {
     return this.executor.getPoolSize();
+  }
+
+  public WebSocket.Builder newWebSocketBuilder() {
+    return this.sharedClient.newWebSocketBuilder();
   }
   
   /**

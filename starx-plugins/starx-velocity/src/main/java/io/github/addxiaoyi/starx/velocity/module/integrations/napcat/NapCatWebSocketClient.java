@@ -6,7 +6,6 @@ package io.github.addxiaoyi.starx.velocity.module.integrations.napcat;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
@@ -31,7 +30,6 @@ public final class NapCatWebSocketClient {
     private final String wsUrl;
     private final String httpUrl;
     private final MessageHandler messageHandler;
-    private final HttpClient httpClient;
     private final ControlledHttpClientProvider controlledHttp;
     private final ScheduledExecutorService scheduler;
     private final Gson gson;
@@ -43,7 +41,6 @@ public final class NapCatWebSocketClient {
         this.wsUrl = Objects.requireNonNull(wsUrl, "wsUrl");
         this.httpUrl = httpUrl != null && !httpUrl.isBlank() ? httpUrl : NapCatWebSocketClient.httpUrlFromWs(wsUrl);
         this.messageHandler = Objects.requireNonNull(messageHandler, "messageHandler");
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10L)).build();
         this.controlledHttp = ControlledHttpClientProvider.getInstance();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "napcat-ws");
@@ -100,7 +97,8 @@ public final class NapCatWebSocketClient {
             return;
         }
         log.info("Connecting to NapCat at {} ...", (Object)this.wsUrl);
-        this.httpClient.newWebSocketBuilder().buildAsync(URI.create(this.wsUrl), new OneBotListener()).thenAccept(ws -> {
+        this.controlledHttp.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10L))
+                .buildAsync(URI.create(this.wsUrl), new OneBotListener()).thenAccept(ws -> {
             if (this.acceptConnectedSocket(ws)) {
                 log.info("Connected to NapCat WebSocket: {}", (Object)this.wsUrl);
             }

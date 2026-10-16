@@ -32,6 +32,7 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
   private final Duration requestTimeout;
   private final int maxConcurrentRequests;
   private final HttpClient http;
+  private final ControlledHttpClientProvider controlledHttp;
   private final Semaphore concurrentRequests;
   private final Consumer<String> logger;
   private final com.google.gson.Gson gson;
@@ -53,10 +54,8 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
         config.heartbeat().connectTimeout(),
         config.heartbeat().requestTimeout(),
         config.enabled() ? DEFAULT_MAX_CONCURRENT : 1,
-        HttpClient.newBuilder()
-            .connectTimeout(config.heartbeat().connectTimeout())
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build(),
+        null,
+        ControlledHttpClientProvider.getInstance(),
         msg -> {
           if (config.enabled() && config.textures().enabled()) {
             // Only log when textures are enabled to avoid spam
@@ -80,11 +79,31 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
       SyncMetrics metrics,
       CircuitBreaker circuitBreaker
   ) {
+    this(siteUrl, connectTimeout, requestTimeout, maxConcurrentRequests, http, null,
+        logger, gson, metrics, circuitBreaker);
+  }
+
+  private AsyncHttpClient(
+      URI siteUrl,
+      Duration connectTimeout,
+      Duration requestTimeout,
+      int maxConcurrentRequests,
+      HttpClient http,
+      ControlledHttpClientProvider controlledHttp,
+      Consumer<String> logger,
+      com.google.gson.Gson gson,
+      SyncMetrics metrics,
+      CircuitBreaker circuitBreaker
+  ) {
     this.siteUrl = Objects.requireNonNull(siteUrl, "siteUrl");
     this.connectTimeout = Objects.requireNonNull(connectTimeout, "connectTimeout");
     this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
     this.maxConcurrentRequests = maxConcurrentRequests > 0 ? maxConcurrentRequests : DEFAULT_MAX_CONCURRENT;
-    this.http = Objects.requireNonNull(http, "http");
+    if (http == null && controlledHttp == null) {
+      throw new IllegalArgumentException("An HTTP client or controlled provider is required");
+    }
+    this.http = http;
+    this.controlledHttp = controlledHttp;
     this.concurrentRequests = new Semaphore(this.maxConcurrentRequests);
     this.logger = logger == null ? ignored -> { } : logger;
     this.gson = Objects.requireNonNull(gson, "gson");
@@ -325,7 +344,10 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
     }
 
     HttpRequest request = builder.build();
-    return this.http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+    CompletableFuture<HttpResponse<String>> responseFuture = this.controlledHttp != null
+        ? this.controlledHttp.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        : this.http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    return responseFuture
         .thenApply(response -> HttpJsonResponse.of(
             response.statusCode(), response.body()))
         .orTimeout(requestTimeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)
