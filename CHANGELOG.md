@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.17] - 2026-10-16
+
+### Bounded HTTP worker correction
+
+- Keep the shared HTTP client bounded to four daemon workers while preserving the four-request concurrency limit.
+- Make the concurrency regression test deterministic on Windows and Linux JDK runners.
+
 ## [1.1.16] - 2026-10-16
 
 ### Plugin-wide network resource control
