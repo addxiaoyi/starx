@@ -290,6 +290,7 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
         this.metrics.recordHeartbeatSuccess(System.currentTimeMillis() - startMillis);
         return result;
       } catch (java.util.concurrent.TimeoutException e) {
+        future.cancel(true);
         this.circuitBreaker.recordFailure();
         this.metrics.recordHeartbeatFailure();
         logger.accept("StarX website sync: request timed out after " + requestTimeout.toMillis() + "ms");
@@ -306,6 +307,7 @@ public final class AsyncHttpClient implements WebsiteSyncClient {
         }
         throw new WebsiteSyncApiException("Request failed", cause);
       } catch (InterruptedException e) {
+        future.cancel(true);
         Thread.currentThread().interrupt();
         this.metrics.recordHeartbeatFailure();
         throw new WebsiteSyncApiException("Request interrupted", e);

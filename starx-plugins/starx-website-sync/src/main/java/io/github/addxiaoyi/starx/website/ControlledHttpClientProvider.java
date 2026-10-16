@@ -37,6 +37,7 @@ public final class ControlledHttpClientProvider {
   private final Duration connectTimeout;
   private final Duration requestTimeout;
   private final ThreadPoolExecutor executor;
+  private final AtomicInteger rejectedRequests = new AtomicInteger();
   
   public static ControlledHttpClientProvider getInstance() {
     return INSTANCE;
@@ -51,7 +52,7 @@ public final class ControlledHttpClientProvider {
       throw new IllegalArgumentException("maxConcurrent must be positive");
     }
     this.maxConcurrent = maxConcurrent;
-    this.concurrentRequests = new Semaphore(maxConcurrent);
+    this.concurrentRequests = new Semaphore(maxConcurrent, true);
     this.connectTimeout = Objects.requireNonNull(connectTimeout, "connectTimeout");
     this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
     int workerLimit = Math.max(8, maxConcurrent * 2);
@@ -88,6 +89,7 @@ public final class ControlledHttpClientProvider {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(bodyHandler, "bodyHandler");
     if (!this.concurrentRequests.tryAcquire()) {
+      this.rejectedRequests.incrementAndGet();
       throw new IOException("HTTP concurrency limit reached: " + request.uri());
     }
     try {
@@ -104,6 +106,7 @@ public final class ControlledHttpClientProvider {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(bodyHandler, "bodyHandler");
     if (!this.concurrentRequests.tryAcquire()) {
+      this.rejectedRequests.incrementAndGet();
       return CompletableFuture.failedFuture(
           new IOException("HTTP concurrency limit reached: " + request.uri()));
     }
@@ -197,6 +200,14 @@ public final class ControlledHttpClientProvider {
 
   public int workerThreads() {
     return this.executor.getPoolSize();
+  }
+
+  public int queueSize() {
+    return this.executor.getQueue().size();
+  }
+
+  public int rejectedRequests() {
+    return this.rejectedRequests.get();
   }
 
   public WebSocket.Builder newWebSocketBuilder() {

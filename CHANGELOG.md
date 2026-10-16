@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.21] - 2026-10-16
+
+### Request fairness and cancellation
+
+- Use fair request permits, expose queue and rejection counters, and cancel timed-out async website operations.
+- Add request timeouts to Yggdrasil profile and authentication lookups.
+
 ## [1.1.20] - 2026-10-16
 
 ### Long-run HTTP soak correction
