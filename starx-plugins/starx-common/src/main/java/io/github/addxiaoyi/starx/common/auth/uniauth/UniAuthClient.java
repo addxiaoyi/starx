@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.common.auth.uniauth;
 
+import io.github.addxiaoyi.starx.common.security.BoundedHttpClientFactory;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -29,8 +30,7 @@ public final class UniAuthClient {
 
   public UniAuthClient(UniAuthConfig config) {
     this.config = Objects.requireNonNull(config, "config");
-    this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofMillis(config.timeoutMs()))
+    this.httpClient = BoundedHttpClientFactory.builder(Duration.ofMillis(config.timeoutMs()))
         .build();
   }
 

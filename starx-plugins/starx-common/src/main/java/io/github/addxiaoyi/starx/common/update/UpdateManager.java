@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.common.update;
 
 import io.github.addxiaoyi.starx.common.security.HttpConstants;
+import io.github.addxiaoyi.starx.common.security.BoundedHttpClientFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -24,10 +25,8 @@ import java.util.function.Consumer;
 public final class UpdateManager {
   private static final Duration MIN_CHECK_INTERVAL = Duration.ofMinutes(30);
   private static final long MAX_JAR_SIZE_BYTES = 64L * 1024 * 1024; // 64 MiB
-  private static final java.net.http.HttpClient SHARED_HTTP_CLIENT = java.net.http.HttpClient.newBuilder()
-      .connectTimeout(HttpConstants.UPDATE_CONNECT_TIMEOUT)
-      .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-      .build();
+  private static final java.net.http.HttpClient SHARED_HTTP_CLIENT = BoundedHttpClientFactory
+      .builder(HttpConstants.UPDATE_CONNECT_TIMEOUT).build();
 
   private final String currentVersion;
   private final RepositoryClient repository;

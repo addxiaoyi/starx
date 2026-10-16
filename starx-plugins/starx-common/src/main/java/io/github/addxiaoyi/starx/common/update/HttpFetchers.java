@@ -1,5 +1,6 @@
 package io.github.addxiaoyi.starx.common.update;
 
+import io.github.addxiaoyi.starx.common.security.BoundedHttpClientFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -10,9 +11,8 @@ import java.time.Duration;
  * 统一超时设置，避免线程长时间挂起。
  */
 final class HttpFetchers {
-  private static final java.net.http.HttpClient SHARED_CLIENT = java.net.http.HttpClient.newBuilder()
-      .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-      .build();
+  private static final java.net.http.HttpClient SHARED_CLIENT = BoundedHttpClientFactory
+      .builder(Duration.ofSeconds(3)).build();
 
   private HttpFetchers() {
   }

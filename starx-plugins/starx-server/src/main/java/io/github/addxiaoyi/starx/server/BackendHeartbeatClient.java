@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.server;
 
 import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
 import io.github.addxiaoyi.starx.api.bridge.BridgeProtocol;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,11 +19,8 @@ final class BackendHeartbeatClient {
   static final String SERVER_HEADER = "X-StarX-Server";
   private static final String API_KEY_HEADER = "X-API-Key";
   private static final String SERVER_PATTERN = "[A-Za-z0-9_.-]{1,64}";
-  private static final HttpClient SHARED_HTTP = HttpClient.newBuilder()
-      .version(HttpClient.Version.HTTP_2)
-      .build();
-
   private final HttpClient http;
+  private final ControlledHttpClientProvider controlledHttp;
   private final URI velocityUrl;
   private final String apiKey;
   private final String serverName;
@@ -43,13 +41,15 @@ final class BackendHeartbeatClient {
     }
     // Reuse the connection pool across endpoint/key refreshes; request timeout
     // remains enforced by HttpRequest.timeout(...).
-    this.http = SHARED_HTTP;
+    this.http = null;
+    this.controlledHttp = ControlledHttpClientProvider.getInstance();
   }
 
   CompletableFuture<Optional<BridgeMessage>> send(BridgeMessage status) {
     HttpRequest request = buildRequest(
         this.velocityUrl, this.apiKey, this.serverName, status, this.timeout);
-    return this.http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.US_ASCII))
+    return this.controlledHttp.sendAsync(
+            request, HttpResponse.BodyHandlers.ofString(StandardCharsets.US_ASCII))
         .thenApply(response -> decodeCommandResponse(response.statusCode(), response.body()));
   }
 

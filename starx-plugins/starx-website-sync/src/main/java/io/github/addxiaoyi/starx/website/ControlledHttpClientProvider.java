@@ -67,6 +67,7 @@ public final class ControlledHttpClientProvider {
     this.sharedClient = HttpClient.newBuilder()
         .connectTimeout(this.connectTimeout)
         .followRedirects(HttpClient.Redirect.NEVER)
+        .version(HttpClient.Version.HTTP_1_1)
         .executor(this.executor)
         .build();
   }

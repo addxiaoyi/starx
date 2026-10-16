@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.19] - 2026-10-16
+
+### Hard network worker bound
+
+- Route common update, security, UniAuth, backend heartbeat, and account clients through bounded daemon executors.
+- Force managed HTTP clients to HTTP/1.1 with four workers and 30-second idle expiry to prevent TLS worker accumulation.
+
 ## [1.1.18] - 2026-10-16
 
 ### Complete shared HTTP client coverage

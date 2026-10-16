@@ -2,6 +2,7 @@ package io.github.addxiaoyi.starx.server;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import io.github.addxiaoyi.starx.website.ControlledHttpClientProvider;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -20,15 +21,17 @@ final class StarxAccountClient {
   private static final int MAX_RESPONSE_BYTES = 262_144;
 
   private final HttpClient http;
+  private final ControlledHttpClientProvider controlledHttp;
   private final URI baseUrl;
   private final String apiKey;
 
   StarxAccountClient(String baseUrl, String apiKey) {
-    this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build(), baseUrl, apiKey);
+    this(null, baseUrl, apiKey);
   }
 
   StarxAccountClient(HttpClient http, String baseUrl, String apiKey) {
-    this.http = Objects.requireNonNull(http, "http");
+    this.http = http;
+    this.controlledHttp = http == null ? ControlledHttpClientProvider.getInstance() : null;
     this.baseUrl = URI.create(Objects.requireNonNull(baseUrl, "baseUrl"));
     this.apiKey = Objects.requireNonNullElse(apiKey, "").trim();
   }
@@ -91,7 +94,10 @@ final class StarxAccountClient {
         .header("X-API-Key", this.apiKey)
         .POST(HttpRequest.BodyPublishers.ofString(JSON.toJson(body)))
         .build();
-    return this.http.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+    CompletableFuture<HttpResponse<InputStream>> responseFuture = this.controlledHttp != null
+        ? this.controlledHttp.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+        : this.http.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
+    return responseFuture
         .thenApply(response -> parse(response.statusCode(), readResponse(response.body())));
   }
 
