@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.22] - 2026-10-19
+
+### Replace website TLS transport
+
+- Route website, skin, texture, Yggdrasil, webhook, and backend HTTP requests through bounded `HttpURLConnection` blocking I/O.
+- Keep JDK `HttpClient` only for NapCat WebSocket connections.
+- Add a hard total request deadline that disconnects stalled sockets and releases the request permit.
+
 ## [1.1.21] - 2026-10-16
 
 ### Request fairness and cancellation

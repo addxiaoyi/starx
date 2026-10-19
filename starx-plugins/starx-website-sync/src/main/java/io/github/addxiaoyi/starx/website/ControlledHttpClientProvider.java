@@ -16,6 +16,9 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 /**
@@ -31,7 +34,8 @@ import java.util.function.Function;
 public final class ControlledHttpClientProvider {
   private static final ControlledHttpClientProvider INSTANCE = new ControlledHttpClientProvider();
   
-  private final HttpClient sharedClient;
+  private final HttpClient webSocketClient;
+  private final ExecutorService webSocketExecutor;
   private final Semaphore concurrentRequests;
   private final int maxConcurrent;
   private final Duration connectTimeout;
@@ -65,18 +69,23 @@ public final class ControlledHttpClientProvider {
         daemonThreadFactory(),
         new ThreadPoolExecutor.AbortPolicy());
     this.executor.allowCoreThreadTimeOut(true);
-    this.sharedClient = HttpClient.newBuilder()
+    this.webSocketExecutor = Executors.newSingleThreadExecutor(
+        daemonThreadFactory("starx-website-ws"));
+    this.webSocketClient = HttpClient.newBuilder()
         .connectTimeout(this.connectTimeout)
-        .followRedirects(HttpClient.Redirect.NEVER)
         .version(HttpClient.Version.HTTP_1_1)
-        .executor(this.executor)
+        .executor(this.webSocketExecutor)
         .build();
   }
 
   private static ThreadFactory daemonThreadFactory() {
+    return daemonThreadFactory("starx-website-http");
+  }
+
+  private static ThreadFactory daemonThreadFactory(String prefix) {
     AtomicInteger sequence = new AtomicInteger();
     return task -> {
-      Thread thread = new Thread(task, "starx-website-http-" + sequence.incrementAndGet());
+      Thread thread = new Thread(task, prefix + "-" + sequence.incrementAndGet());
       thread.setDaemon(true);
       return thread;
     };
@@ -93,7 +102,9 @@ public final class ControlledHttpClientProvider {
       throw new IOException("HTTP concurrency limit reached: " + request.uri());
     }
     try {
-      return this.sharedClient.send(request, bodyHandler);
+      return BlockingHttpTransport.send(
+          request, bodyHandler, this.connectTimeout, this.requestTimeout,
+          request.timeout().orElse(this.requestTimeout));
     } finally {
       this.concurrentRequests.release();
     }
@@ -111,8 +122,27 @@ public final class ControlledHttpClientProvider {
           new IOException("HTTP concurrency limit reached: " + request.uri()));
     }
     try {
-      return this.sharedClient.sendAsync(request, bodyHandler)
-          .whenComplete((ignored, error) -> this.concurrentRequests.release());
+      CompletableFuture<HttpResponse<T>> result = new CompletableFuture<>();
+      Future<?> task = this.executor.submit(() -> {
+        try {
+          if (!result.isCancelled()) {
+            result.complete(BlockingHttpTransport.send(
+                request, bodyHandler, this.connectTimeout, this.requestTimeout,
+                request.timeout().orElse(this.requestTimeout)));
+          }
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          result.completeExceptionally(error);
+        } catch (Exception error) {
+          result.completeExceptionally(error);
+        } finally {
+          this.concurrentRequests.release();
+        }
+      });
+      result.whenComplete((ignored, error) -> {
+        if (result.isCancelled()) task.cancel(true);
+      });
+      return result;
     } catch (RuntimeException error) {
       this.concurrentRequests.release();
       return CompletableFuture.failedFuture(error);
@@ -133,8 +163,10 @@ public final class ControlledHttpClientProvider {
           .header("Accept", "image/png")
           .build();
       
-      HttpResponse<InputStream> response = this.sharedClient.send(
-          request, HttpResponse.BodyHandlers.ofInputStream());
+      HttpResponse<InputStream> response = BlockingHttpTransport.send(
+          request, HttpResponse.BodyHandlers.ofInputStream(),
+          this.connectTimeout, this.requestTimeout,
+          request.timeout().orElse(this.requestTimeout));
       
       if (response.statusCode() != 200) {
         response.body().close();
@@ -167,8 +199,10 @@ public final class ControlledHttpClientProvider {
           .timeout(timeout != null ? timeout : this.requestTimeout)
           .build();
       
-      HttpResponse<InputStream> response = this.sharedClient.send(
-          request, HttpResponse.BodyHandlers.ofInputStream());
+      HttpResponse<InputStream> response = BlockingHttpTransport.send(
+          request, HttpResponse.BodyHandlers.ofInputStream(),
+          this.connectTimeout, this.requestTimeout,
+          request.timeout().orElse(this.requestTimeout));
       
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
         response.body().close();
@@ -211,7 +245,7 @@ public final class ControlledHttpClientProvider {
   }
 
   public WebSocket.Builder newWebSocketBuilder() {
-    return this.sharedClient.newWebSocketBuilder();
+    return this.webSocketClient.newWebSocketBuilder();
   }
   
   /**
