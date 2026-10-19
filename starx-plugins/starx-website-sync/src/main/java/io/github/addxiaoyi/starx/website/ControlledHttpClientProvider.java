@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Function;
 
 /**
@@ -98,7 +99,7 @@ public final class ControlledHttpClientProvider {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(bodyHandler, "bodyHandler");
     if (!this.concurrentRequests.tryAcquire()) {
-      this.rejectedRequests.incrementAndGet();
+      rejectRequest();
       throw new IOException("HTTP concurrency limit reached: " + request.uri());
     }
     try {
@@ -117,7 +118,7 @@ public final class ControlledHttpClientProvider {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(bodyHandler, "bodyHandler");
     if (!this.concurrentRequests.tryAcquire()) {
-      this.rejectedRequests.incrementAndGet();
+      rejectRequest();
       return CompletableFuture.failedFuture(
           new IOException("HTTP concurrency limit reached: " + request.uri()));
     }
@@ -143,6 +144,10 @@ public final class ControlledHttpClientProvider {
         if (result.isCancelled()) task.cancel(true);
       });
       return result;
+    } catch (RejectedExecutionException error) {
+      rejectRequest();
+      this.concurrentRequests.release();
+      return CompletableFuture.failedFuture(error);
     } catch (RuntimeException error) {
       this.concurrentRequests.release();
       return CompletableFuture.failedFuture(error);
@@ -154,6 +159,7 @@ public final class ControlledHttpClientProvider {
    */
   public byte[] fetchTexture(URI uri, Duration timeout) throws IOException, InterruptedException {
     if (!this.concurrentRequests.tryAcquire()) {
+      rejectRequest();
       throw new IOException("Texture fetch concurrent limit reached: " + uri);
     }
     try {
@@ -191,6 +197,7 @@ public final class ControlledHttpClientProvider {
   
   public <T> T fetch(URI uri, Function<InputStream, T> contentHandler, Duration timeout) throws IOException, InterruptedException {
     if (!this.concurrentRequests.tryAcquire()) {
+      rejectRequest();
       throw new IOException("Request concurrent limit reached: " + uri);
     }
     try {
@@ -242,6 +249,10 @@ public final class ControlledHttpClientProvider {
 
   public int rejectedRequests() {
     return this.rejectedRequests.get();
+  }
+
+  private void rejectRequest() {
+    this.rejectedRequests.incrementAndGet();
   }
 
   public WebSocket.Builder newWebSocketBuilder() {

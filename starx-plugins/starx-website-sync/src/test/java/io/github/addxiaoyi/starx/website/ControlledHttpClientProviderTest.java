@@ -39,6 +39,7 @@ class ControlledHttpClientProviderTest {
         assertTrue(requestStarted.await(5, TimeUnit.SECONDS));
         assertThrows(IOException.class,
             () -> provider.send(request, HttpResponse.BodyHandlers.ofString()));
+        assertTrue(provider.rejectedRequests() >= 1);
         releaseRequest.countDown();
         first.get(2, TimeUnit.SECONDS);
       }

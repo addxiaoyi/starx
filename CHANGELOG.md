@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.25] - 2026-10-19
+
+### Transport pressure metrics
+
+- Expose bounded HTTP queue depth and cumulative request rejection counts through the website sync runtime status.
+- Count concurrency, texture, fetch, and executor queue rejections consistently for production diagnosis.
+
 ## [1.1.24] - 2026-10-19
 
 ### Local HTTP compatibility

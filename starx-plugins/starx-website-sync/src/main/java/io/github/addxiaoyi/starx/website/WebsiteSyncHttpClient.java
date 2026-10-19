@@ -442,6 +442,8 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
         "shared", true,
         "maxConcurrent", provider.maxConcurrent(),
         "activeRequests", provider.activeRequests(),
-        "workerThreads", provider.workerThreads());
+        "workerThreads", provider.workerThreads(),
+        "queueSize", provider.queueSize(),
+        "rejectedRequests", provider.rejectedRequests());
   }
 }
