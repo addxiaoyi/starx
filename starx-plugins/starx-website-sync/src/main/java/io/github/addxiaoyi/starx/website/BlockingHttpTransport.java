@@ -30,6 +30,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class BlockingHttpTransport {
   private static final int MAX_REQUEST_BYTES = 2 * 1024 * 1024;
   private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+  private static final HttpClient LOCAL_HTTP = HttpClient.newBuilder()
+      .version(HttpClient.Version.HTTP_1_1)
+      .build();
   private static final ScheduledExecutorService DEADLINES = Executors.newSingleThreadScheduledExecutor(
       daemonFactory());
 
@@ -47,6 +50,9 @@ final class BlockingHttpTransport {
     if (!"http".equalsIgnoreCase(uri.getScheme())
         && !"https".equalsIgnoreCase(uri.getScheme())) {
       throw new IOException("Unsupported HTTP scheme: " + uri.getScheme());
+    }
+    if ("http".equalsIgnoreCase(uri.getScheme()) && isLoopback(uri.getHost())) {
+      return LOCAL_HTTP.send(request, bodyHandler);
     }
     byte[] requestBody = collectRequestBody(request);
     URLConnection opened = uri.toURL().openConnection();
@@ -97,6 +103,11 @@ final class BlockingHttpTransport {
         throw new IOException("HTTP request exceeded its total deadline: " + uri);
       }
     }
+  }
+
+  private static boolean isLoopback(String host) {
+    return "127.0.0.1".equals(host) || "localhost".equalsIgnoreCase(host)
+        || "::1".equals(host);
   }
 
   private static HttpHeaders responseHeaders(Map<String, List<String>> source) {

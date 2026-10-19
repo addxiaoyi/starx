@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.24] - 2026-10-19
+
+### Local HTTP compatibility
+
+- Preserve local loopback test and development HTTP behavior while keeping production HTTPS on the blocking transport.
+- Keep backend heartbeat and account API clients on their existing JDK client paths.
+
 ## [1.1.23] - 2026-10-19
 
 ### Scope blocking transport to website traffic
