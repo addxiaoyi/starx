@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.23] - 2026-10-19
+
+### Scope blocking transport to website traffic
+
+- Keep the blocking transport for website sync, skin, texture, and webhook traffic where the TLS hot loop was observed.
+- Keep backend heartbeat and account API clients on their existing JDK client paths to preserve their existing test and lifecycle behavior.
+
 ## [1.1.22] - 2026-10-19
 
 ### Replace website TLS transport
