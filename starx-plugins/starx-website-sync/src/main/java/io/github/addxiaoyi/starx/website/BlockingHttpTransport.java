@@ -19,7 +19,7 @@ import java.util.Optional;
 import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -33,8 +33,12 @@ final class BlockingHttpTransport {
   private static final HttpClient LOCAL_HTTP = HttpClient.newBuilder()
       .version(HttpClient.Version.HTTP_1_1)
       .build();
-  private static final ScheduledExecutorService DEADLINES = Executors.newSingleThreadScheduledExecutor(
-      daemonFactory());
+  private static final ScheduledThreadPoolExecutor DEADLINES = new ScheduledThreadPoolExecutor(1, daemonFactory());
+  static {
+    DEADLINES.setKeepAliveTime(30, TimeUnit.SECONDS);
+    DEADLINES.allowCoreThreadTimeOut(true);
+    DEADLINES.setRemoveOnCancelPolicy(true);
+  }
 
   private BlockingHttpTransport() {
   }

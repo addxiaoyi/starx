@@ -9,10 +9,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public final class VelocityEventBus
@@ -21,12 +23,27 @@ implements EventBus, AutoCloseable {
     private static final System.Logger LOG = System.getLogger(VelocityEventBus.class.getName());
     private final Map<String, List<Consumer<StarxEvent>>> subscribers = new ConcurrentHashMap<String, List<Consumer<StarxEvent>>>(32);
     private final List<Consumer<StarxEvent>> observers = new CopyOnWriteArrayList<>();
-    private final ExecutorService asyncExecutor = Executors.newFixedThreadPool(2, r -> {
-        Thread t = new Thread(r, "starx-event-bus");
-        t.setDaemon(true);
-        return t;
-    });
+    private final AtomicLong rejectedEvents = new AtomicLong();
+    private final ThreadPoolExecutor asyncExecutor = new ThreadPoolExecutor(
+        ASYNC_THREADS,
+        ASYNC_THREADS,
+        30,
+        TimeUnit.SECONDS,
+        new ArrayBlockingQueue<>(256),
+        runnable -> {
+            Thread thread = new Thread(runnable, "starx-event-bus");
+            thread.setDaemon(true);
+            return thread;
+        },
+        (runnable, executor) -> {
+            this.rejectedEvents.incrementAndGet();
+            new ThreadPoolExecutor.CallerRunsPolicy().rejectedExecution(runnable, executor);
+        });
     private final AtomicBoolean closed = new AtomicBoolean();
+
+    {
+        this.asyncExecutor.allowCoreThreadTimeOut(true);
+    }
 
     @Override
     public void publish(StarxEvent event) {
@@ -50,6 +67,14 @@ implements EventBus, AutoCloseable {
     public void subscribeAll(Consumer<StarxEvent> observer) {
         if (this.closed.get()) throw new IllegalStateException("StarX event bus is closed");
         this.observers.add(java.util.Objects.requireNonNull(observer, "observer"));
+    }
+
+    public Map<String, Object> runtimeMetrics() {
+        return Map.of(
+            "queuedEvents", this.asyncExecutor.getQueue().size(),
+            "activeWorkers", this.asyncExecutor.getActiveCount(),
+            "workerThreads", this.asyncExecutor.getPoolSize(),
+            "rejectedEvents", this.rejectedEvents.get());
     }
 
     public void unsubscribeAll(Consumer<StarxEvent> observer) {

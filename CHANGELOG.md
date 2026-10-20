@@ -1,4 +1,15 @@
 # Changelog
+## [1.1.26] - 2026-10-20
+
+### Runtime resource hardening
+
+- Reduce idle TAB refresh wakeups when no animations are active.
+- Add lifecycle cancellation for automatic update scheduling.
+- Bound EventBus, WebsiteSync, server HTTP, and HTTP API work with explicit backpressure metrics.
+- Add HTTP API 503 server_busy admission control while keeping health checks available.
+- Skip unchanged CrossServer TAB reconciles using a roster fingerprint and dirty-state signals.
+- Reclaim idle deadline scheduler threads and expose runtime worker metrics.
+
 
 ## [1.1.25] - 2026-10-19
 

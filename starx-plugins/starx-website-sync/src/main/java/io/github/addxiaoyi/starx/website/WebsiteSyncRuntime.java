@@ -22,6 +22,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -47,6 +48,9 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   }
 
   private static final Duration MAX_BACKOFF = Duration.ofMinutes(5);
+  private static final int WORKER_CORE_THREADS = 1;
+  private static final int WORKER_MAX_THREADS = 2;
+  private static final int WORKER_QUEUE_CAPACITY = 8;
   private final WebsiteSyncConfig config;
   private final WebsiteSyncClient client;
   private final WebsiteSyncCredentialStore credentials;
@@ -57,6 +61,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   private final Clock clock;
   private final ScheduledThreadPoolExecutor scheduler;
   private final ThreadPoolExecutor workers;
+  private final AtomicLong rejectedWorkerTasks = new AtomicLong();
   private final AtomicReference<SecretValue> nodeToken;
   private final AtomicReference<State> state;
   private final AtomicBoolean started = new AtomicBoolean();
@@ -123,9 +128,12 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         8,
         1,
         TimeUnit.SECONDS,
-        new java.util.concurrent.LinkedBlockingQueue<>(64),
+        new java.util.concurrent.LinkedBlockingQueue<>(WORKER_QUEUE_CAPACITY),
         daemonFactory("starx-website-http"),
-        new ThreadPoolExecutor.AbortPolicy());
+        (task, executor) -> {
+          this.rejectedWorkerTasks.incrementAndGet();
+          throw new RejectedExecutionException("website sync worker queue is full");
+        });
     this.workers.allowCoreThreadTimeOut(true);
   }
 
@@ -158,6 +166,15 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
 
   int workerThreadCount() {
     return this.workers.getPoolSize();
+  }
+
+  public Map<String, Object> runtimeMetrics() {
+    return Map.of(
+        "workerThreads", this.workers.getPoolSize(),
+        "activeWorkers", this.workers.getActiveCount(),
+        "queueSize", this.workers.getQueue().size(),
+        "rejectedTasks", this.rejectedWorkerTasks.get(),
+        "scheduledTasks", this.scheduler.getQueue().size());
   }
 
   int scheduledTaskCount() {

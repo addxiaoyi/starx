@@ -163,6 +163,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
     private Consumer<StarxEvent> extensionEventForwarder;
     private CompatibilityReport compatibilityReport;
     private volatile io.github.addxiaoyi.starx.common.update.UpdateManager updateManager;
+    private volatile ScheduledTask updateTask;
 
     @Inject
     public StarxVelocityPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -568,6 +569,9 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             metrics.put("playerNetwork", playerList.networkMetrics());
             metrics.put("playerListRuntime", playerList.runtimeMetrics());
             metrics.put("crossServerTabRuntime", crossServerTab.runtimeMetrics());
+            metrics.put("eventBusRuntime", this.eventBus.runtimeMetrics());
+            metrics.put("httpApiRuntime", this.httpApiServer == null
+                ? Map.of() : this.httpApiServer.runtimeMetrics());
             var websiteMetrics = websiteSync.metrics();
             metrics.put("websiteSyncRuntime", Map.of(
                 "state", websiteSync.status().state().name(),
@@ -576,7 +580,8 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
                 "heartbeatsSent", websiteMetrics.heartbeatsSent(),
                 "manifestsSent", websiteMetrics.manifestsSent(),
                 "texturesUploaded", websiteMetrics.texturesUploaded(),
-                "transport", websiteSync.transportMetrics()));
+                "transport", websiteSync.transportMetrics(),
+                "runtime", websiteSync.runtimeMetrics()));
             metrics.put("networkAutomation", this.networkAutomationService == null
                 ? Map.of("status", "not_started")
                 : this.networkAutomationService.snapshot());
@@ -671,7 +676,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             this.logger::info);
         long intervalMinutes = updateConfig.checkInterval().toMinutes();
         boolean notifyEnabled = updateConfig.notifyEnabled();
-        this.proxy.getScheduler().buildTask(this, () -> {
+        this.updateTask = this.proxy.getScheduler().buildTask(this, () -> {
             io.github.addxiaoyi.starx.common.update.UpdateManager.CheckResult result = this.updateManager.checkAndUpdate();
             switch (result) {
                 case UPDATE_DOWNLOADED -> {
@@ -697,6 +702,13 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             }
         }).repeat(java.time.Duration.ofMinutes(intervalMinutes)).schedule();
         this.lifecycle.own("update manager", () -> this.updateManager = null);
+        this.lifecycle.own("update task", () -> {
+            ScheduledTask task = this.updateTask;
+            this.updateTask = null;
+            if (task != null) {
+                task.cancel();
+            }
+        });
     }
 
     private String implementationVersion() {

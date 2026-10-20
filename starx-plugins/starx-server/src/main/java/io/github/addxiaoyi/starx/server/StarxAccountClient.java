@@ -24,7 +24,7 @@ final class StarxAccountClient {
   private final String apiKey;
 
   StarxAccountClient(String baseUrl, String apiKey) {
-    this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build(), baseUrl, apiKey);
+    this(ServerHttpClientFactory.builder(Duration.ofSeconds(4)).build(), baseUrl, apiKey);
   }
 
   StarxAccountClient(HttpClient http, String baseUrl, String apiKey) {

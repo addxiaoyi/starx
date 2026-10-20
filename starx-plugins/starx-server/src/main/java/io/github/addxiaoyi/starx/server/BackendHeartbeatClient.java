@@ -18,8 +18,8 @@ final class BackendHeartbeatClient {
   static final String SERVER_HEADER = "X-StarX-Server";
   private static final String API_KEY_HEADER = "X-API-Key";
   private static final String SERVER_PATTERN = "[A-Za-z0-9_.-]{1,64}";
-  private static final HttpClient SHARED_HTTP = HttpClient.newBuilder()
-      .version(HttpClient.Version.HTTP_1_1)
+  private static final HttpClient SHARED_HTTP = ServerHttpClientFactory
+      .builder(Duration.ofSeconds(3))
       .build();
 
   private final HttpClient http;

@@ -16,5 +16,8 @@ class HttpExecutorBackpressureContractTest {
     assertTrue(source.contains("new ThreadPoolExecutor.CallerRunsPolicy()"));
     assertFalse(source.contains("new ThreadPoolExecutor.AbortPolicy()"));
     assertTrue(source.contains("new ArrayBlockingQueue<>(256)"));
+    assertTrue(source.contains("new Semaphore(HTTP_WORKERS, true)"));
+    assertTrue(source.contains("server_busy"));
+    assertTrue(source.contains("queuedRequests"));
   }
 }

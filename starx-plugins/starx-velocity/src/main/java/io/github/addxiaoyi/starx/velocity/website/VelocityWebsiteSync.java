@@ -95,6 +95,10 @@ public final class VelocityWebsiteSync implements AutoCloseable {
     return this.httpClient.getCircuitState();
   }
 
+  public Map<String, Object> runtimeMetrics() {
+    return this.runtime.runtimeMetrics();
+  }
+
   public Map<String, Object> transportMetrics() {
     return this.httpClient.transportMetrics();
   }

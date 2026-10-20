@@ -42,6 +42,7 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 public class TabListModule implements VelocityModule {
 
     private static final long STATIC_REFRESH_INTERVAL_NANOS = Duration.ofSeconds(1).toNanos();
+    private static final Duration STATIC_REFRESH_INTERVAL = Duration.ofSeconds(1);
     private static final Duration ANIMATION_REFRESH_INTERVAL = Duration.ofMillis(200);
 
     private final StarxVelocityPlugin plugin;
@@ -50,6 +51,7 @@ public class TabListModule implements VelocityModule {
     private final ConcurrentMap<UUID, TabContent> lastSentContent = new ConcurrentHashMap<>();
     private final AtomicBoolean refreshInProgress = new AtomicBoolean();
     private ScheduledTask globalRefreshTask;
+    private volatile boolean enabled;
     private volatile long nextStaticRefreshAt;
 
     public TabListModule(StarxVelocityPlugin plugin) {
@@ -65,10 +67,8 @@ public class TabListModule implements VelocityModule {
     @Override
     public void onEnable() {
         // 启动全局刷新任务
-        this.globalRefreshTask = this.plugin.proxy().getScheduler()
-            .buildTask(this.plugin, this::refreshAll)
-            .repeat(ANIMATION_REFRESH_INTERVAL)
-            .schedule();
+        this.enabled = true;
+        scheduleGlobalRefresh(Duration.ZERO);
 
         // 监听玩家事件
         this.plugin.proxy().getEventManager().register(this.plugin, this.playerListener);
@@ -78,6 +78,7 @@ public class TabListModule implements VelocityModule {
 
     @Override
     public void onDisable() {
+        this.enabled = false;
         ScheduledTask task = this.globalRefreshTask;
         this.globalRefreshTask = null;
         if (task != null) {
@@ -100,9 +101,27 @@ public class TabListModule implements VelocityModule {
         this.plugin.logger().info("增强版标签页列表模块已禁用");
     }
 
-    /**
-     * 刷新所有玩家
-     */
+    private void scheduleGlobalRefresh(Duration delay) {
+        if (!this.enabled) {
+            return;
+        }
+        this.globalRefreshTask = this.plugin.proxy().getScheduler()
+            .buildTask(this.plugin, this::runScheduledRefresh)
+            .delay(delay)
+            .schedule();
+    }
+
+    private void runScheduledRefresh() {
+        this.globalRefreshTask = null;
+        if (!this.enabled) {
+            return;
+        }
+        refreshAll();
+        scheduleGlobalRefresh(
+            this.tabListManager.hasAnimations()
+                ? ANIMATION_REFRESH_INTERVAL
+                : STATIC_REFRESH_INTERVAL);
+    }
     public void refreshAll() {
         if (!this.refreshInProgress.compareAndSet(false, true)) {
             return;

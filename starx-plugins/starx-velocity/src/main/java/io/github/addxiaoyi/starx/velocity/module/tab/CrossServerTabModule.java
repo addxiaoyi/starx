@@ -39,10 +39,13 @@ public final class CrossServerTabModule implements VelocityModule {
   private final RuntimeWindowCounter reconcileCounter = new RuntimeWindowCounter();
   private final RuntimeWindowCounter playerScanCounter = new RuntimeWindowCounter();
   private final RuntimeWindowCounter tabWriteCounter = new RuntimeWindowCounter();
+  private final RuntimeWindowCounter fullReconcileCounter = new RuntimeWindowCounter();
   private final ServerMetadataCache serverMetadata =
       new ServerMetadataCache(Duration.ofSeconds(30), Duration.ofSeconds(2));
   private final ReentrantLock lifecycleLock = new ReentrantLock();
   private boolean reconcileQueued;
+  private volatile boolean metadataDirty = true;
+  private volatile long lastRosterFingerprint = Long.MIN_VALUE;
   private long generation;
   private ScheduledTask eventTask;
   private final Listener listener = new Listener();
@@ -96,6 +99,8 @@ public final class CrossServerTabModule implements VelocityModule {
       this.reconcileTask = null;
       this.eventTask = null;
       this.reconcileQueued = false;
+      this.metadataDirty = true;
+      this.lastRosterFingerprint = Long.MIN_VALUE;
       this.plugin.proxy().getEventManager().unregisterListener(this.plugin, this.listener);
       this.plugin.proxy().getAllPlayers().forEach(this::removeManagedEntries);
       this.sentEntries.clear();
@@ -110,7 +115,8 @@ public final class CrossServerTabModule implements VelocityModule {
     try {
       if (!this.enabled || epoch != this.generation) return;
       this.reconcileCounter.increment();
-      if (this.serverNames.reloadIfChanged()) {
+      boolean mappingsChanged = this.serverNames.reloadIfChanged();
+      if (mappingsChanged) {
         this.plugin.logger().info("已热加载 cross-server-tab.yml（" + this.serverNames.size() + " 个映射）");
       }
       List<Player> players = this.plugin.proxy().getAllPlayers().stream()
@@ -119,6 +125,14 @@ public final class CrossServerTabModule implements VelocityModule {
               .thenComparing(Player::getUniqueId))
           .toList();
       this.playerScanCounter.add(players.size());
+      long rosterFingerprint = rosterFingerprint(players);
+      if (!mappingsChanged && !this.metadataDirty
+          && rosterFingerprint == this.lastRosterFingerprint) {
+        return;
+      }
+      this.lastRosterFingerprint = rosterFingerprint;
+      this.metadataDirty = false;
+      this.fullReconcileCounter.increment();
       this.sentEntries.keySet().retainAll(players.stream().map(Player::getUniqueId).collect(Collectors.toSet()));
       Map<UUID, EntryState> roster = new LinkedHashMap<>();
       players.forEach(player -> player.getCurrentServer().ifPresent(connection -> {
@@ -181,6 +195,22 @@ public final class CrossServerTabModule implements VelocityModule {
     });
   }
 
+  private static long rosterFingerprint(List<Player> players) {
+    long fingerprint = players.size();
+    for (Player player : players) {
+      String backend = player.getCurrentServer()
+          .map(connection -> connection.getServer().getServerInfo().getName())
+          .orElse("");
+      long item = player.getUniqueId().getMostSignificantBits()
+          ^ player.getUniqueId().getLeastSignificantBits();
+      item = 31 * item + player.getUsername().hashCode();
+      item = 31 * item + backend.hashCode();
+      fingerprint ^= Long.rotateLeft(item, (int) (item & 63));
+      fingerprint += item;
+    }
+    return fingerprint;
+  }
+
   private Map<UUID, EntryState> groupedEntries(
       Map<UUID, EntryState> roster,
       UUID viewerId,
@@ -219,7 +249,11 @@ public final class CrossServerTabModule implements VelocityModule {
         .map(server -> server.ping())
         .orElseGet(() -> java.util.concurrent.CompletableFuture.failedFuture(
             new IllegalStateException("Server is not registered: " + backendName))),
-        () -> scheduleReconcile(Duration.ZERO));
+        () -> {
+          this.metadataDirty = true;
+          this.lastRosterFingerprint = Long.MIN_VALUE;
+          scheduleReconcile(Duration.ZERO);
+        });
     ServerMetadataCache.Snapshot metadata = this.serverMetadata.snapshot(backendName);
     int maxPlayers = metadata.maxPlayers();
     String capacity = maxPlayers > 0 ? players + "/" + maxPlayers : Integer.toString(players);
@@ -326,22 +360,28 @@ public final class CrossServerTabModule implements VelocityModule {
         "playerScansTotal", this.playerScanCounter.total(),
         "tabWritesPerMinute", this.tabWriteCounter.perMinute(),
         "tabWritesTotal", this.tabWriteCounter.total(),
+        "fullReconcilePerMinute", this.fullReconcileCounter.perMinute(),
+        "fullReconcileTotal", this.fullReconcileCounter.total(),
         "reconcileIntervalSeconds", RECONCILE_INTERVAL.toSeconds());
   }
 
   private final class Listener {
     @Subscribe
     public void onPostLogin(PostLoginEvent event) {
+      CrossServerTabModule.this.metadataDirty = true;
       scheduleReconcile(EVENT_DELAY);
     }
 
     @Subscribe
     public void onServerConnected(ServerConnectedEvent event) {
+      CrossServerTabModule.this.metadataDirty = true;
       scheduleReconcile(EVENT_DELAY);
     }
 
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
+      CrossServerTabModule.this.metadataDirty = true;
+      CrossServerTabModule.this.lastRosterFingerprint = Long.MIN_VALUE;
       UUID playerId = event.getPlayer().getUniqueId();
       sentEntries.remove(playerId);
       latencyTracker.remove(playerId);

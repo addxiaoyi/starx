@@ -47,6 +47,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicLong;
 import java.time.Clock;
 import java.time.Instant;
 import java.lang.management.ManagementFactory;
@@ -110,7 +112,10 @@ public final class HttpApiServer implements RouteRegistrar {
     private static final int RATE_LIMIT_MAX_REQUESTS = 100;
     private static final int SENSITIVE_RATE_LIMIT_MAX = 10;
     private static final int HMAC_REPLAY_CAPACITY = 8192;
+    private static final int HTTP_WORKERS = 8;
     private final HmacReplayGuard hmacReplayGuard = new HmacReplayGuard(HMAC_REPLAY_CAPACITY);
+    private final Semaphore requestSlots = new Semaphore(HTTP_WORKERS, true);
+    private final AtomicLong rejectedRequests = new AtomicLong();
 
     public HttpApiServer(
             StarxConfig config,
@@ -209,9 +214,12 @@ public final class HttpApiServer implements RouteRegistrar {
         };
         // 严格控制资源：核心2线程，最大8线程（减少CPU竞争），队列64（快速反馈），饱和策略调用者运行
         this.executor = new ThreadPoolExecutor(
-                2, 8, 60L, java.util.concurrent.TimeUnit.SECONDS,
+                2, HTTP_WORKERS, 60L, java.util.concurrent.TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(256), threads,
-                new ThreadPoolExecutor.CallerRunsPolicy());
+                (runnable, executor) -> {
+                    this.rejectedRequests.incrementAndGet();
+                    new ThreadPoolExecutor.CallerRunsPolicy().rejectedExecution(runnable, executor);
+                });
         this.server.setExecutor(this.executor);
         this.get("/v1/health", this::health);
         RouteHandler requireAuth = this.requireApiKey();
@@ -483,6 +491,15 @@ public final class HttpApiServer implements RouteRegistrar {
         }
     }
 
+    public Map<String, Object> runtimeMetrics() {
+        ThreadPoolExecutor current = this.executor instanceof ThreadPoolExecutor pool ? pool : null;
+        return Map.of(
+            "activeRequests", HTTP_WORKERS - this.requestSlots.availablePermits(),
+            "queuedRequests", current == null ? 0 : current.getQueue().size(),
+            "workerThreads", current == null ? 0 : current.getPoolSize(),
+            "rejectedRequests", this.rejectedRequests.get());
+    }
+
     private void dispatch(HttpExchange exchange) {
         this.applyCorsHeaders(exchange);
         if (this.handleCors(exchange)) {
@@ -505,6 +522,18 @@ public final class HttpApiServer implements RouteRegistrar {
                 exchange.sendResponseHeaders(405, -1L);
             } catch (IOException ignored) {}
             exchange.close();
+            return;
+        }
+        boolean requestSlot = !PUBLIC_ENDPOINTS.contains(path);
+        if (requestSlot && !this.requestSlots.tryAcquire()) {
+            this.rejectedRequests.incrementAndGet();
+            try {
+                new JsonHttpExchange(exchange).status(503).json(Map.of(
+                    "error", "server_busy",
+                    "message", "Server is busy; retry shortly"));
+            } catch (IOException ignored) {
+                exchange.close();
+            }
             return;
         }
         JsonHttpExchange ctx = new JsonHttpExchange(exchange);
@@ -541,6 +570,10 @@ public final class HttpApiServer implements RouteRegistrar {
             try {
                 ctx.status(500).json(Map.of("error", "Internal Server Error"));
             } catch (IOException ignored) {}
+        } finally {
+            if (requestSlot) {
+                this.requestSlots.release();
+            }
         }
     }
 
