@@ -32,6 +32,8 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -43,13 +45,25 @@ implements VelocityModule {
     private static final long SERVER_PROBE_TTL_MILLIS = 5000L;
     private final StarxVelocityPlugin plugin;
     private final Config config;
+    private final Supplier<Map<String, Object>> runtimeMetrics;
+    private final Function<String, Map<String, Object>> backendHealth;
     private final Map<String, ProbeResult> serverProbeCache = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<Boolean>> serverProbes = new ConcurrentHashMap<>();
     private CommandMeta commandMeta;
 
     public ProxyInfoModule(StarxVelocityPlugin plugin, Config config) {
+        this(plugin, config, Map::of, ignored -> Map.of());
+    }
+
+    public ProxyInfoModule(
+        StarxVelocityPlugin plugin,
+        Config config,
+        Supplier<Map<String, Object>> runtimeMetrics,
+        Function<String, Map<String, Object>> backendHealth) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.config = Objects.requireNonNull(config, "config");
+        this.runtimeMetrics = Objects.requireNonNull(runtimeMetrics, "runtimeMetrics");
+        this.backendHealth = Objects.requireNonNull(backendHealth, "backendHealth");
     }
 
     @Override
@@ -125,6 +139,10 @@ implements VelocityModule {
                     this.sendServers(invocation);
                     break;
                 }
+                case "health": {
+                    this.sendHealth(invocation, args);
+                    break;
+                }
                 case "doctor": {
                     this.sendDoctor(invocation);
                     break;
@@ -140,7 +158,41 @@ implements VelocityModule {
             invocation.source().sendMessage((Component)Component.text((String)"  /starx info    - Proxy status info", (TextColor)NamedTextColor.YELLOW));
             invocation.source().sendMessage((Component)Component.text((String)"  /starx uptime  - Proxy uptime", (TextColor)NamedTextColor.YELLOW));
             invocation.source().sendMessage((Component)Component.text((String)"  /starx servers - Server list", (TextColor)NamedTextColor.YELLOW));
+            invocation.source().sendMessage((Component)Component.text((String)"  /starx health  - Runtime health and pressure", (TextColor)NamedTextColor.YELLOW));
+            invocation.source().sendMessage((Component)Component.text((String)"  /starx health <server> - Backend heartbeat details", (TextColor)NamedTextColor.YELLOW));
             invocation.source().sendMessage((Component)Component.text((String)"  /starx doctor  - Compatibility diagnostics", (TextColor)NamedTextColor.YELLOW));
+        }
+
+        private void sendHealth(SimpleCommand.Invocation invocation, String[] args) {
+            if (args.length > 1) {
+                this.sendBackendHealth(invocation, args[1]);
+                return;
+            }
+            RuntimeHealthReport.Report report =
+                RuntimeHealthReport.from(ProxyInfoModule.this.runtimeMetrics.get());
+            invocation.source().sendMessage(Component.text(
+                "==== StarX Runtime Health: " + report.state() + " ====",
+                color(report.state())).decoration(TextDecoration.BOLD, true));
+            for (RuntimeHealthReport.Check check : report.checks()) {
+                invocation.source().sendMessage(Component.text(
+                    "  " + check.name() + ": " + check.state() + " | " + check.details(),
+                    color(check.state())));
+            }
+        }
+
+        private void sendBackendHealth(SimpleCommand.Invocation invocation, String serverName) {
+            Map<String, Object> health = ProxyInfoModule.this.backendHealth.apply(serverName);
+            if (health.isEmpty()) {
+                invocation.source().sendMessage(Component.text(
+                    "Unknown backend: " + serverName, NamedTextColor.RED));
+                return;
+            }
+            RuntimeHealthReport.Check check = RuntimeHealthReport.backendCheck(serverName, health);
+            invocation.source().sendMessage(Component.text(
+                "==== Backend " + serverName + ": " + check.state() + " ====",
+                color(check.state())).decoration(TextDecoration.BOLD, true));
+            invocation.source().sendMessage(Component.text(
+                "  " + check.details(), color(check.state())));
         }
 
         private void sendInfo(SimpleCommand.Invocation invocation) {
@@ -176,6 +228,31 @@ implements VelocityModule {
                 case DEGRADED -> NamedTextColor.GOLD;
                 case UNSUPPORTED -> NamedTextColor.RED;
             };
+        }
+
+        private NamedTextColor color(RuntimeHealthReport.State status) {
+            return switch (status) {
+                case OK -> NamedTextColor.GREEN;
+                case INFO -> NamedTextColor.YELLOW;
+                case WARNING -> NamedTextColor.RED;
+            };
+        }
+
+        @Override
+        public java.util.List<String> suggest(SimpleCommand.Invocation invocation) {
+            String[] args = invocation.arguments();
+            if (args.length == 0) {
+                return java.util.List.of("info", "uptime", "servers", "health", "doctor");
+            }
+            if (args.length != 2 || !"health".equalsIgnoreCase(args[0])) {
+                return java.util.List.of();
+            }
+            String prefix = args[1].toLowerCase(java.util.Locale.ROOT);
+            return ProxyInfoModule.this.plugin.proxy().getAllServers().stream()
+                .map(server -> server.getServerInfo().getName())
+                .filter(name -> name.toLowerCase(java.util.Locale.ROOT).startsWith(prefix))
+                .sorted()
+                .toList();
         }
 
     private void sendServers(SimpleCommand.Invocation invocation) {

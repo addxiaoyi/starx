@@ -1,6 +1,6 @@
 package io.github.addxiaoyi.starx.velocity.module.security;
 
-import java.util.Comparator;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -9,7 +9,9 @@ final class PerIpWindowCounter {
   private final int capacity;
   private final long windowMillis;
   private final Map<String, Window> windows = new ConcurrentHashMap<>();
+  private static final int EVICTION_SAMPLE_SIZE = 32;
   private final Object trimLock = new Object();
+  private Iterator<Map.Entry<String, Window>> evictionCursor;
 
   PerIpWindowCounter(int capacity, long windowMillis) {
     if (capacity <= 0) throw new IllegalArgumentException("capacity must be positive");
@@ -41,22 +43,46 @@ final class PerIpWindowCounter {
   }
 
   void purgeBefore(long cutoff) {
-    this.windows.entrySet().removeIf(entry -> entry.getValue().lastSeenAt < cutoff);
+    synchronized (this.trimLock) {
+      this.windows.entrySet().removeIf(entry -> entry.getValue().lastSeenAt < cutoff);
+      if (this.windows.isEmpty()) {
+        this.evictionCursor = null;
+      }
+    }
   }
 
   int size() { return this.windows.size(); }
-  void clear() { this.windows.clear(); }
+  void clear() {
+    synchronized (this.trimLock) {
+      this.windows.clear();
+      this.evictionCursor = null;
+    }
+  }
 
   private void trim() {
     if (this.windows.size() <= this.capacity) return;
     synchronized (this.trimLock) {
       while (this.windows.size() > this.capacity) {
-        this.windows.entrySet().stream()
-            .min(Comparator.comparingLong(entry -> entry.getValue().lastSeenAt))
-            .ifPresent(oldest -> this.windows.remove(oldest.getKey(), oldest.getValue()));
+        if (this.evictionCursor == null || !this.evictionCursor.hasNext()) {
+          this.evictionCursor = this.windows.entrySet().iterator();
+        }
+        Map.Entry<String, Window> oldest = null;
+        int inspected = 0;
+        while (inspected < EVICTION_SAMPLE_SIZE && this.evictionCursor.hasNext()) {
+          Map.Entry<String, Window> candidate = this.evictionCursor.next();
+          inspected++;
+          if (oldest == null
+              || candidate.getValue().lastSeenAt() < oldest.getValue().lastSeenAt()) {
+            oldest = candidate;
+          }
+        }
+        if (oldest == null) {
+          this.evictionCursor = null;
+          return;
+        }
+        this.windows.remove(oldest.getKey(), oldest.getValue());
       }
     }
   }
-
   private record Window(long startedAt, long lastSeenAt, int count) { }
 }

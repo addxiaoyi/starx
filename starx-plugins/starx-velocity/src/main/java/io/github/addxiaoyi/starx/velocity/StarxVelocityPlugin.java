@@ -134,6 +134,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import io.github.addxiaoyi.starx.velocity.variable.StarxPlayerContextFactory;
@@ -201,6 +202,10 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
     }
 
     public EventBus eventBus() {
+        return this.eventBus;
+    }
+
+    public EventBus eventBusOrNull() {
         return this.eventBus;
     }
 
@@ -389,7 +394,11 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
         }
         this.moduleManager = new ModuleManager(this.config);
         this.lifecycle.own("modules", this.moduleManager::disableAll);
-        VelocityBackendBridge backendBridge = new VelocityBackendBridge(this);
+        VelocityBackendBridge backendBridge = new VelocityBackendBridge(
+            this,
+            new io.github.addxiaoyi.starx.velocity.bridge.BackendNodeRegistry(),
+            Clock.systemUTC(),
+            this.eventBus);
         SkinBridgeModule skinBridge = new SkinBridgeModule(
             this, this.eventBus, backendBridge, knownMinecraftUuidsResolver);
         UworldModule uworldModule = new UworldModule(this, this.config.uworld());
@@ -519,7 +528,6 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             this,
             ReconnectModule.Config.defaultConfig(),
             new BackendRoutingService(backendBridge.registry())));
-        this.moduleManager.register(new ProxyInfoModule(this, ProxyInfoModule.Config.defaultConfig()));
         this.moduleManager.register(new ForgeCompatModule(this, ForgeCompatModule.Config.from(
             this.config.modules().get("starx.forge"))));
         this.moduleManager.register(new OnlineSyncModule(this, OnlineSyncModule.Config.defaultConfig()));
@@ -558,10 +566,7 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             canonicalUuidResolver, knownMinecraftUuidsResolver));
         this.moduleManager.register(new VoteModule(
             this, voteRepo, canonicalUuidResolver, knownMinecraftUuidsResolver));
-        this.httpApiServer = new HttpApiServer(this.config, this.eventBus, this.proxy,
-            backendBridge.registry(), userRepository, authModule.authService(),
-            authModule::approveWebLogin, skinBridge, punishmentRepo, staffNoteRepo,
-            reportRepo, announcementRepo, bindingRepo, bindingVerification, voteRepo, () -> {
+        Supplier<Map<String, Object>> runtimeMetrics = () -> {
             Map<String, Object> metrics = new java.util.LinkedHashMap<>(planIntegration.getSummary());
             metrics.put("maintenance", maintenanceModule.isEnabled());
             metrics.put("queue", queueModule.runtimeSnapshot());
@@ -570,11 +575,23 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
             metrics.put("playerListRuntime", playerList.runtimeMetrics());
             metrics.put("crossServerTabRuntime", crossServerTab.runtimeMetrics());
             metrics.put("eventBusRuntime", this.eventBus.runtimeMetrics());
+            Map<String, Object> backendHealth = new java.util.LinkedHashMap<>();
+            for (var server : this.proxy.getAllServers()) {
+                String serverName = server.getServerInfo().getName();
+                var health = backendBridge.registry().health(serverName);
+                backendHealth.put(serverName, Map.of(
+                    "bridgeSeen", backendBridge.registry().find(serverName).isPresent(),
+                    "state", health.state().name(),
+                    "admissionWeight", health.admissionWeight(),
+                    "missedHeartbeats", health.missedHeartbeats()));
+            }
+            metrics.put("backendHealth", Map.copyOf(backendHealth));
             metrics.put("httpApiRuntime", this.httpApiServer == null
                 ? Map.of() : this.httpApiServer.runtimeMetrics());
             var websiteMetrics = websiteSync.metrics();
             metrics.put("websiteSyncRuntime", Map.of(
                 "state", websiteSync.status().state().name(),
+                "circuitState", websiteSync.circuitState().name(),
                 "requestsPerMinute", websiteMetrics.requestsPerMinute(),
                 "requestsTotal", websiteMetrics.requestsSent(),
                 "heartbeatsSent", websiteMetrics.heartbeatsSent(),
@@ -586,11 +603,39 @@ public class StarxVelocityPlugin implements StarxServiceProvider {
                 ? Map.of("status", "not_started")
                 : this.networkAutomationService.snapshot());
             return Map.copyOf(metrics);
-        }, backendBridge.commandMailbox(), backendBridge::acceptHttpMessage, incidentTimeline, playerSessions,
+        };
+        this.httpApiServer = new HttpApiServer(this.config, this.eventBus, this.proxy,
+            backendBridge.registry(), userRepository, authModule.authService(),
+            authModule::approveWebLogin, skinBridge, punishmentRepo, staffNoteRepo,
+            reportRepo, announcementRepo, bindingRepo, bindingVerification, voteRepo, runtimeMetrics,
+            backendBridge.commandMailbox(), backendBridge::acceptHttpMessage, incidentTimeline, playerSessions,
             accountDeletions, accountEraser, crossDeviceApprovals, bindingChallenges,
             accountByConnectedPlayer, identityAwareUserResolver,
             identityAwareUsernameResolver, identityAwareFullUsernameResolver,
             canonicalUuidResolver, knownMinecraftUuidsResolver);
+        this.moduleManager.register(new ProxyInfoModule(
+            this,
+            ProxyInfoModule.Config.defaultConfig(),
+            runtimeMetrics,
+            serverName -> {
+                if (this.proxy.getServer(serverName).isEmpty()) {
+                    return Map.of();
+                }
+                var node = backendBridge.registry().find(serverName).orElse(null);
+                var health = backendBridge.registry().health(serverName);
+                Map<String, Object> status = new java.util.LinkedHashMap<>();
+                status.put("bridgeSeen", node != null);
+                status.put("state", health.state().name());
+                status.put("admissionWeight", health.admissionWeight());
+                status.put("missedHeartbeats", health.missedHeartbeats());
+                if (node != null) {
+                    status.put("nodeId", node.declaredNodeId());
+                    status.put("platform", node.platform().name());
+                    status.put("lastSeen", node.lastSeen().toString());
+                    status.put("capabilities", String.join(",", new java.util.TreeSet<>(node.capabilities())));
+                }
+                return Map.copyOf(status);
+            }));
         this.lifecycle.own("HTTP API", this.httpApiServer::stop);
         this.moduleManager.register(new AdminCommandsModule(
             this, userRepository, punishmentRepo, staffNoteRepo, reportRepo, announcementRepo,

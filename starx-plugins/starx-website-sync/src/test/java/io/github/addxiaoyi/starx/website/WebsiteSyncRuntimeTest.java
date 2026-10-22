@@ -17,6 +17,32 @@ import org.junit.jupiter.api.Test;
 
 class WebsiteSyncRuntimeTest {
   @Test
+  void reportsRuntimeFailureAndRecoveryOnlyWhenStateChanges() throws Exception {
+    FakeClient client = new FakeClient();
+    client.heartbeatFailure = new WebsiteSyncApiException(503, "unavailable", "offline");
+    List<WebsiteSyncRuntime.HealthChange> changes = new java.util.concurrent.CopyOnWriteArrayList<>();
+    WebsiteSyncRuntime runtime = runtime(
+        config(SecretValue.empty(), SecretValue.of("stx_node_test"), false),
+        client,
+        ignored -> { });
+    runtime.setHealthChangeListener(changes::add);
+    try {
+      runtime.start();
+      await(() -> runtime.snapshot().state() == WebsiteSyncRuntime.State.BACKOFF);
+      client.heartbeatFailure = null;
+      runtime.forceHeartbeat();
+      await(() -> runtime.snapshot().state() == WebsiteSyncRuntime.State.ACTIVE);
+
+      assertEquals(2, changes.size());
+      assertEquals("BACKOFF", changes.get(0).state());
+      assertEquals("ACTIVE", changes.get(1).state());
+      assertEquals("runtime", changes.get(0).component());
+    } finally {
+      runtime.close();
+    }
+  }
+
+  @Test
   void enrollsPersistsCredentialAndPublishesHeartbeat() throws Exception {
     AtomicReference<SecretValue> persisted = new AtomicReference<>();
     FakeClient client = new FakeClient();

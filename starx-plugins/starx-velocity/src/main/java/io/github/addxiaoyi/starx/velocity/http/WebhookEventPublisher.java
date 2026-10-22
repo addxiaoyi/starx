@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory;
 
 public final class WebhookEventPublisher implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(WebhookEventPublisher.class);
-    private static final String[] SUBSCRIBED_EVENTS = new String[]{"player:login:success", "player:login:failed", "player:register", "player:brute-force", "skin:updated", "skin:applied", "admin:ban:player", "admin:kick:player"};
+    private static final String[] SUBSCRIBED_EVENTS = new String[]{"player:login:success", "player:login:failed", "player:register", "player:brute-force", "skin:updated", "skin:applied", "admin:ban:player", "admin:kick:player", "backend:health:changed", "website:health:changed"};
     private final EventBus eventBus;
     private final WebhookClient webhookClient;
     private final Consumer<StarxEvent> subscriber = this::onEvent;

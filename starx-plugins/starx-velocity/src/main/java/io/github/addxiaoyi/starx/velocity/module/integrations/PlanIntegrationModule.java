@@ -13,13 +13,13 @@ import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.messaging.VelocityMessageBridge;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -31,9 +31,8 @@ implements VelocityModule {
     private final VelocityMessageBridge messageBridge;
     private final Config config;
     private final AtomicBoolean collecting = new AtomicBoolean(false);
-    private final ConcurrentLinkedDeque<Map<String, Object>> dataPoints = new ConcurrentLinkedDeque<>();
+    private final DataPointHistory dataPoints;
     private final Map<String, Map<String, Object>> backendStats = new ConcurrentHashMap<>();
-    private volatile int dataPointsCount = 0;
     private ScheduledTask scheduledTask;
     private final Consumer<StarxEvent> statsSubscriber = this::onBackendStats;
 
@@ -42,6 +41,7 @@ implements VelocityModule {
         this.eventBus = Objects.requireNonNull(eventBus, "eventBus");
         this.messageBridge = Objects.requireNonNull(messageBridge, "messageBridge");
         this.config = Objects.requireNonNull(config, "config");
+        this.dataPoints = new DataPointHistory(config.maxDataPoints());
     }
 
     @Override
@@ -69,7 +69,6 @@ implements VelocityModule {
         }
         this.backendStats.clear();
         this.dataPoints.clear();
-        this.dataPointsCount = 0;
     }
 
     public boolean isCollecting() {
@@ -83,7 +82,6 @@ implements VelocityModule {
     }
 
     public void collectDataPoint() {
-        int excess;
         int onlinePlayers = this.plugin.proxy().getPlayerCount();
         LinkedHashMap<String, Object> point = new LinkedHashMap<>();
         point.put("timestamp", Instant.now().toString());
@@ -91,20 +89,10 @@ implements VelocityModule {
         point.put("server_count", this.plugin.proxy().getAllServers().size());
         point.put("backend_stats", new LinkedHashMap<>(this.backendStats));
         this.dataPoints.add(point);
-        this.dataPointsCount++;
-        if (this.dataPointsCount > this.config.maxDataPoints() && (excess = this.dataPointsCount - this.config.maxDataPoints()) > 0) {
-            for (int i = 0; i < excess; i++) {
-                this.dataPoints.pollFirst();
-            }
-            this.dataPointsCount = this.config.maxDataPoints();
-        }
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
     public List<Map<String, Object>> getDataPoints() {
-        return List.copyOf(this.dataPoints);
+        return this.dataPoints.snapshot();
     }
 
     public Map<String, Map<String, Object>> getBackendStats() {
@@ -132,6 +120,33 @@ implements VelocityModule {
         String lastCollectedAt = lastTimestamp == null ? "" : String.valueOf(lastTimestamp);
         summary.put("lastCollectedAt", lastCollectedAt);
         return Map.copyOf(summary);
+    }
+
+    static final class DataPointHistory {
+        private final int capacity;
+        private final ArrayDeque<Map<String, Object>> points = new ArrayDeque<>();
+
+        DataPointHistory(int capacity) {
+            if (capacity <= 0) {
+                throw new IllegalArgumentException("maxDataPoints must be positive");
+            }
+            this.capacity = capacity;
+        }
+
+        synchronized void add(Map<String, Object> point) {
+            this.points.addLast(Map.copyOf(Objects.requireNonNull(point, "point")));
+            while (this.points.size() > this.capacity) {
+                this.points.removeFirst();
+            }
+        }
+
+        synchronized List<Map<String, Object>> snapshot() {
+            return List.copyOf(this.points);
+        }
+
+        synchronized void clear() {
+            this.points.clear();
+        }
     }
 
     public static interface Config {

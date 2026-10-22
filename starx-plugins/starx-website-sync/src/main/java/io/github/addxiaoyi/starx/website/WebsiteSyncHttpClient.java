@@ -20,6 +20,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
   private static final int MAX_RESPONSE_CHARS = 1_048_576;
@@ -32,6 +34,14 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
   private final CircuitBreaker circuitBreaker;
   private final boolean metricsEnabled;
   private final boolean circuitBreakerEnabled;
+  private final AtomicBoolean transportPressure = new AtomicBoolean();
+  private volatile Consumer<TransportPressureChange> transportPressureListener = ignored -> { };
+
+  public record TransportPressureChange(boolean saturated, Map<String, Object> metrics) {
+    public TransportPressureChange {
+      metrics = Map.copyOf(metrics);
+    }
+  }
 
   public WebsiteSyncHttpClient(WebsiteSyncConfig config) {
     this(
@@ -79,7 +89,7 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
         metricsEnabled, circuitBreakerEnabled);
   }
 
-  private WebsiteSyncHttpClient(
+  WebsiteSyncHttpClient(
       URI siteUrl,
       Duration requestTimeout,
       HttpClient http,
@@ -262,9 +272,11 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
               request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
+      observeTransportRejection(error);
       recordFailure();
       throw new WebsiteSyncApiException("Website sync request was interrupted", error);
     } catch (IOException | RuntimeException error) {
+      observeTransportRejection(error);
       recordFailure();
       throw new WebsiteSyncApiException("Website sync transport failed", error);
     }
@@ -286,7 +298,49 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
       throw new WebsiteSyncApiException(response.statusCode(), code, message);
     }
     recordSuccess(startMillis);
+    recoverTransportPressure();
     return json;
+  }
+
+  private void observeTransportRejection(Throwable error) {
+    if (this.controlledHttp == null || !isConcurrencyRejection(error)) {
+      return;
+    }
+    if (this.transportPressure.compareAndSet(false, true)) {
+      publishTransportPressure(true);
+    }
+  }
+
+  private void recoverTransportPressure() {
+    if (this.controlledHttp != null
+        && this.controlledHttp.activeRequests() == 0
+        && this.transportPressure.compareAndSet(true, false)) {
+      publishTransportPressure(false);
+    }
+  }
+
+  private void publishTransportPressure(boolean saturated) {
+    try {
+      this.transportPressureListener.accept(
+          new TransportPressureChange(saturated, this.transportMetrics()));
+    } catch (RuntimeException error) {
+      System.getLogger(WebsiteSyncHttpClient.class.getName()).log(
+          System.Logger.Level.WARNING,
+          "Website transport pressure listener failed: " + error.getClass().getSimpleName());
+    }
+  }
+
+  private static boolean isConcurrencyRejection(Throwable error) {
+    for (Throwable current = error; current != null; current = current.getCause()) {
+      String message = current.getMessage();
+      if (message == null) continue;
+      String normalized = message.toLowerCase(java.util.Locale.ROOT);
+      if (normalized.contains("concurrency limit reached")
+          || normalized.contains("queue is full")) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private void recordSuccess(long startMillis) {
@@ -424,6 +478,10 @@ public final class WebsiteSyncHttpClient implements WebsiteSyncClient {
    */
   public CircuitBreaker.State getCircuitState() {
     return this.circuitBreaker.getState();
+  }
+
+  public void setTransportPressureListener(Consumer<TransportPressureChange> listener) {
+    this.transportPressureListener = Objects.requireNonNull(listener, "listener");
   }
 
   /**

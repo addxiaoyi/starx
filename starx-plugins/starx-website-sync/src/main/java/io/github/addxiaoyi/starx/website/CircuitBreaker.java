@@ -3,6 +3,8 @@ package io.github.addxiaoyi.starx.website;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * 简单的熔断器实现。
@@ -28,6 +30,10 @@ public final class CircuitBreaker {
   private final AtomicInteger failureCount = new AtomicInteger(0);
   private final AtomicLong openStartTime = new AtomicLong(0);
   private boolean halfOpenProbeInFlight;
+  private volatile Consumer<StateChange> stateChangeListener = ignored -> { };
+
+  public record StateChange(State previous, State state) {
+  }
 
   public CircuitBreaker(int failureThreshold, Duration timeout) {
     this(failureThreshold, timeout, Duration.ofSeconds(30), true);
@@ -46,12 +52,16 @@ public final class CircuitBreaker {
     // 如果启用，保持 enable=true；否则始终 CLOSED
   }
 
+  public void setStateChangeListener(Consumer<StateChange> listener) {
+    this.stateChangeListener = Objects.requireNonNull(listener, "listener");
+  }
+
   /**
    * 进入成功请求时调用。成功后熔断器重置到 CLOSED 状态。
    */
   public synchronized void recordSuccess() {
     this.failureCount.set(0);
-    this.state = State.CLOSED;
+    transitionTo(State.CLOSED);
     this.halfOpenProbeInFlight = false;
   }
 
@@ -64,7 +74,7 @@ public final class CircuitBreaker {
       return; // 已经处于熔断状态，无需重复计数
     }
     if (failures >= this.failureThreshold) {
-      this.state = State.OPEN;
+      transitionTo(State.OPEN);
       this.openStartTime.set(System.currentTimeMillis());
       this.halfOpenProbeInFlight = false;
     }
@@ -82,7 +92,7 @@ public final class CircuitBreaker {
       case OPEN:
         // 检查是否可以尝试半熔断
         if (Duration.ofMillis(now - this.openStartTime.get()).compareTo(this.timeout) >= 0) {
-          this.state = State.HALF_OPEN;
+          transitionTo(State.HALF_OPEN);
           this.halfOpenProbeInFlight = true;
           return true;
         }
@@ -114,9 +124,23 @@ public final class CircuitBreaker {
    * 重置熔断器到初始状态。
    */
   public synchronized void reset() {
-    this.state = State.CLOSED;
+    transitionTo(State.CLOSED);
     this.failureCount.set(0);
     this.openStartTime.set(0);
     this.halfOpenProbeInFlight = false;
+  }
+
+  private void transitionTo(State next) {
+    State previous = this.state;
+    if (previous == next) {
+      return;
+    }
+    this.state = next;
+    try {
+      this.stateChangeListener.accept(new StateChange(previous, next));
+    } catch (RuntimeException error) {
+      System.getLogger(CircuitBreaker.class.getName()).log(System.Logger.Level.WARNING,
+          "Circuit breaker state listener failed: " + error.getClass().getSimpleName());
+    }
   }
 }

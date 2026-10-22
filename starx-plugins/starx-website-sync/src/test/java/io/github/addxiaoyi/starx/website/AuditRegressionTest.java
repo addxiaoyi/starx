@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -14,6 +15,39 @@ import org.junit.jupiter.api.Test;
  * - LruTtlCache 的 TTL 过期、LRU 淘汰与容量边界
  */
 class AuditRegressionTest {
+
+  @Test
+  void circuitBreakerListenerEmitsOnlyStateEdges() {
+    CircuitBreaker breaker = new CircuitBreaker(1, Duration.ZERO);
+    var changes = new ArrayList<CircuitBreaker.StateChange>();
+    breaker.setStateChangeListener(changes::add);
+
+    breaker.recordFailure();
+    breaker.recordFailure();
+    breaker.allowRequest();
+    breaker.allowRequest();
+    breaker.recordSuccess();
+    breaker.recordSuccess();
+
+    assertEquals(3, changes.size());
+    assertEquals(CircuitBreaker.State.OPEN, changes.get(0).state());
+    assertEquals(CircuitBreaker.State.HALF_OPEN, changes.get(1).state());
+    assertEquals(CircuitBreaker.State.CLOSED, changes.get(2).state());
+  }
+
+  @Test
+  void throwingCircuitStateListenerCannotBreakTheRequestPolicy() {
+    CircuitBreaker breaker = new CircuitBreaker(1, Duration.ZERO);
+    breaker.setStateChangeListener(ignored -> {
+      throw new IllegalStateException("observer failed");
+    });
+
+    breaker.recordFailure();
+
+    assertEquals(CircuitBreaker.State.OPEN, breaker.getState());
+    assertTrue(breaker.allowRequest());
+    assertEquals(CircuitBreaker.State.HALF_OPEN, breaker.getState());
+  }
 
   @Test
   void circuitBreakerStaysClosedBelowThreshold() {

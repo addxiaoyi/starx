@@ -1,4 +1,14 @@
 # Changelog
+## [1.1.27] - 2026-10-22
+
+### Integrated health events and bounded state
+
+- Add `/starx health` and `/starx health <server>` to inspect proxy pressure and backend heartbeat/bridge state.
+- Publish backend, website-sync, circuit-breaker, worker-queue, and HTTP concurrency health transitions to the incident timeline and webhook pipeline.
+- Correlate each outage with its recovery and suppress repeated events while a component remains in the same state.
+- Keep Plan integration history, per-IP windows, and SmartAlert buckets bounded; add regression coverage for eviction and thresholds.
+- Six-server deployment and production JVM reload remain separate operational steps.
+
 ## [1.1.26] - 2026-10-20
 
 ### Runtime resource hardening

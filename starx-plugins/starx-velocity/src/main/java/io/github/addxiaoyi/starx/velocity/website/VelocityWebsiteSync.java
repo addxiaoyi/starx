@@ -39,6 +39,7 @@ public final class VelocityWebsiteSync implements AutoCloseable {
   private final MaintenanceModule maintenance;
   private final WebsiteSyncRuntime runtime;
   private final WebsiteSyncHttpClient httpClient;
+  private final WebsiteHealthEventPublisher healthEvents;
 
   public VelocityWebsiteSync(
       StarxVelocityPlugin plugin,
@@ -49,11 +50,20 @@ public final class VelocityWebsiteSync implements AutoCloseable {
     this.bridge = Objects.requireNonNull(bridge, "bridge");
     this.maintenance = Objects.requireNonNull(maintenance, "maintenance");
     WebsiteSyncConfig config = plugin.config().websiteSync();
+    this.healthEvents = new WebsiteHealthEventPublisher(
+        plugin.eventBus(), config.nodeId(), plugin.logger()::warning);
     SyncMetrics syncMetrics = new SyncMetrics();
     CircuitBreaker circuitBreaker = new CircuitBreaker(
         config.circuitBreaker().failureThreshold(),
         java.time.Duration.ofSeconds(config.circuitBreaker().openTimeoutSeconds()));
     this.httpClient = new WebsiteSyncHttpClient(config, syncMetrics, circuitBreaker);
+    circuitBreaker.setStateChangeListener(change -> this.healthEvents.publish(
+        "circuit-breaker", change.previous().name(), change.state().name(), "",
+        Map.of("failureCount", circuitBreaker.getFailureCount())));
+    this.httpClient.setTransportPressureListener(change -> this.healthEvents.publish(
+        "http-transport", change.saturated() ? "NORMAL" : "SATURATED",
+        change.saturated() ? "SATURATED" : "NORMAL", "concurrency_limit",
+        change.metrics()));
     this.runtime = new WebsiteSyncRuntime(
         config,
         this.httpClient,
@@ -68,6 +78,10 @@ public final class VelocityWebsiteSync implements AutoCloseable {
             NodeCapabilities.SKIN_REFRESH,
             NodeCapabilities.CAPE_REFRESH),
         plugin.logger()::info);
+    this.runtime.setHealthChangeListener(change -> this.healthEvents.publish(
+        change.component(), change.previousState(), change.state(), change.errorCode(), Map.of(
+            "queueSize", change.queueSize(),
+            "rejectedTasks", change.rejectedTasks())));
   }
 
   public void start() {

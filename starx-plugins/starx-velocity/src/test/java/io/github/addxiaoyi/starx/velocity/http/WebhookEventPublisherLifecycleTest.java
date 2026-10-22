@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.velocity.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.addxiaoyi.starx.api.event.EventBus;
 import io.github.addxiaoyi.starx.api.event.StarxEvent;
@@ -11,6 +12,22 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 final class WebhookEventPublisherLifecycleTest {
+
+  @Test
+  void registersBackendHealthTransitionsForWebhookDelivery() {
+    RecordingBus bus = new RecordingBus();
+    WebhookClient client = new WebhookClient(
+        new StarxConfig.WebhookConfig("", ""),
+        body -> "",
+        (url, body, headers) -> java.util.concurrent.CompletableFuture.completedFuture(null));
+    WebhookEventPublisher publisher = new WebhookEventPublisher(bus, client);
+
+    publisher.register();
+
+    assertTrue(bus.subscribers.containsKey("backend:health:changed"));
+    assertTrue(bus.subscribers.containsKey("website:health:changed"));
+    publisher.close();
+  }
 
   @Test
   void closeRemovesEveryWebhookSubscription() {

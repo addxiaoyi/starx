@@ -1,6 +1,7 @@
 package io.github.addxiaoyi.starx.velocity.module.security;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -36,5 +37,15 @@ final class PerIpWindowCounterTest {
 
     assertEquals(0, counter.count("10.0.0.1", 3));
     assertEquals(2, counter.size());
+  }
+
+  @Test
+  void sampledEvictionKeepsTheCounterBounded() {
+    PerIpWindowCounter counter = new PerIpWindowCounter(64, 1_000);
+
+    IntStream.range(0, 10_000).forEach(index ->
+        counter.increment("10.0." + (index / 256) + "." + (index % 256), index));
+
+    assertTrue(counter.size() <= 64);
   }
 }

@@ -16,6 +16,8 @@ import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.addxiaoyi.starx.api.bridge.BridgeMessage;
 import io.github.addxiaoyi.starx.api.bridge.BridgeProtocol;
 import io.github.addxiaoyi.starx.api.bridge.PlatformKind;
+import io.github.addxiaoyi.starx.api.event.EventBus;
+import io.github.addxiaoyi.starx.common.platform.NodeHealthStateMachine;
 import io.github.addxiaoyi.starx.velocity.StarxVelocityPlugin;
 import io.github.addxiaoyi.starx.velocity.module.VelocityModule;
 import java.time.Clock;
@@ -46,10 +48,12 @@ public final class VelocityBackendBridge implements VelocityModule {
 
   private final StarxVelocityPlugin plugin;
   private final BackendNodeRegistry registry;
+  private final EventBus eventBus;
   private final Clock clock;
   private final ChannelIdentifier channel;
   private final BackendCommandMailbox commandMailbox;
   private final PendingSkinRequests pendingSkinRequests = new PendingSkinRequests();
+  private final Object healthTransitionLock = new Object();
   private final Listener listener = new Listener();
   private CommandMeta commandMeta;
   private ScheduledTask refreshTask;
@@ -70,17 +74,19 @@ public final class VelocityBackendBridge implements VelocityModule {
   }
 
   public VelocityBackendBridge(StarxVelocityPlugin plugin) {
-    this(plugin, new BackendNodeRegistry(), Clock.systemUTC());
+    this(plugin, new BackendNodeRegistry(), Clock.systemUTC(), plugin.eventBusOrNull());
   }
 
-  VelocityBackendBridge(
+  public VelocityBackendBridge(
       StarxVelocityPlugin plugin,
       BackendNodeRegistry registry,
-      Clock clock
+      Clock clock,
+      EventBus eventBus
   ) {
     this.plugin = Objects.requireNonNull(plugin, "plugin");
     this.registry = Objects.requireNonNull(registry, "registry");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.eventBus = eventBus;
     this.channel = MinecraftChannelIdentifier.from(BridgeProtocol.CHANNEL);
     this.commandMailbox = new BackendCommandMailbox(64);
   }
@@ -444,11 +450,15 @@ public final class VelocityBackendBridge implements VelocityModule {
     servers.forEach(server -> {
       String name = server.getServerInfo().getName();
       this.registry.observeServer(name);
-      this.registry.find(name).ifPresent(node -> {
-        if (node.isStale(this.clock.instant(), STALE_AFTER)) {
-          this.registry.markHeartbeatMissed(name);
+      synchronized (this.healthTransitionLock) {
+        BackendNode node = this.registry.find(name).orElse(null);
+        if (node == null || !node.isStale(this.clock.instant(), STALE_AFTER)) {
+          return;
         }
-      });
+        NodeHealthStateMachine.Snapshot previous = this.registry.health(name);
+        NodeHealthStateMachine.Snapshot current = this.registry.markHeartbeatMissed(name);
+        this.publishHealthTransition(name, previous, current, node);
+      }
     });
     this.registry.pruneExpired();
     this.commandMailbox.pruneIdle();
@@ -546,7 +556,13 @@ public final class VelocityBackendBridge implements VelocityModule {
         return;
       }
       BridgeMessage carried = markTransport(message, "player-carrier");
-      this.registry.update(registeredName, carried, this.clock.instant());
+      synchronized (this.healthTransitionLock) {
+        NodeHealthStateMachine.Snapshot previous = this.registry.health(registeredName);
+        Instant seenAt = this.clock.instant();
+        BackendNode node = this.registry.update(registeredName, carried, seenAt);
+        NodeHealthStateMachine.Snapshot current = this.registry.health(registeredName);
+        this.publishHealthTransition(registeredName, previous, current, node);
+      }
       followUpFor(carried, UUID.randomUUID().toString()).ifPresent(followUp -> {
         boolean sent = connection.sendPluginMessage(
             this.channel,
@@ -564,6 +580,19 @@ public final class VelocityBackendBridge implements VelocityModule {
           "Rejected StarX backend bridge packet from {0}: {1}",
           new Object[] {registeredName, error.getMessage()});
     }
+  }
+
+  private void publishHealthTransition(
+      String serverName,
+      NodeHealthStateMachine.Snapshot previous,
+      NodeHealthStateMachine.Snapshot current,
+      BackendNode node) {
+    BackendHealthTransition.event(serverName, previous, current, node, this.clock.instant())
+        .ifPresent(event -> {
+          if (this.eventBus != null) {
+            this.eventBus.publish(event);
+          }
+        });
   }
 
   private void deliverSkinResponse(BridgeMessage message) {

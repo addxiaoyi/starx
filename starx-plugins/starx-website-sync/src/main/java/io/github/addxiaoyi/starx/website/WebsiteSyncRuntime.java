@@ -47,6 +47,17 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   ) {
   }
 
+  public record HealthChange(
+      String component,
+      String previousState,
+      String state,
+      String errorCode,
+      int queueSize,
+      long rejectedTasks,
+      Instant occurredAt
+  ) {
+  }
+
   private static final Duration MAX_BACKOFF = Duration.ofMinutes(5);
   private static final int WORKER_CORE_THREADS = 1;
   private static final int WORKER_MAX_THREADS = 2;
@@ -67,6 +78,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean heartbeatInFlight = new AtomicBoolean();
   private final AtomicBoolean texturesInFlight = new AtomicBoolean();
+  private final AtomicBoolean workerQueueSaturated = new AtomicBoolean();
   private final Object heartbeatScheduleLock = new Object();
   private final Object textureScheduleLock = new Object();
   private final ExponentialBackoff heartbeatBackoff;
@@ -79,6 +91,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
   private volatile String lastErrorCode = "";
   private volatile NodeSnapshot latestSnapshot;
   private volatile Map<String, String> lastTextureManifest = Map.of();
+  private volatile Consumer<HealthChange> healthChangeListener = ignored -> { };
   private ScheduledFuture<?> heartbeatFuture;
   private ScheduledFuture<?> textureFuture;
 
@@ -147,6 +160,10 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     scheduleHeartbeat(Duration.ZERO);
   }
 
+  public void setHealthChangeListener(Consumer<HealthChange> listener) {
+    this.healthChangeListener = Objects.requireNonNull(listener, "listener");
+  }
+
   public void forceHeartbeat() {
     if (this.state.get() != State.AUTH_FAILED && this.state.get() != State.STOPPED) {
       this.nextHeartbeatMillis = 0;
@@ -174,6 +191,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
         "activeWorkers", this.workers.getActiveCount(),
         "queueSize", this.workers.getQueue().size(),
         "rejectedTasks", this.rejectedWorkerTasks.get(),
+        "workerQueueSaturated", this.workerQueueSaturated.get(),
         "scheduledTasks", this.scheduler.getQueue().size());
   }
 
@@ -249,11 +267,11 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
     try {
       if (!token.isPresent()) {
         if (!this.config.bootstrapToken().isPresent()) {
-          this.state.set(State.WAITING_FOR_CREDENTIALS);
+          transitionTo(State.WAITING_FOR_CREDENTIALS);
           this.nextHeartbeatMillis = Long.MAX_VALUE;
           return;
         }
-        this.state.set(State.ENROLLING);
+        transitionTo(State.ENROLLING);
         Enrollment enrollment = this.client.enroll(
             this.config.bootstrapToken(),
             this.config.nodeId(),
@@ -272,7 +290,8 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
           this.snapshotSupplier.get(), "snapshotSupplier returned null");
       this.latestSnapshot = snapshot;
       this.client.heartbeat(token, this.config.nodeId(), this.capabilities, snapshot);
-      boolean recovered = this.state.getAndSet(State.ACTIVE) == State.BACKOFF;
+      boolean recovered = this.state.get() == State.BACKOFF;
+      transitionTo(State.ACTIVE);
       this.lastHeartbeat = this.clock.instant();
       this.lastErrorCode = "";
       this.heartbeatBackoff.reset();
@@ -471,7 +490,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
 
   private void authFailed(String code) {
     this.lastErrorCode = code;
-    this.state.set(State.AUTH_FAILED);
+    transitionTo(State.AUTH_FAILED);
     this.nextHeartbeatMillis = Long.MAX_VALUE;
     this.nextTextureMillis = Long.MAX_VALUE;
     this.logger.accept(
@@ -481,7 +500,7 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
 
   private void handleFailure(String code, Duration delay, boolean heartbeat) {
     this.lastErrorCode = code;
-    this.state.set(State.BACKOFF);
+    transitionTo(State.BACKOFF);
     long due = this.clock.millis() + delay.toMillis();
     if (heartbeat) {
       this.nextHeartbeatMillis = due;
@@ -500,21 +519,65 @@ public final class WebsiteSyncRuntime implements AutoCloseable {
 
   private boolean submit(Runnable task, AtomicBoolean guard) {
     try {
-      this.workers.execute(task);
+      this.workers.execute(() -> {
+        try {
+          task.run();
+        } finally {
+          recoverWorkerQueuePressure();
+        }
+      });
       return true;
     } catch (RejectedExecutionException error) {
       guard.set(false);
       this.lastErrorCode = "queue_full";
+      if (this.workerQueueSaturated.compareAndSet(false, true)) {
+        publishHealthChange("worker-queue", "NORMAL", "SATURATED", "queue_full");
+      }
       return false;
+    }
+  }
+
+  private void recoverWorkerQueuePressure() {
+    if (this.workerQueueSaturated.get()
+        && this.workers.getQueue().size() <= WORKER_QUEUE_CAPACITY / 2
+        && this.workerQueueSaturated.compareAndSet(true, false)) {
+      publishHealthChange("worker-queue", "SATURATED", "NORMAL", "");
+    }
+  }
+
+  private void transitionTo(State next) {
+    State previous = this.state.getAndSet(Objects.requireNonNull(next, "next"));
+    if (previous != next) {
+      publishHealthChange("runtime", previous.name(), next.name(), this.lastErrorCode);
+    }
+  }
+
+  private void publishHealthChange(
+      String component,
+      String previousState,
+      String nextState,
+      String errorCode) {
+    try {
+      this.healthChangeListener.accept(new HealthChange(
+          component,
+          previousState,
+          nextState,
+          errorCode == null ? "" : errorCode,
+          this.workers.getQueue().size(),
+          this.rejectedWorkerTasks.get(),
+          this.clock.instant()));
+    } catch (RuntimeException error) {
+      this.logger.accept("Website health listener failed: " + error.getClass().getSimpleName());
     }
   }
 
   @Override
   public void close() {
-    State previous = this.state.getAndSet(State.STOPPED);
+    State previous = this.state.get();
     if (previous == State.STOPPED) {
       return;
     }
+    transitionTo(State.STOPPED);
     this.scheduler.shutdownNow();
     NodeSnapshot snapshot = this.latestSnapshot;
     SecretValue token = this.nodeToken.get();
